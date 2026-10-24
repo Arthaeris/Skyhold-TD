@@ -37,6 +37,7 @@ scene.add(previewEdge);
 
 let selectedTowerType="fire_0";
 let selectedTowerId=null;
+let hoverCell=null;
 let pointerDown=null;
 let pinchStart=null;
 let cameraTarget={x:0,z:0};
@@ -74,7 +75,7 @@ const ui=createUI({
   onUpgrade:()=>{const tower=selectedTower();if(tower)queue("UpgradeTower",{corridorId:0,towerId:tower.id});},
   onMutate:mutId=>{const tower=selectedTower();if(tower)queue("MutateTower",{corridorId:0,towerId:tower.id,mutId,masteryLevel:5});},
   onTargetMode:mode=>{const tower=selectedTower();if(tower)queue("SetTargetMode",{corridorId:0,towerId:tower.id,mode});},
-  onResetView:()=>{cameraTarget={x:0,z:0};camera.zoom=1;camera.updateProjectionMatrix();camera.position.set(0,78,16);camera.lookAt(0,0,0);updatePreview(null);}
+  onResetView:()=>{cameraTarget={x:0,z:0};camera.zoom=1;camera.updateProjectionMatrix();camera.position.set(24,60,42);camera.lookAt(0,0,0);updatePreview(null);}
 });
 
 function worldPointer(event) {
@@ -128,8 +129,7 @@ function panCamera(dx,dy) {
   const worldPerPixelZ=(camera.top-camera.bottom)/(camera.zoom*Math.max(1,bounds.height));
   cameraTarget.x-=dx*worldPerPixelX;
   cameraTarget.z-=dy*worldPerPixelZ;
-  camera.position.x=cameraTarget.x;
-  camera.position.z=cameraTarget.z+16;
+  camera.position.set(cameraTarget.x+24,60,cameraTarget.z+42);
   camera.lookAt(cameraTarget.x,0,cameraTarget.z);
 }
 renderer.domElement.addEventListener("pointermove",event=>{
