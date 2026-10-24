@@ -77,3 +77,9 @@ button,select{font:inherit;color:inherit}button{cursor:pointer;touch-action:mani
   .crosshair-hint{bottom:8px;left:8px;right:230px}
   .corner-note{top:auto;bottom:12px}
 }
+
+.selected-info{margin:0 auto 6px;max-width:1100px;color:#d2d6ef;font:9px 'DM Mono',monospace;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mutation-options{display:flex;gap:7px;overflow-x:auto;max-width:1100px;margin:0 auto 7px;scrollbar-width:none}
+.mutation-option{display:flex;flex:0 0 155px;flex-direction:column;gap:4px;text-align:left;padding:7px 9px;border:1px solid rgba(198,205,255,.2);border-radius:9px;background:rgba(158,114,242,.1)}
+.mutation-option b{font-size:10px;color:#e3d5ff}.mutation-option small{font-size:8px;line-height:1.35;color:#b5b4d4}.mutation-option:disabled{opacity:.4}
+@media(min-width:700px){.mutation-options{overflow:visible}.mutation-option{flex:1;min-width:0}.selected-info{font-size:10px}}
