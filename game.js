@@ -38,9 +38,9 @@ scene.add(previewEdge);
 let selectedTowerType="fire_0";
 let selectedTowerId=null;
 let pointerDown=null;
-let hoverCell=null;
+let pinchStart=null;
+let cameraTarget={x:0,z:0};
 let accumulator=0;
-let previousTick=state.tick;
 const pendingCommands=[];
 const raycaster=new THREE.Raycaster();
 const pointer=new THREE.Vector2();
@@ -114,14 +114,60 @@ function updatePreview(cell) {
   previewEdge.material.color.set(valid?0xafffd9:0xff637d);
   preview.visible=true;previewEdge.visible=true;
 }
+const activePointers=new Map();
+const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
+function pinchDistance() {
+  const pts=[...activePointers.values()];
+  if(pts.length<2)return 0;
+  return Math.hypot(pts[0].x-pts[1].x,pts[0].y-pts[1].y);
+}
+function panCamera(dx,dy) {
+  const bounds=renderer.domElement.getBoundingClientRect();
+  const worldPerPixelX=(camera.right-camera.left)/(camera.zoom*Math.max(1,bounds.width));
+  const worldPerPixelZ=(camera.top-camera.bottom)/(camera.zoom*Math.max(1,bounds.height));
+  cameraTarget.x-=dx*worldPerPixelX;
+  cameraTarget.z-=dy*worldPerPixelZ;
+  camera.position.x=cameraTarget.x;
+  camera.position.z=cameraTarget.z+16;
+  camera.lookAt(cameraTarget.x,0,cameraTarget.z);
+}
 renderer.domElement.addEventListener("pointermove",event=>{
-  const cell=floorCell(event);
-  updatePreview(cell);
+  if(activePointers.has(event.pointerId))activePointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
+  if(activePointers.size>=2){
+    if(!pinchStart)pinchStart={distance:pinchDistance(),zoom:camera.zoom};
+    const distance=pinchDistance();
+    if(pinchStart.distance>0){
+      camera.zoom=clamp(pinchStart.zoom*(distance/pinchStart.distance),1,2.6);
+      camera.updateProjectionMatrix();
+    }
+    updatePreview(null);
+    return;
+  }
+  if(pointerDown&&pointerDown.id===event.pointerId){
+    const dx=event.clientX-pointerDown.lastX,dy=event.clientY-pointerDown.lastY;
+    if(Math.hypot(event.clientX-pointerDown.startX,event.clientY-pointerDown.startY)>8)pointerDown.moved=true;
+    if(pointerDown.moved)panCamera(dx,dy);
+    pointerDown.lastX=event.clientX;pointerDown.lastY=event.clientY;
+  }
+  updatePreview(floorCell(event));
 });
-renderer.domElement.addEventListener("pointerleave",()=>updatePreview(null));
-renderer.domElement.addEventListener("pointerdown",event=>{pointerDown={x:event.clientX,y:event.clientY,id:event.pointerId};});
+renderer.domElement.addEventListener("pointerleave",()=>{if(activePointers.size===0)updatePreview(null);});
+renderer.domElement.addEventListener("pointerdown",event=>{
+  activePointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
+  try{renderer.domElement.setPointerCapture(event.pointerId);}catch{}
+  if(activePointers.size===1){
+    pointerDown={id:event.pointerId,startX:event.clientX,startY:event.clientY,lastX:event.clientX,lastY:event.clientY,moved:false};
+  }else{
+    if(pointerDown)pointerDown.moved=true;
+    pinchStart={distance:pinchDistance(),zoom:camera.zoom};
+    updatePreview(null);
+  }
+});
 renderer.domElement.addEventListener("pointerup",event=>{
-  if(!pointerDown||Math.hypot(event.clientX-pointerDown.x,event.clientY-pointerDown.y)>12){pointerDown=null;return;}
+  const pointerCount=activePointers.size;
+  activePointers.delete(event.pointerId);
+  if(pointerCount>1){pointerDown=null;pinchStart=null;updatePreview(null);return;}
+  if(!pointerDown||pointerDown.id!==event.pointerId||pointerDown.moved){pointerDown=null;return;}
   pointerDown=null;
   const id=towerHit(event);
   if(id!=null){selectTower(id);return;}
@@ -130,6 +176,14 @@ renderer.domElement.addEventListener("pointerup",event=>{
   selectedTowerId=null;
   queue("BuildTower",{corridorId:0,towerType:selectedTowerType,gx:cell.c,gy:cell.r,masteryLevel:5});
 });
+renderer.domElement.addEventListener("pointercancel",event=>{
+  activePointers.delete(event.pointerId);pointerDown=null;pinchStart=null;updatePreview(null);
+});
+renderer.domElement.addEventListener("wheel",event=>{
+  event.preventDefault();
+  camera.zoom=clamp(camera.zoom*Math.exp(-event.deltaY*0.001),1,2.6);
+  camera.updateProjectionMatrix();
+},{passive:false});
 renderer.domElement.addEventListener("contextmenu",event=>event.preventDefault());
 
 function processEvents() {
