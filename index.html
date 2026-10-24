@@ -67,6 +67,19 @@
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <div class="corner-note">CIRCLE RULES · VOXEL WORLD</div>
   </main>
-  <script type="module" src="./game.js"></script>
+  <script>
+    (function () {
+      var script = document.createElement("script");
+      script.type = "module";
+      script.src = "./game.js";
+      script.onerror = function () {
+        var box = document.getElementById("startup-error");
+        if (!box) return;
+        box.hidden = false;
+        box.textContent = "The game engine could not load. Check your connection, then refresh. If this persists, send the developer this message and your browser name.";
+      };
+      document.body.appendChild(script);
+    })();
+  </script>
 </body>
 </html>
