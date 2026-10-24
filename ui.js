@@ -70,13 +70,14 @@ export function createUI({onSelectTower,onSelectElement,onStartWave,onSell,onUpg
     phaseLabel.textContent=player.phase==="wave"?"WAVE IN PROGRESS":player.phase==="prep"?"FINAL BOSS READY":player.phase.toUpperCase()+" PHASE";
     waveButton.disabled=player.phase==="wave"||player.phase==="victory"||player.phase==="defeat"||state.finished;
     waveButton.innerHTML=player.phase==="prep"?'SUMMON FINAL BOSS <span>⚔</span>':player.phase==="wave"?'WAVE IN PROGRESS <span>…</span>':player.wave?'NEXT WAVE <span>→</span>':'START WAVE <span>→</span>';
-    sellButton.disabled=!selectedTower||player.phase==="wave";
-    upgradeButton.disabled=!selectedTower||selectedTower.level>=state.bal.maxLevel||player.phase==="wave";
+    sellButton.disabled=!selectedTower;
+    upgradeButton.disabled=!selectedTower||selectedTower.level>=state.bal.maxLevel;
     if(player.phase==="wave")hint.textContent="Defend the corridor! Towers follow Circle targeting and status rules.";
     else if(player.phase==="defeat")hint.textContent="The corridor has fallen. Refresh to start a new run.";
     else if(player.phase==="victory")hint.textContent="The Nexus is secure. Victory!";
     else if(player.phase==="prep")hint.textContent="All regular waves cleared. Summon the final boss.";
     else if(player.wave>0)hint.textContent="Build a maze without sealing the route, upgrade towers, then launch the next wave.";
+    targetMode.value=selectedTower?.targetMode||"first";
     if(selectedTower){
       sellButton.textContent="SELL +"+Math.floor(totalInvested(state,selectedTower)*state.bal.sellRefund);
       upgradeButton.textContent=selectedTower.level>=state.bal.maxLevel?"MAX LEVEL":"UPGRADE · "+getUpgradeCost(state,selectedTower);
