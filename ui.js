@@ -73,7 +73,7 @@ export function createUI({onSelectTower,onSelectElement,onStartWave,onSell,onUpg
     lives.textContent=player.lives;wave.textContent=player.wave;
     phaseLabel.textContent=player.phase==="wave"?"WAVE IN PROGRESS":player.phase==="prep"?"FINAL BOSS READY":player.phase.toUpperCase()+" PHASE";
     waveButton.disabled=player.phase==="endboss"||player.phase==="victory"||player.phase==="defeat"||state.finished;
-    waveButton.innerHTML=player.phase==="prep"?'SUMMON FINAL BOSS <span>⚔</span>':player.phase==="wave"?'WAVE IN PROGRESS <span>…</span>':player.wave?'NEXT WAVE <span>→</span>':'START WAVE <span>→</span>';
+    waveButton.innerHTML=player.phase==="prep"?'SUMMON FINAL BOSS <span>⚔</span>':player.phase==="wave"?'CALL NEXT WAVE <span>⚡</span>':player.wave?'NEXT WAVE <span>→</span>':'START WAVE <span>→</span>';
     sellButton.disabled=!selectedTower;
     upgradeButton.disabled=!selectedTower||selectedTower.level>=state.bal.maxLevel;
     if(player.phase==="wave")hint.textContent="Defend the corridor or call the next wave early for a gold bonus.";
@@ -81,7 +81,8 @@ export function createUI({onSelectTower,onSelectElement,onStartWave,onSell,onUpg
     else if(player.phase==="victory")hint.textContent="The Nexus is secure. Victory!";
     else if(player.phase==="prep")hint.textContent="All regular waves cleared. Summon the final boss.";
     else if(player.wave>0)hint.textContent="Build a maze without sealing the route, upgrade towers, then launch the next wave.";
-    targetMode.value=selectedTower?.targetMode||"first";
+    const targetSignature=selectedTower?selectedTower.id+":"+selectedTower.targetMode:"none";
+    if(targetMode.dataset.signature!==targetSignature){targetMode.value=selectedTower?.targetMode||"first";targetMode.dataset.signature=targetSignature;}
     selectedInfo.hidden=!selectedTower;
     if(selectedTower){
       const authored=DB.TOWER_BY_ID[selectedTower.def.id];
