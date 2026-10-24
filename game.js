@@ -61,6 +61,7 @@ function selectTower(id) {
   selectedTowerId=id;
   const tower=selectedTower();
   if(tower) {
+    selectedTowerType=tower.def.id;
     ui.selectTowerType(tower.def.id);
     ui.showToast(tower.def.name+" · Level "+tower.level);
   }
