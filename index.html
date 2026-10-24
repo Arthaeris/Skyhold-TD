@@ -10,12 +10,27 @@
   <script src="./circle/database.js"></script>
   <script src="./circle/database-ext.js"></script>
   <script type="importmap">
-    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js" } }
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js" } }
   </script>
 </head>
 <body>
   <main id="app">
     <div id="game-view" aria-label="Voxel battlefield, tap a tower then tap a grid cell to build"></div>
+    <div id="startup-error" role="alert" hidden></div>
+    <script>
+      addEventListener("error", function (event) {
+        var box = document.getElementById("startup-error");
+        if (!box) return;
+        box.hidden = false;
+        box.textContent = "Game startup error: " + (event.message || "A script failed to load. Check your connection and refresh.");
+      });
+      addEventListener("unhandledrejection", function (event) {
+        var box = document.getElementById("startup-error");
+        if (!box) return;
+        box.hidden = false;
+        box.textContent = "Game startup error: " + (event.reason && event.reason.message || event.reason || "A module failed to load.");
+      });
+    </script>
     <header class="topbar">
       <a class="brand" href="./" aria-label="Skyhold TD"><span class="brand-mark">◆</span><span>SKYHOLD <b>TD</b></span></a>
       <div class="stats" aria-live="polite">
