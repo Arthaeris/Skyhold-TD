@@ -40,7 +40,7 @@ let selectedTowerId=null;
 let hoverCell=null;
 let pointerDown=null;
 let pinchStart=null;
-let cameraTarget={x:0,z:0};
+let cameraTarget={x:0,z:0};\nlet cameraAngle="pixelpups";
 let accumulator=0;
 const pendingCommands=[];
 const raycaster=new THREE.Raycaster();
@@ -75,7 +75,7 @@ const ui=createUI({
   onUpgrade:()=>{const tower=selectedTower();if(tower)queue("UpgradeTower",{corridorId:0,towerId:tower.id});},
   onMutate:mutId=>{const tower=selectedTower();if(tower)queue("MutateTower",{corridorId:0,towerId:tower.id,mutId,masteryLevel:5});},
   onTargetMode:mode=>{const tower=selectedTower();if(tower)queue("SetTargetMode",{corridorId:0,towerId:tower.id,mode});},
-  onResetView:()=>{cameraTarget={x:0,z:0};camera.zoom=1;camera.updateProjectionMatrix();camera.position.set(24,60,42);camera.lookAt(0,0,0);updatePreview(null);}
+  onResetView:()=>{cameraTarget={x:0,z:0};camera.zoom=1;camera.updateProjectionMatrix();camera.position.set(cameraAngle==="steeper"?11:18,cameraAngle==="steeper"?42:31,cameraAngle==="steeper"?25:36);camera.lookAt(0,0,0);updatePreview(null);}
 });
 
 function worldPointer(event) {
@@ -116,6 +116,12 @@ function updatePreview(cell) {
   previewEdge.material.color.set(valid?0xafffd9:0xff637d);
   preview.visible=true;previewEdge.visible=true;
 }
+document.addEventListener("skyhold-camera-angle",event=>{cameraAngle=event.detail==="steeper"?"steeper":"pixelpups";panCamera(0,0);});
+document.addEventListener("skyhold-render-quality",event=>{
+  const quality=event.detail;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,quality==="low"?0.85:quality==="high"?1.75:1.35));
+  renderer.setSize(container.clientWidth,container.clientHeight,false);
+});
 const activePointers=new Map();
 const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 function pinchDistance() {
@@ -129,7 +135,7 @@ function panCamera(dx,dy) {
   const worldPerPixelZ=(camera.top-camera.bottom)/(camera.zoom*Math.max(1,bounds.height));
   cameraTarget.x-=dx*worldPerPixelX;
   cameraTarget.z-=dy*worldPerPixelZ;
-  camera.position.set(cameraTarget.x+24,60,cameraTarget.z+42);
+  camera.position.set(cameraTarget.x+(cameraAngle==="steeper"?11:18),cameraAngle==="steeper"?42:31,cameraTarget.z+(cameraAngle==="steeper"?25:36));
   camera.lookAt(cameraTarget.x,0,cameraTarget.z);
 }
 renderer.domElement.addEventListener("pointermove",event=>{
