@@ -73,7 +73,8 @@ const ui=createUI({
   onSell:()=>{const tower=selectedTower();if(tower)queue("SellTower",{corridorId:0,towerId:tower.id});},
   onUpgrade:()=>{const tower=selectedTower();if(tower)queue("UpgradeTower",{corridorId:0,towerId:tower.id});},
   onMutate:mutId=>{const tower=selectedTower();if(tower)queue("MutateTower",{corridorId:0,towerId:tower.id,mutId,masteryLevel:5});},
-  onTargetMode:mode=>{const tower=selectedTower();if(tower)queue("SetTargetMode",{corridorId:0,towerId:tower.id,mode});}
+  onTargetMode:mode=>{const tower=selectedTower();if(tower)queue("SetTargetMode",{corridorId:0,towerId:tower.id,mode});},
+  onResetView:()=>{cameraTarget={x:0,z:0};camera.zoom=1;camera.updateProjectionMatrix();camera.position.set(0,78,16);camera.lookAt(0,0,0);updatePreview(null);}
 });
 
 function worldPointer(event) {
