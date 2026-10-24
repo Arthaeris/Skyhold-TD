@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { createPortState, fx, SIM_DT, cellToWorld, worldToCell } from "./sim/circle-adapter.js";
+import { createPortState, fx, SIM_DT, cellToWorld, worldToCell, step } from "./sim/circle-adapter.js";
 import { createScene } from "./render/scene.js";
 import { createTerrain } from "./render/terrain.js";
 import { createEntityRenderer } from "./render/models.js";
@@ -160,7 +160,6 @@ function animate() {
     // Commands are applied by the same deterministic simulation step as Circle.
     state.events.length=0;
     const simDt=SIM_DT;
-    const {step}=simApi;
     step(state,commands,simDt);
     processEvents();
     accumulator-=1/30;
@@ -171,7 +170,6 @@ function animate() {
   ui.render(state,selectedTower());
   renderer.render(scene,camera);
 }
-import * as simApi from "./sim/circle-adapter.js";
 animate();
 
 console.info("Skyhold TD Circle port initialized",{
