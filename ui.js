@@ -6,13 +6,15 @@ const starter=new Set(DB.availableElements({}));
 const icons=Object.fromEntries(elementOrder.map(id=>[id,DB.ELEMENTS[id].icon]));
 const esc=(s)=>String(s).replace(/[&<>"]/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[ch]));
 
-export function createUI({onSelectTower,onSelectElement,onStartWave,onSell,onUpgrade,onTargetMode,onDismissIntro}) {
+export function createUI({onSelectTower,onSelectElement,onStartWave,onSell,onUpgrade,onMutate,onTargetMode,onDismissIntro}) {
   const gold=document.querySelector("#gold-value"),lives=document.querySelector("#lives-value"),wave=document.querySelector("#wave-value");
   const waveButton=document.querySelector("#wave-button"),hint=document.querySelector("#hint"),toast=document.querySelector("#toast");
   const intro=document.querySelector("#intro-card"),elementOptions=document.querySelector("#element-options"),towerOptions=document.querySelector("#tower-options");
   const buildTitle=document.querySelector("#build-title"),phaseLabel=document.querySelector("#phase-label");
   const sellButton=document.querySelector("#sell-button"),upgradeButton=document.querySelector("#upgrade-button");
   const targetMode=document.querySelector("#target-mode");
+  const selectedInfo=document.querySelector("#selected-info"),mutationOptions=document.querySelector("#mutation-options");
+  let mutationSignature="";
   let currentElement="fire",selectedTowerType="fire_0",toastTimer=null;
   const unlocked=DB.availableElements({});
 
@@ -53,6 +55,7 @@ export function createUI({onSelectTower,onSelectElement,onStartWave,onSell,onUpg
   waveButton.addEventListener("click",()=>onStartWave());
   sellButton.addEventListener("click",()=>onSell());
   upgradeButton.addEventListener("click",()=>onUpgrade());
+  mutationOptions.addEventListener("click",event=>{const button=event.target.closest("[data-mutation]");if(button&&!button.disabled)onMutate(button.dataset.mutation);});
   targetMode.addEventListener("change",()=>onTargetMode(targetMode.value));
   window.addEventListener("keydown",e=>{
     if(e.repeat||e.target instanceof HTMLInputElement||e.target instanceof HTMLSelectElement)return;
@@ -79,11 +82,26 @@ export function createUI({onSelectTower,onSelectElement,onStartWave,onSell,onUpg
     else if(player.phase==="prep")hint.textContent="All regular waves cleared. Summon the final boss.";
     else if(player.wave>0)hint.textContent="Build a maze without sealing the route, upgrade towers, then launch the next wave.";
     targetMode.value=selectedTower?.targetMode||"first";
+    selectedInfo.hidden=!selectedTower;
     if(selectedTower){
+      const authored=DB.TOWER_BY_ID[selectedTower.def.id];
+      selectedInfo.textContent=(authored?.name||selectedTower.def.id)+" · LEVEL "+selectedTower.level+"/"+state.bal.maxLevel+" · "+selectedTower.kills+" KILLS · EXPERT "+selectedTower.expert+"/"+state.bal.maxExpert;
       sellButton.textContent="SELL +"+Math.floor(totalInvested(state,selectedTower)*state.bal.sellRefund);
       upgradeButton.textContent=selectedTower.level>=state.bal.maxLevel?"MAX LEVEL":"UPGRADE · "+getUpgradeCost(state,selectedTower);
+      const signature=selectedTower.def.id+":"+selectedTower.level+":"+selectedTower.mutations.join(",");
+      if(signature!==mutationSignature){
+        mutationSignature=signature;
+        const mutations=authored?.mutations||[];
+        mutationOptions.innerHTML=mutations.map(m=>{
+          const applied=selectedTower.mutations.includes(m.id);
+          const full=selectedTower.mutations.length>=2;
+          return '<button class="mutation-option" data-mutation="'+esc(m.id)+'" '+(selectedTower.level<state.bal.maxLevel||applied||(full&&!applied)?'disabled':'')+'><b>'+esc(m.name)+'</b><small>'+esc(m.desc||"Tower mutation")+'</small></button>';
+        }).join("");
+      }
+      mutationOptions.hidden=selectedTower.level<state.bal.maxLevel||!(authored?.mutations?.length);
     }else{
       sellButton.textContent="SELL SELECTED";upgradeButton.textContent="UPGRADE";
+      selectedInfo.textContent="";mutationOptions.hidden=true;mutationOptions.innerHTML="";mutationSignature="";
     }
   }
   function totalInvested(state,tower){
