@@ -72,6 +72,7 @@ const ui=createUI({
   onStartWave:()=>queue("StartWave"),
   onSell:()=>{const tower=selectedTower();if(tower)queue("SellTower",{corridorId:0,towerId:tower.id});},
   onUpgrade:()=>{const tower=selectedTower();if(tower)queue("UpgradeTower",{corridorId:0,towerId:tower.id});},
+  onMutate:mutId=>{const tower=selectedTower();if(tower)queue("MutateTower",{corridorId:0,towerId:tower.id,mutId,masteryLevel:5});},
   onTargetMode:mode=>{const tower=selectedTower();if(tower)queue("SetTargetMode",{corridorId:0,towerId:tower.id,mode});}
 });
 
