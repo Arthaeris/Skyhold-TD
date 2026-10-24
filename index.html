@@ -87,7 +87,22 @@
   </main>
   <script>
     (function () {
-      document.addEventListener("DOMContentLoaded", function () {\n        var title = document.getElementById("title-screen");\n        var intro = document.getElementById("intro-card");\n        function begin() { title.classList.add("title-screen-hidden"); if (intro) intro.classList.add("hidden"); }\n        document.getElementById("menu-new-run").addEventListener("click", begin);\n        document.getElementById("menu-continue").addEventListener("click", begin);\n        document.getElementById("menu-mastery").addEventListener("click", function () { begin(); document.querySelector("[data-panel=\"progression\"]").click(); });\n        document.getElementById("menu-save").addEventListener("click", function () { begin(); document.querySelector("[data-panel=\"overview\"]").click(); });\n        var modal = document.getElementById("options-modal");\n        document.getElementById("menu-options").addEventListener("click", function () { modal.hidden = false; });\n        document.getElementById("options-close").addEventListener("click", function () { modal.hidden = true; });\n        document.getElementById("camera-angle").addEventListener("change", function (e) { document.dispatchEvent(new CustomEvent("skyhold-camera-angle", {detail:e.target.value})); });\n        document.getElementById("render-quality").addEventListener("change", function (e) { document.dispatchEvent(new CustomEvent("skyhold-render-quality", {detail:e.target.value})); });\n      });\n      var script = document.createElement("script");
+      document.addEventListener("DOMContentLoaded", function () {
+        var title = document.getElementById("title-screen");
+        var intro = document.getElementById("intro-card");
+        function begin() { title.classList.add("title-screen-hidden"); if (intro) intro.classList.add("hidden"); }
+        document.getElementById("menu-new-run").addEventListener("click", begin);
+        document.getElementById("menu-continue").addEventListener("click", begin);
+        document.getElementById("menu-mastery").addEventListener("click", function () { begin(); document.querySelector("[data-panel=\"progression\"]").click(); });
+        document.getElementById("menu-save").addEventListener("click", function () { begin(); document.querySelector("[data-panel=\"overview\"]").click(); });
+        var modal = document.getElementById("options-modal");
+        document.getElementById("menu-options").addEventListener("click", function () { modal.hidden = false; });
+        document.getElementById("options-close").addEventListener("click", function () { modal.hidden = true; });
+        document.getElementById("camera-angle").addEventListener("change", function (e) { document.dispatchEvent(new CustomEvent("skyhold-camera-angle", {detail:e.target.value})); });
+        document.getElementById("render-quality").addEventListener("change", function (e) { document.dispatchEvent(new CustomEvent("skyhold-render-quality", {detail:e.target.value})); });
+      });
+
+      var script = document.createElement("script");
       script.type = "module";
       script.src = "./game.js";
       script.onerror = function () {
