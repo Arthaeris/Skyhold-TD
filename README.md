@@ -29,7 +29,9 @@ This is a **first gameplay port slice**, not yet complete parity with every Circ
 
 For testing the combat loop, the current UI temporarily exposes all five tower tiers and mutation slots instead of enforcing the full mastery unlock profile. Persistent mastery/unlock progression and multi-corridor world navigation remain to be wired into the interface.
 
-The game has been connected to the Circle simulation source, but it has **not yet been verified in a live browser in this environment**. Please report any console errors or unexpected placement/combat behavior from your device so the next iteration can target real issues.
+The current view uses an angled orthographic camera with touch pinch-zoom and drag-pan. The HUD includes overview, tower codex, rules, and progression panels. These UI panels are an initial port slice; persistent mastery saves and multi-corridor navigation are still outstanding.
+
+The project has **not yet been verified in a live browser in this environment**. Static checks confirm all local JavaScript module imports point to files present in the repository. Please report any runtime errors or unexpected placement/combat behavior so the next iteration can target real issues.
 
 ## Project layout
 
