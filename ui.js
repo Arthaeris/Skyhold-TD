@@ -13,6 +13,31 @@ export function createUI({onSelectTower,onSelectElement,onStartWave,onSell,onUpg
   const buildTitle=document.querySelector("#build-title"),phaseLabel=document.querySelector("#phase-label");
   const sellButton=document.querySelector("#sell-button"),upgradeButton=document.querySelector("#upgrade-button");
   const targetMode=document.querySelector("#target-mode");
+  const infoPanel=document.querySelector("#info-panel"),infoTitle=document.querySelector("#info-panel-title"),infoContent=document.querySelector("#info-panel-content");
+  let activeInfoPanel="overview",latestState=null;
+  function renderInfoPanel(){
+    if(!latestState)return;
+    const player=latestState.players[0],field=player.corridors[0];
+    const names={overview:"FIELD OVERVIEW",towers:"TOWER CODEX",rules:"CIRCLE RULES",progression:"MASTERY & PROGRESSION"};
+    infoTitle.textContent=names[activeInfoPanel]||"FIELD OVERVIEW";
+    if(activeInfoPanel==="overview"){
+      infoContent.innerHTML='<div class="info-stat-grid"><div><small>GOLD</small><b>'+Math.round(fx.toFloat(player.gold))+'</b></div><div><small>LIVES</small><b>'+player.lives+'</b></div><div><small>WAVE</small><b>'+player.wave+'</b></div><div><small>BUILDINGS</small><b>'+field.towers.length+'</b></div></div><p>Build a maze by placing towers on the grid. The route recalculates from the current layout; keep a valid path to the Nexus.</p><p class="panel-muted">Current phase: '+esc(player.phase.toUpperCase())+' · Corridor: Fire</p>';
+    }else if(activeInfoPanel==="towers"){
+      infoContent.innerHTML='<p>Elemental towers available in the current content library.</p><div class="codex-list">'+DB.TOWERS.map(t=>'<article><span>'+esc(DB.ELEMENTS[t.element]?.icon||"◆")+'</span><div><b>'+esc(t.name)+'</b><small>'+esc(DB.ELEMENTS[t.element]?.name||t.element)+' · Tier '+t.tier+' · '+t.cost+' gold</small></div></article>').join("")+'</div>';
+    }else if(activeInfoPanel==="rules"){
+      infoContent.innerHTML='<div class="rules-list"><article><b>Shape the route</b><p>Place towers on open cells. The simulation uses grid pathfinding and rejects placements that block the route.</p></article><article><b>Defend the corridor</b><p>Start waves to send enemies through the maze. Towers automatically target enemies according to the selected targeting mode.</p></article><article><b>Grow your defenses</b><p>Earn rewards from combat and wave clears. Upgrade, mutate, retarget or sell selected towers from the build panel.</p></article><article><b>Touch controls</b><p>Tap to place or select. Drag to pan, pinch to zoom, and use Center to restore the view.</p></article></div>';
+    }else{
+      const mastery=DB.MASTERY||{};
+      infoContent.innerHTML='<p>Circle progression is based on elemental mastery and unlocks. The port is exposing this reference panel while persistent save/unlock wiring is completed.</p><div class="codex-list">'+DB.ELEMENT_ORDER.map(id=>'<article><span>'+esc(DB.ELEMENTS[id].icon)+'</span><div><b>'+esc(DB.ELEMENTS[id].name)+'</b><small>'+((DB.availableElements({})||[]).includes(id)?"Available in this build":"Unlock progression not yet connected")+'</small></div></article>').join("")+'</div>';
+    }
+  }
+  document.querySelectorAll("[data-panel]").forEach(button=>button.addEventListener("click",()=>{
+    activeInfoPanel=button.dataset.panel;
+    infoPanel.hidden=false;
+    document.querySelectorAll("[data-panel]").forEach(b=>b.classList.toggle("active",b===button));
+    renderInfoPanel();
+  }));
+  document.querySelector("#close-info-panel").addEventListener("click",()=>{infoPanel.hidden=true;document.querySelectorAll("[data-panel]").forEach(b=>b.classList.remove("active"));});
   document.querySelector("#view-reset").addEventListener("click",()=>onResetView?.());
   const selectedInfo=document.querySelector("#selected-info"),mutationOptions=document.querySelector("#mutation-options");
   let mutationSignature="";
