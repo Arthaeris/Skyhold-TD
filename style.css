@@ -114,3 +114,28 @@ button,select{font:inherit;color:inherit}button{cursor:pointer;touch-action:mani
 .rules-list article p{margin:3px 0;color:var(--muted)}
 @media(min-width:700px){.game-nav{top:110px;left:18px;right:245px}.info-panel{left:18px;right:240px;top:155px;margin:0}.game-nav button{font-size:10px;padding:9px 12px}}
 @media(max-width:420px){.game-nav{left:9px;right:9px;gap:4px}.game-nav button{font-size:8px;padding:8px}.info-panel{left:9px;right:9px;top:153px;padding:11px}.info-stat-grid{gap:4px}.info-stat-grid>div{padding:7px 5px}}
+
+/* Circle Tower Wars shell translated to the voxel renderer */
+.title-screen{position:absolute;z-index:30;inset:0;display:grid;place-items:center;padding:24px 18px calc(24px + env(safe-area-inset-bottom));overflow-y:auto;background:radial-gradient(ellipse at 50% 34%,#282849 0%,#151932 48%,#090c1b 100%)}
+.title-screen-hidden{display:none}
+.title-menu-card{width:min(100%,440px);display:flex;align-items:center;flex-direction:column;text-align:center;padding:30px 23px 22px;border:1px solid rgba(198,205,255,.19);border-radius:20px;background:rgba(17,20,42,.62);box-shadow:0 24px 90px #03051166}
+.title-brand-mark{display:grid;place-items:center;width:60px;height:60px;border-radius:18px;background:var(--mint);color:#10152d;font-size:33px;box-shadow:0 0 38px #9fffd12b}
+.title-eyebrow{margin:21px 0 8px;color:var(--mint);font:10px 'DM Mono',monospace;letter-spacing:.14em}
+.title-game-name{margin:0;color:#f5f5ff;font-size:clamp(31px,9vw,47px);line-height:1.05;letter-spacing:-.06em;font-weight:800}
+.title-game-name span{color:var(--mint)}
+.title-tagline{margin:14px 0 22px;color:#b8bfd9;font-size:13px;line-height:1.65}
+.title-menu-buttons{display:flex;flex-direction:column;gap:9px;width:100%}
+.title-menu-buttons button{width:100%;min-height:44px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:#1b203b;color:#e7eaff;font:10px 'DM Mono',monospace;letter-spacing:.08em}
+.title-menu-buttons button.title-primary{background:var(--mint);border-color:var(--mint);color:#11172b;font-weight:700}
+.title-menu-buttons button.title-primary span{float:right;font-size:16px;line-height:10px}
+.title-menu-buttons button:disabled{opacity:.38}
+.title-version{margin:19px 0 0;color:#777f9f;font:8px 'DM Mono',monospace;letter-spacing:.1em}
+.options-modal{position:absolute;z-index:40;inset:0;display:grid;place-items:center;padding:18px;background:#050714b8}
+.options-modal[hidden]{display:none}
+.options-card{width:min(100%,430px);padding:17px;border:1px solid var(--line);border-radius:15px;background:#11152d;box-shadow:0 20px 70px #0008}
+.options-head{display:flex;justify-content:space-between;align-items:center;color:var(--mint);font:11px 'DM Mono',monospace;letter-spacing:.1em;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.options-head button{border:1px solid var(--line);border-radius:8px;padding:8px;background:#202440;font:9px 'DM Mono',monospace}
+.option-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:14px 0;color:var(--ink);font-size:12px}
+.option-row select{max-width:58%;padding:9px;border:1px solid var(--line);border-radius:8px;background:#202440;font-size:11px}
+.options-card>p{color:var(--muted);font-size:11px;line-height:1.5}
+@media(min-width:700px){.title-menu-card{padding:38px 34px 26px}.title-tagline{font-size:14px}.title-menu-buttons button{min-height:48px}}
