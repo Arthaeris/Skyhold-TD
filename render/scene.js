@@ -4,8 +4,8 @@ export function createScene(container) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x11152d);
   scene.fog = new THREE.Fog(0x11152d, 76, 150);
-  const camera = new THREE.OrthographicCamera(-20,20,40,-40,0.1,220);
-  camera.position.set(24,60,42);
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 260);
+  camera.position.set(18,31,36);
   camera.lookAt(0,0,0);
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.35));
@@ -33,11 +33,8 @@ export function createScene(container) {
   const resize = () => {
     const w = Math.max(container.clientWidth,1), h = Math.max(container.clientHeight,1);
     const aspect = w / h;
-    const viewHeight = window.innerWidth < 700 ? 78 : 70;
-    camera.top = viewHeight/2;
-    camera.bottom = -viewHeight/2;
-    camera.left = -viewHeight*aspect/2;
-    camera.right = viewHeight*aspect/2;
+    camera.aspect = aspect;
+    camera.fov = window.innerWidth < 700 ? 42 : 38;
     camera.updateProjectionMatrix();
     renderer.setSize(w,h,false);
   };
