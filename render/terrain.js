@@ -38,6 +38,18 @@ export function createTerrain(scene, cols, rows) {
     if (c===0 || r===0 || c===cols-1 || r===rows-1) edge.push({x,y:-0.38,z,sy:0.38});
   }
   instanced(scene,palette.grass,floor,[1,1,1]);
+  const gridPoints=[];
+  for(let c=0;c<=cols;c++){
+    const x=-cols/2+c;
+    gridPoints.push(new THREE.Vector3(x,0.012,-rows/2),new THREE.Vector3(x,0.012,rows/2));
+  }
+  for(let r=0;r<=rows;r++){
+    const z=-rows/2+r;
+    gridPoints.push(new THREE.Vector3(-cols/2,0.012,z),new THREE.Vector3(cols/2,0.012,z));
+  }
+  const gridGeometry=new THREE.BufferGeometry().setFromPoints(gridPoints);
+  const gridLines=new THREE.LineSegments(gridGeometry,new THREE.LineBasicMaterial({color:0x294b3e,transparent:true,opacity:0.68}));
+  scene.add(gridLines);
   instanced(scene,palette.dirt,edge,[1,1,1]);
   const trim = [];
   for (let r=0;r<rows;r+=5) {
