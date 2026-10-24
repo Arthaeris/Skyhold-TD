@@ -27,6 +27,8 @@ Open [http://localhost:8000](http://localhost:8000). Three.js and Google Fonts a
 
 This is a **first gameplay port slice**, not yet complete parity with every Circle Tower Wars mode. The active scene currently displays one Fire corridor. The simulation core supports much more of Circle's systems than the current presentation exposes; multi-corridor navigation, mastery persistence/unlocks, co-op/versus interfaces, save migration, and complete visual representations of every status/attack are still follow-up work.
 
+For testing the combat loop, the current UI temporarily exposes all five tower tiers and mutation slots instead of enforcing the full mastery unlock profile. Persistent mastery/unlock progression and multi-corridor world navigation remain to be wired into the interface.
+
 The game has been connected to the Circle simulation source, but it has **not yet been verified in a live browser in this environment**. Please report any console errors or unexpected placement/combat behavior from your device so the next iteration can target real issues.
 
 ## Project layout
