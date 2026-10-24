@@ -6,13 +6,14 @@ const starter=new Set(DB.availableElements({}));
 const icons=Object.fromEntries(elementOrder.map(id=>[id,DB.ELEMENTS[id].icon]));
 const esc=(s)=>String(s).replace(/[&<>"]/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[ch]));
 
-export function createUI({onSelectTower,onSelectElement,onStartWave,onSell,onUpgrade,onMutate,onTargetMode,onDismissIntro}) {
+export function createUI({onSelectTower,onSelectElement,onStartWave,onSell,onUpgrade,onMutate,onTargetMode,onResetView,onDismissIntro}) {
   const gold=document.querySelector("#gold-value"),lives=document.querySelector("#lives-value"),wave=document.querySelector("#wave-value");
   const waveButton=document.querySelector("#wave-button"),hint=document.querySelector("#hint"),toast=document.querySelector("#toast");
   const intro=document.querySelector("#intro-card"),elementOptions=document.querySelector("#element-options"),towerOptions=document.querySelector("#tower-options");
   const buildTitle=document.querySelector("#build-title"),phaseLabel=document.querySelector("#phase-label");
   const sellButton=document.querySelector("#sell-button"),upgradeButton=document.querySelector("#upgrade-button");
   const targetMode=document.querySelector("#target-mode");
+  document.querySelector("#view-reset").addEventListener("click",()=>onResetView?.());
   const selectedInfo=document.querySelector("#selected-info"),mutationOptions=document.querySelector("#mutation-options");
   let mutationSignature="";
   let currentElement="fire",selectedTowerType="fire_0",toastTimer=null;
