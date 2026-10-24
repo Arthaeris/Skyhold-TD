@@ -3,42 +3,52 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#101b2b">
-  <meta name="description" content="Skyhold TD — defend a floating voxel island.">
-  <title>Skyhold TD</title>
+  <meta name="theme-color" content="#101327">
+  <meta name="description" content="Skyhold TD — Circle Tower Wars reimagined as a voxel battlefield.">
+  <title>Skyhold TD — Circle Tower Wars in Voxels</title>
   <link rel="stylesheet" href="./style.css">
+  <script src="./circle/database.js"></script>
+  <script src="./circle/database-ext.js"></script>
   <script type="importmap">
     { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js" } }
   </script>
 </head>
 <body>
   <main id="app">
-    <div id="game-view" aria-label="3D tower defense battlefield"></div>
+    <div id="game-view" aria-label="Voxel battlefield, tap a tower then tap a grid cell to build"></div>
     <header class="topbar">
-      <a class="brand" href="./" aria-label="Skyhold TD home"><span class="brand-mark">◆</span><span>SKYHOLD <b>TD</b></span></a>
+      <a class="brand" href="./" aria-label="Skyhold TD"><span class="brand-mark">◆</span><span>SKYHOLD <b>TD</b></span></a>
       <div class="stats" aria-live="polite">
-        <div class="stat"><span class="stat-icon">✦</span><span id="gold-value">180</span><small>GOLD</small></div>
+        <div class="stat"><span class="stat-icon">✦</span><span id="gold-value">420</span><small>GOLD</small></div>
         <div class="stat"><span class="stat-icon">♥</span><span id="lives-value">20</span><small>LIVES</small></div>
         <div class="stat"><span class="stat-icon">⚑</span><span id="wave-value">0</span><small>WAVE</small></div>
       </div>
     </header>
+    <div class="field-label"><span id="element-icon">🔥</span><span id="field-name">FIRE CORRIDOR</span><span class="dot"></span><span id="phase-label">BUILD PHASE</span></div>
     <section class="intro-card" id="intro-card">
-      <div class="eyebrow">A NEW WORLD ABOVE THE CLOUDS</div>
-      <h1>Defend your <em>Skyhold.</em></h1>
-      <p>Place voxel towers beside the winding path, then launch a wave. Keep the island safe.</p>
+      <div class="eyebrow">CIRCLE TOWER WARS · VOXEL PORT</div>
+      <h1>Build the maze.<br><em>Defend the Nexus.</em></h1>
+      <p>Place towers on the grid to shape enemy flow. Keep a route open from the gate to the exit. Enemies loop through the elemental field.</p>
       <button id="dismiss-intro" class="quiet-button">LET'S BUILD <span>→</span></button>
     </section>
-    <div class="crosshair-hint" id="hint">Choose a tower, then click a grassy tile to place it.</div>
+    <div class="crosshair-hint" id="hint">Choose a tower, then tap an open grid cell to place it.</div>
     <footer class="buildbar">
-      <div class="build-label"><span class="pulse"></span><span>BUILD PHASE</span></div>
-      <div class="tower-options" role="group" aria-label="Choose tower">
-        <button class="tower-option selected" data-tower="bolt" aria-pressed="true"><span class="tower-glyph bolt-glyph">✦</span><span class="tower-copy"><b>Arc Tower</b><small>Fast · 60 gold</small></span><kbd>1</kbd></button>
-        <button class="tower-option" data-tower="cannon" aria-pressed="false"><span class="tower-glyph cannon-glyph">✹</span><span class="tower-copy"><b>Stone Cannon</b><small>Heavy · 90 gold</small></span><kbd>2</kbd></button>
+      <div class="build-head">
+        <div class="build-label"><span class="pulse"></span><span id="build-title">FIRE TOWERS</span></div>
+        <div class="build-actions">
+          <button id="sell-button" class="quiet-button small-button" disabled>SELL SELECTED</button>
+          <button id="upgrade-button" class="quiet-button small-button" disabled>UPGRADE</button>
+        </div>
       </div>
-      <button id="wave-button" class="primary-button">START WAVE <span>→</span></button>
+      <div id="element-options" class="element-options" role="group" aria-label="Choose element"></div>
+      <div id="tower-options" class="tower-options" role="group" aria-label="Choose tower"></div>
+      <div class="bar-bottom">
+        <div class="target-wrap"><label for="target-mode">TARGET</label><select id="target-mode"><option value="first">First</option><option value="last">Last</option><option value="strong">Strong</option><option value="weak">Weak</option></select></div>
+        <button id="wave-button" class="primary-button">START WAVE <span>→</span></button>
+      </div>
     </footer>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <div class="corner-note">PROTOTYPE 0.1 <span>•</span> FLOATING ISLES</div>
+    <div class="corner-note">CIRCLE RULES · VOXEL WORLD</div>
   </main>
   <script type="module" src="./game.js"></script>
 </body>
