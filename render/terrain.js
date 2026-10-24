@@ -1,83 +1,116 @@
 import * as THREE from "three";
-import { CONFIG, PATH_POINTS } from "../data.js";
-import { material, voxel } from "../art.js";
+import { bestNeighbor, NB } from "../sim/circle-pathfind.js";
 
-function instancedBlocks(scene, color, blocks) {
-  const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), material(color), blocks.length);
+const palette = {
+  grass: 0x507e58, grassLight: 0x659b65, dirt: 0x614653, dirtLight: 0x8d5d57,
+  path: 0xb5a078, pathLight: 0xe6cc91, stone: 0x69718b, crystal: 0x9e72f2
+};
+
+function instanced(scene, color, items, box=[1,1,1], y=0) {
+  const mesh = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(...box),
+    new THREE.MeshLambertMaterial({color}),
+    Math.max(items.length,1)
+  );
   const dummy = new THREE.Object3D();
-  blocks.forEach((block, i) => {
-    dummy.position.set(block.x, block.y, block.z);
-    dummy.scale.set(block.sx ?? 1, block.sy ?? 1, block.sz ?? 1);
+  items.forEach((p,i)=>{
+    dummy.position.set(p.x,p.y ?? y,p.z);
+    dummy.scale.set(p.sx ?? 1,p.sy ?? 1,p.sz ?? 1);
+    dummy.rotation.y = p.ry || 0;
     dummy.updateMatrix();
-    mesh.setMatrixAt(i, dummy.matrix);
+    mesh.setMatrixAt(i,dummy.matrix);
   });
+  mesh.count = items.length;
+  mesh.instanceMatrix.needsUpdate = true;
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   scene.add(mesh);
   return mesh;
 }
 
-function distanceToPath(x, z) {
-  let best = Infinity;
-  for (let i = 0; i < PATH_POINTS.length - 1; i++) {
-    const a = PATH_POINTS[i], b = PATH_POINTS[i + 1];
-    const dx = b.x - a.x, dz = b.z - a.z;
-    const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / (dx * dx + dz * dz)));
-    best = Math.min(best, Math.hypot(x - (a.x + dx * t), z - (a.z + dz * t)));
+export function createTerrain(scene, cols, rows) {
+  const x0 = -(cols-1)/2, z0 = -(rows-1)/2;
+  const floor = [];
+  const edge = [];
+  for (let r=0;r<rows;r++) for (let c=0;c<cols;c++) {
+    const x=x0+c,z=z0+r;
+    floor.push({x,y:-0.12,z,sy:0.24});
+    if (c===0 || r===0 || c===cols-1 || r===rows-1) edge.push({x,y:-0.38,z,sy:0.38});
   }
-  return best;
-}
+  instanced(scene,palette.grass,floor,[1,1,1]);
+  instanced(scene,palette.dirt,edge,[1,1,1]);
+  const trim = [];
+  for (let r=0;r<rows;r+=5) {
+    trim.push({x:x0-0.65,y:-0.25,z:z0+r,sx:0.3,sy:0.2,sz:0.9});
+    trim.push({x:-x0+0.65,y:-0.25,z:z0+r,sx:0.3,sy:0.2,sz:0.9});
+  }
+  instanced(scene,palette.dirtLight,trim,[1,1,1]);
 
-export function createTerrain(scene) {
-  const grass = [], dirt = [], deepStone = [], path = [], pathTrim = [];
-  for (let x = -8; x <= 8; x++) {
-    for (let z = -7; z <= 7; z++) {
-      const distance = distanceToPath(x, z);
-      if (distance < 0.55) {
-        path.push({ x, y: 0.025, z });
-        pathTrim.push({ x, y: -0.025, z, sx: 1.08, sz: 1.08, sy: 0.08 });
-      } else {
-        grass.push({ x, y: 0, z });
-        if (distance < 1.1) pathTrim.push({ x, y: -0.015, z, sx: 1.02, sz: 1.02, sy: 0.05 });
-      }
+  const gate = new THREE.Group();
+  const gateMat = new THREE.MeshLambertMaterial({color:0xff8c55,emissive:0x8b2d16,emissiveIntensity:0.6});
+  for (const x of [-1,0,1]) {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.55,1.7,0.55),gateMat);
+    post.position.set(x,0.72,z0+1.0);
+    gate.add(post);
+  }
+  const lintel = new THREE.Mesh(new THREE.BoxGeometry(3.3,0.45,0.55),gateMat);
+  lintel.position.set(0,1.65,z0+1.0);
+  gate.add(lintel);
+  scene.add(gate);
+
+  const exit = new THREE.Group();
+  const exitMat = new THREE.MeshLambertMaterial({color:0x9e72f2,emissive:0x5530b0,emissiveIntensity:0.8});
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(1.1,0.18,4,8),exitMat);
+  ring.position.set(0,1.1,z0);
+  exit.add(ring);
+  const core = new THREE.Mesh(new THREE.BoxGeometry(0.65,0.65,0.65),exitMat);
+  core.position.set(0,1.1,z0);
+  exit.add(core);
+  scene.add(exit);
+
+  const cloudMat = new THREE.MeshLambertMaterial({color:0xc4c8ee,transparent:true,opacity:0.32});
+  for (const [x,y,z,s] of [[-18,-1,-12,1.6],[18,-2,4,2],[-12,-2,20,1.8],[12,-1,-24,1.4]]) {
+    const cloud = new THREE.Mesh(new THREE.BoxGeometry(3.4,0.6,1.8),cloudMat);
+    cloud.position.set(x,y,z); cloud.scale.setScalar(s); scene.add(cloud);
+  }
+
+  let signature = "";
+  let pathMesh = null;
+  let obstacleMesh = null;
+  let gridMesh = null;
+
+  function update(field) {
+    let sig = "";
+    for (let i=0;i<field.grid.length;i++) sig += field.grid[i];
+    if (sig === signature) return;
+    signature = sig;
+    if (pathMesh) {scene.remove(pathMesh);pathMesh.geometry.dispose();pathMesh.material.dispose();}
+    if (obstacleMesh) {scene.remove(obstacleMesh);obstacleMesh.geometry.dispose();obstacleMesh.material.dispose();}
+    if (gridMesh) {scene.remove(gridMesh);gridMesh.geometry.dispose();gridMesh.material.dispose();}
+
+    const path = [];
+    let c=field.entrance.c, r=field.entrance.r;
+    const seen = new Set();
+    for (let i=0;i<cols*rows;i++) {
+      const id=r*cols+c;
+      if (seen.has(id)) break;
+      seen.add(id);
+      path.push({x:x0+c,y:0.035,z:z0+r,sx:0.76,sy:0.08,sz:0.76});
+      if (c===field.exit.c && r===field.exit.r) break;
+      const k=bestNeighbor(field,cols,rows,c,r);
+      if (k==null) break;
+      c+=NB[k][0]; r+=NB[k][1];
     }
+    pathMesh=instanced(scene,palette.path,path,[1,1,1]);
+    const blocks=[];
+    const marks=[];
+    for (let rr=0;rr<rows;rr++) for (let cc=0;cc<cols;cc++) {
+      const value=field.grid[rr*cols+cc];
+      if (value===1) blocks.push({x:x0+cc,y:0.38,z:z0+rr,sx:0.76,sy:0.8,sz:0.76});
+      if (value!==0) marks.push({x:x0+cc,y:0.012,z:z0+rr,sx:0.92,sy:0.025,sz:0.92});
+    }
+    obstacleMesh=instanced(scene,palette.stone,blocks,[1,1,1]);
+    gridMesh=instanced(scene,0x91bd91,marks,[1,1,1]);
   }
-  instancedBlocks(scene, CONFIG.palette.dirtDark, deepStone.map((b) => b));
-  // Layered blocky underside gives the island a chunky, floating silhouette.
-  const lower = [];
-  for (let x = -7; x <= 7; x++) for (let z = -6; z <= 6; z++) {
-    if (Math.abs(x) + Math.abs(z) < 5) continue;
-    lower.push({ x, y: -0.62, z, sx: 1, sy: 0.42, sz: 1 });
-  }
-  instancedBlocks(scene, CONFIG.palette.dirt, lower);
-  const underside = [];
-  for (let x = -6; x <= 6; x++) for (let z = -5; z <= 5; z++) {
-    if ((Math.abs(x) > 5 || Math.abs(z) > 4) && (x + z) % 2 !== 0) continue;
-    underside.push({ x, y: -1.02, z, sx: 1, sy: 0.42, sz: 1 });
-  }
-  instancedBlocks(scene, CONFIG.palette.dirtDark, underside);
-  instancedBlocks(scene, CONFIG.palette.grass, grass);
-  instancedBlocks(scene, CONFIG.palette.pathEdge, pathTrim);
-  instancedBlocks(scene, CONFIG.palette.path, path);
-
-  const decoration = new THREE.Group();
-  for (const [x, z, scale] of [[-7, 3, 1], [7, 5, 0.8], [-2, -6, 0.8], [7, -1, 0.65], [0, 6, 0.65]]) {
-    const rock = voxel(CONFIG.palette.stone, { x, y: 0.28 * scale, z }, [0.7 * scale, 0.56 * scale, 0.62 * scale]);
-    decoration.add(rock);
-  }
-  // Small grass tufts, kept as a few decorative meshes rather than per-frame objects.
-  for (const [x, z] of [[-7, 1], [-7, 2], [7, 3], [0, -6], [1, -6], [-2, 6], [6, 5]]) {
-    if (distanceToPath(x, z) < 1.3) continue;
-    decoration.add(voxel(CONFIG.palette.grassLight, { x, y: 0.13, z }, [0.16, 0.26, 0.16]));
-  }
-  scene.add(decoration);
-
-  const cloudMaterial = new THREE.MeshLambertMaterial({ color: CONFIG.palette.cloud, transparent: true, opacity: 0.75 });
-  const cloudGeo = new THREE.BoxGeometry(2.2, 0.5, 1.2);
-  for (const [x, y, z, scale] of [[-10, -0.8, -5, 1], [10, 1.5, 2, 1.2], [-4, -2.5, 8, 1.4], [5, -2, -9, 1]]) {
-    const cloud = new THREE.Mesh(cloudGeo, cloudMaterial);
-    cloud.position.set(x, y, z);
-    cloud.scale.setScalar(scale);
-    scene.add(cloud);
-  }
+  return {update};
 }
