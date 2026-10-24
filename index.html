@@ -100,7 +100,6 @@
         document.getElementById("options-close").addEventListener("click", function () { modal.hidden = true; });
         document.getElementById("camera-angle").addEventListener("change", function (e) { document.dispatchEvent(new CustomEvent("skyhold-camera-angle", {detail:e.target.value})); });
         document.getElementById("render-quality").addEventListener("change", function (e) { document.dispatchEvent(new CustomEvent("skyhold-render-quality", {detail:e.target.value})); });
-      });
 
       var script = document.createElement("script");
       script.type = "module";
