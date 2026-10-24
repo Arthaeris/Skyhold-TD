@@ -36,6 +36,7 @@ export function createUI({onSelectTower,onSelectElement,onStartWave,onSell,onUpg
     const el=DB.ELEMENTS[currentElement];
     buildTitle.textContent=el.name.toUpperCase()+" TOWERS";
     const towers=DB.TOWERS.filter(t=>t.element===currentElement);
+    if(towers.length&&!towers.some(t=>t.id===selectedTowerType))selectedTowerType=towers[0].id;
     towerOptions.innerHTML=towers.map(t=>{
       const selected=t.id===selectedTowerType;
       return '<button class="tower-option '+(selected?'selected':'')+'" data-tower="'+esc(t.id)+'" style="--element:'+el.color+'" aria-pressed="'+selected+'"><span class="tower-glyph">'+el.icon+'</span><span class="tower-copy"><b>'+esc(t.name)+'</b><small>'+t.cost+' gold · T'+t.tier+'</small></span><span class="tower-level">'+(t.slot+1)+'</span></button>';
