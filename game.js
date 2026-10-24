@@ -63,7 +63,7 @@ function selectTower(id) {
   if(tower) {
     selectedTowerType=tower.def.id;
     ui.selectTowerType(tower.def.id);
-    ui.showToast(tower.def.name+" · Level "+tower.level);
+    ui.showToast((globalThis.DB.TOWER_BY_ID[tower.def.id]?.name||tower.def.id)+" · Level "+tower.level);
   }
 }
 const ui=createUI({
