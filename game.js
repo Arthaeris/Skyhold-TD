@@ -145,7 +145,7 @@ renderer.domElement.addEventListener("pointermove",event=>{
   }
   if(pointerDown&&pointerDown.id===event.pointerId){
     const dx=event.clientX-pointerDown.lastX,dy=event.clientY-pointerDown.lastY;
-    if(Math.hypot(event.clientX-pointerDown.startX,event.clientY-pointerDown.startY)>8)pointerDown.moved=true;
+    if(Math.hypot(event.clientX-pointerDown.startX,event.clientY-pointerDown.startY)>12)pointerDown.moved=true;
     if(pointerDown.moved)panCamera(dx,dy);
     pointerDown.lastX=event.clientX;pointerDown.lastY=event.clientY;
   }
