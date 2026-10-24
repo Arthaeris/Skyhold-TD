@@ -62,11 +62,11 @@ export function createTerrain(scene, cols, rows) {
   const gateMat = new THREE.MeshLambertMaterial({color:0xff8c55,emissive:0x8b2d16,emissiveIntensity:0.6});
   for (const x of [-1,0,1]) {
     const post = new THREE.Mesh(new THREE.BoxGeometry(0.55,1.7,0.55),gateMat);
-    post.position.set(x,0.72,z0+1.0);
+    post.position.set(x,0.72,-z0-1.0);
     gate.add(post);
   }
   const lintel = new THREE.Mesh(new THREE.BoxGeometry(3.3,0.45,0.55),gateMat);
-  lintel.position.set(0,1.65,z0+1.0);
+  lintel.position.set(0,1.65,-z0-1.0);
   gate.add(lintel);
   scene.add(gate);
 
