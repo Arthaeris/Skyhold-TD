@@ -86,3 +86,6 @@ button,select{font:inherit;color:inherit}button{cursor:pointer;touch-action:mani
 
 .view-reset{margin-left:3px;padding:4px 6px;border:1px solid rgba(198,205,255,.2);border-radius:5px;background:rgba(255,255,255,.06);font:8px 'DM Mono',monospace;letter-spacing:.04em;color:var(--mint)}
 .view-reset:active{transform:scale(.96)}
+
+#startup-error{position:absolute;z-index:20;left:12px;right:12px;top:150px;max-width:760px;margin:auto;padding:12px 14px;border:1px solid #ff8b9c;border-radius:10px;background:#321b2a;color:#ffe5ea;font:12px/1.5 'DM Mono',monospace;overflow-wrap:anywhere;box-shadow:0 8px 30px #0008}
+#startup-error[hidden]{display:none}
