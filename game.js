@@ -68,7 +68,7 @@ function selectTower(id) {
 }
 const ui=createUI({
   onSelectTower:selectTowerType,
-  onSelectElement:()=>{selectedTowerId=null;},
+  onSelectElement:element=>{selectedTowerId=null;selectedTowerType=globalThis.DB.TOWERS.find(t=>t.element===element)?.id||selectedTowerType;},
   onStartWave:()=>queue("StartWave"),
   onSell:()=>{const tower=selectedTower();if(tower)queue("SellTower",{corridorId:0,towerId:tower.id});},
   onUpgrade:()=>{const tower=selectedTower();if(tower)queue("UpgradeTower",{corridorId:0,towerId:tower.id});},
