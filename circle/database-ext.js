@@ -1,0 +1,85 @@
+/* =============================================================================
+ * Circle Tower Wars — database-ext.js
+ * Non-destructive AUGMENTATION of window.DB. Loaded AFTER database.js, it adds
+ * the game-mode list and the competitive send-economy tuning (D8/D11/D12, §8)
+ * plus the content-gating version fields (§6.4), without modifying the original
+ * database.js. (Merge these blocks back into database.js when convenient.)
+ * ===========================================================================*/
+(function (global) {
+  "use strict";
+  const DB = global.DB;
+  if (!DB) { console.error("database-ext.js: window.DB missing — load database.js first"); return; }
+
+  // D8 — four modes ("versus" = offline vs NPC rivals, Line-Tower-Wars style).
+  if (!DB.GAME_MODES) DB.GAME_MODES = ["solo", "coop", "competitive", "versus"];
+
+  // ---------------------------------------------------------------------------
+  // SENDS — the sendable-mob catalog for competitive & versus modes.
+  // FLAT cost per type+level (no rising per-purchase cost). Each type can be
+  // upgraded to level 5; every level raises both send cost and mob strength.
+  // ---------------------------------------------------------------------------
+  if (!DB.SENDS) {
+    DB.SENDS = {
+      grunt:  { baseCost: 15,  count: 1, costGrowth: 1.6, hpGrowth: 1.8, desc: "Cheap, steady filler" },
+      runner: { baseCost: 25,  count: 1, costGrowth: 1.6, hpGrowth: 1.8, desc: "Fast — punishes slow towers" },
+      swarm:  { baseCost: 40,  count: 4, costGrowth: 1.6, hpGrowth: 1.8, desc: "A pack of 4 — floods single-target" },
+      brute:  { baseCost: 70,  count: 1, costGrowth: 1.6, hpGrowth: 1.8, desc: "Armored bruiser" },
+      tank:   { baseCost: 130, count: 1, costGrowth: 1.6, hpGrowth: 1.8, desc: "Heavily armored wall" },
+    };
+    DB.SEND_MAX_LEVEL = 5;
+    // Shared authored formulas (UI, bots and balance all use these):
+    DB.sendCost = (type, lvl) => { const s = DB.SENDS[type]; return s ? Math.round(s.baseCost * Math.pow(s.costGrowth, lvl - 1)) : 0; };
+    DB.sendUpgradeCost = (type, lvl) => { const s = DB.SENDS[type]; return s ? Math.round(s.baseCost * 4 * lvl) : 0; }; // lvl -> lvl+1
+    DB.sendHpMult = (type, lvl) => { const s = DB.SENDS[type]; return s ? Math.pow(s.hpGrowth, lvl - 1) : 1; };
+  }
+
+  // §8 — competitive send-economy tuning (plain data; the sim-core reads it).
+  // D12: sentBountyMult is a FIXED higher reward for killing a sent enemy — it
+  // does NOT rise per sent enemy. Anti-snowball (§8.3) uses rising send cost +
+  // catch-up income for the trailing player, never the defender bounty.
+  if (!DB.COMPETITIVE) {
+    DB.COMPETITIVE = {
+      incomeRate: 0.06,            // §8.1 income gained per gold spent on sends
+      incomeIntervalTicks: 150,    // payout every 5s @30Hz
+      sentBountyMult: 1.6,         // §8.2 fixed higher bounty
+      maxActiveSentPerTarget: 40,  // §8.3 cap
+      catchupPerLifeBehind: 1,     // §8.3 catch-up income
+    };
+  }
+
+  // Early-call bonus: reward for starting the next wave while the previous is
+  // still being fought (plain data; the sim-core reads it via buildBalance).
+  if (!DB.CONFIG.earlyCallBonus) DB.CONFIG.earlyCallBonus = { base: 20, perWave: 6 };
+
+  // ---------------------------------------------------------------------------
+  // SERPENTINE MAZE PLAN — used by the NPC builders (app/main.js) and by tests.
+  // Returns an ordered list of tower TOP-LEFT spots. Horizontal walls alternate
+  // their open side, so enemies snake the full corridor width between every
+  // wall — maximizing the path length past the towers. The gap is part of the
+  // plan, so placements never fully block the path (core validation stays happy).
+  // Pure function of the grid config: safe to call anywhere, including Node.
+  // ---------------------------------------------------------------------------
+  DB.makeMazePlan = function (cols, rows, towerSize) {
+    const S = towerSize || 3;
+    const plan = [];
+    const wallRows = [];
+    const laneCenter = (cols - 1) / 2; // mobs spawn and walk up the middle
+    for (let r = rows - 8; r >= 4; r -= S + 3) wallRows.push(r); // bottom-up: defend the entrance first
+    wallRows.forEach((r, k) => {
+      const leftOpen = k % 2 === 1;
+      const spots = [];
+      if (leftOpen) { for (let c = cols - S; c >= S + 1; c -= S) spots.push(c); } // gap on the LEFT
+      else { for (let c = 0; c <= cols - S - (S + 1); c += S) spots.push(c); }    // gap on the RIGHT
+      // CENTER-OUT build order: the first towers of every wall sit over the
+      // middle of the lane, in range of the spawn path — edge towers come
+      // later, once the wall (and the serpentine detour) is taking shape.
+      spots.sort((a, b) => Math.abs(a + (S - 1) / 2 - laneCenter) - Math.abs(b + (S - 1) / 2 - laneCenter));
+      for (const c of spots) plan.push({ c, r });
+    });
+    return plan;
+  };
+
+  // §6.4 — content-gating version fields.
+  if (DB.codeVersion == null) DB.codeVersion = 4; // v4: flat send levels, versus mode
+  if (DB.contentHash === undefined) DB.contentHash = null; // filled by hashContent at boot
+})(typeof window !== "undefined" ? window : this);
