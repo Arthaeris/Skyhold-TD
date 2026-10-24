@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101b2b">
+  <meta name="description" content="Skyhold TD — defend a floating voxel island.">
+  <title>Skyhold TD</title>
+  <link rel="stylesheet" href="./style.css">
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js" } }
+  </script>
+</head>
+<body>
+  <main id="app">
+    <div id="game-view" aria-label="3D tower defense battlefield"></div>
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="Skyhold TD home"><span class="brand-mark">◆</span><span>SKYHOLD <b>TD</b></span></a>
+      <div class="stats" aria-live="polite">
+        <div class="stat"><span class="stat-icon">✦</span><span id="gold-value">180</span><small>GOLD</small></div>
+        <div class="stat"><span class="stat-icon">♥</span><span id="lives-value">20</span><small>LIVES</small></div>
+        <div class="stat"><span class="stat-icon">⚑</span><span id="wave-value">0</span><small>WAVE</small></div>
+      </div>
+    </header>
+    <section class="intro-card" id="intro-card">
+      <div class="eyebrow">A NEW WORLD ABOVE THE CLOUDS</div>
+      <h1>Defend your <em>Skyhold.</em></h1>
+      <p>Place voxel towers beside the winding path, then launch a wave. Keep the island safe.</p>
+      <button id="dismiss-intro" class="quiet-button">LET'S BUILD <span>→</span></button>
+    </section>
+    <div class="crosshair-hint" id="hint">Choose a tower, then click a grassy tile to place it.</div>
+    <footer class="buildbar">
+      <div class="build-label"><span class="pulse"></span><span>BUILD PHASE</span></div>
+      <div class="tower-options" role="group" aria-label="Choose tower">
+        <button class="tower-option selected" data-tower="bolt" aria-pressed="true"><span class="tower-glyph bolt-glyph">✦</span><span class="tower-copy"><b>Arc Tower</b><small>Fast · 60 gold</small></span><kbd>1</kbd></button>
+        <button class="tower-option" data-tower="cannon" aria-pressed="false"><span class="tower-glyph cannon-glyph">✹</span><span class="tower-copy"><b>Stone Cannon</b><small>Heavy · 90 gold</small></span><kbd>2</kbd></button>
+      </div>
+      <button id="wave-button" class="primary-button">START WAVE <span>→</span></button>
+    </footer>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <div class="corner-note">PROTOTYPE 0.1 <span>•</span> FLOATING ISLES</div>
+  </main>
+  <script type="module" src="./game.js"></script>
+</body>
+</html>
