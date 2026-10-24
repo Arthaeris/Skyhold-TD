@@ -158,11 +158,18 @@ function animate() {
   let guard=0;
   while(accumulator>=1/30&&guard++<5) {
     const commands=pendingCommands.splice(0,pendingCommands.length);
-    // Commands are applied by the same deterministic simulation step as Circle.
-    state.events.length=0;
-    const simDt=SIM_DT;
-    step(state,commands,simDt);
+    const towersBefore=field.towers.length;
+    const selectedBefore=selectedTower();
+    const levelBefore=selectedBefore?.level||0;
+    const mutationsBefore=selectedBefore?.mutations?.join(",")||"";
+    step(state,commands,SIM_DT);
     processEvents();
+    if(commands.some(c=>c.type==="BuildTower")&&field.towers.length>towersBefore){
+      ui.showToast((globalThis.DB.TOWER_BY_ID[commands.find(c=>c.type==="BuildTower").towerType]?.name||"Tower")+" placed");
+    }
+    if(commands.some(c=>c.type==="UpgradeTower")&&selectedBefore&&selectedBefore.level>levelBefore)ui.showToast("Tower upgraded to level "+selectedBefore.level);
+    if(commands.some(c=>c.type==="SellTower")&&selectedBefore&&!field.towers.some(t=>t.id===selectedBefore.id))ui.showToast("Tower sold");
+    if(commands.some(c=>c.type==="MutateTower")&&selectedBefore&&selectedBefore.mutations.join(",")!==mutationsBefore)ui.showToast("Mutation applied");
     accumulator-=1/30;
   }
   const currentField=state.players[0].corridors[0];
