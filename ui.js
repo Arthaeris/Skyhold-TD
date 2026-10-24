@@ -94,7 +94,9 @@ export function createUI({onSelectTower,onSelectElement,onStartWave,onSell,onUpg
   });
 
   function render(state,selectedTower) {
+    latestState=state;
     const player=state.players[0],field=player.corridors[0];
+    if(!infoPanel.hidden)renderInfoPanel();
     gold.textContent=state.economy==="shared"?player.gold:player.essence[currentElement];
     lives.textContent=player.lives;wave.textContent=player.wave;
     phaseLabel.textContent=player.phase==="wave"?"WAVE IN PROGRESS":player.phase==="prep"?"FINAL BOSS READY":player.phase.toUpperCase()+" PHASE";
