@@ -1,46 +1,47 @@
 import * as THREE from "three";
-import { CONFIG } from "../data.js";
 
 export function createScene(container) {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(CONFIG.palette.sky);
-  scene.fog = new THREE.Fog(CONFIG.palette.sky, 24, 58);
-
-  const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
-  camera.position.set(16, 17, 20);
-  camera.lookAt(0, 0, 0);
-
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  scene.background = new THREE.Color(0x11152d);
+  scene.fog = new THREE.Fog(0x11152d, 76, 150);
+  const camera = new THREE.OrthographicCamera(-20,20,40,-40,0.1,220);
+  camera.position.set(0,78,16);
+  camera.lookAt(0,0,0);
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.15;
+  renderer.toneMappingExposure = 1.12;
+  renderer.domElement.style.touchAction = "none";
+  renderer.domElement.setAttribute("aria-label","Voxel corridor grid");
   container.appendChild(renderer.domElement);
-
-  scene.add(new THREE.HemisphereLight(0xe8f6ff, 0x6a7c6b, 2.0));
-  const sun = new THREE.DirectionalLight(0xfff2d9, 3.0);
-  sun.position.set(-8, 18, 11);
+  scene.add(new THREE.HemisphereLight(0xdde9ff,0x51465f,2.25));
+  const sun = new THREE.DirectionalLight(0xffe5bf,2.7);
+  sun.position.set(-22,42,20);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = -18;
-  sun.shadow.camera.right = 18;
-  sun.shadow.camera.top = 18;
-  sun.shadow.camera.bottom = -18;
-  sun.shadow.bias = -0.0003;
+  sun.shadow.mapSize.set(1024,1024);
+  sun.shadow.camera.left = -24;
+  sun.shadow.camera.right = 24;
+  sun.shadow.camera.top = 40;
+  sun.shadow.camera.bottom = -40;
+  sun.shadow.bias = -0.0004;
   scene.add(sun);
-  sun.target.position.set(0, 0, 0);
+  sun.target.position.set(0,0,0);
   scene.add(sun.target);
-
   const resize = () => {
-    const width = Math.max(container.clientWidth, 1);
-    const height = Math.max(container.clientHeight, 1);
-    camera.aspect = width / height;
+    const w = Math.max(container.clientWidth,1), h = Math.max(container.clientHeight,1);
+    const aspect = w / h;
+    const viewHeight = 70;
+    camera.top = viewHeight/2;
+    camera.bottom = -viewHeight/2;
+    camera.left = -viewHeight*aspect/2;
+    camera.right = viewHeight*aspect/2;
     camera.updateProjectionMatrix();
-    renderer.setSize(width, height, false);
+    renderer.setSize(w,h,false);
   };
   resize();
-  window.addEventListener("resize", resize);
-  return { scene, camera, renderer, dispose: () => window.removeEventListener("resize", resize) };
+  window.addEventListener("resize",resize);
+  return {scene,camera,renderer,dispose:()=>window.removeEventListener("resize",resize)};
 }
