@@ -19,7 +19,8 @@ Open [http://localhost:8000](http://localhost:8000). Three.js and Google Fonts a
 - A 31 × 61 corridor grid is rendered in Three.js. The highlighted route is derived from the live flow field, not a hand-authored spline.
 - Towers occupy Circle's 3 × 3 grid footprint. Placement is validated by the Circle simulation, which rejects placements that block the entrance-to-exit route.
 - Circle-style loop behavior, lives, gold, wave clears, bosses, tower upgrades/selling, target modes, and combat/status logic run in the simulation.
-- The first UI slice exposes the four starter elements and their five tower tiers, with touch-first controls and PC mouse/keyboard support.
+- The first UI slice exposes the four starter elements and their five tower tiers, tower targeting, upgrades, selling, expert progression, mutations, and early-wave calls.
+- Mobile controls use tap-to-build, pinch zoom, and drag-to-pan; PC supports mouse placement, drag-to-pan, wheel zoom, and keyboard shortcuts.
 - Tower and enemy visuals are voxel interpretations of Circle's elemental themes and enemy data.
 
 ## Current scope and honest limitations
