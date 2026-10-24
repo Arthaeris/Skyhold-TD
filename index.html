@@ -15,6 +15,22 @@
 </head>
 <body>
   <main id="app">
+    <section id="title-screen" class="title-screen" aria-label="Main menu">
+      <div class="title-menu-card">
+        <div class="title-brand-mark">◆</div>
+        <p class="title-eyebrow">CIRCLE TOWER WARS · VOXEL EDITION</p>
+        <h1 class="title-game-name">SKYHOLD <span>TD</span></h1>
+        <p class="title-tagline">A looping-battlefield tower defense.<br>Build your maze. Defend your world.</p>
+        <div class="title-menu-buttons">
+          <button id="menu-continue" type="button" class="title-primary" disabled>CONTINUE</button>
+          <button id="menu-new-run" type="button" class="title-primary">NEW RUN <span>→</span></button>
+          <button id="menu-mastery" type="button">ELEMENTAL MASTERY</button>
+          <button id="menu-save" type="button">SAVE / IMPORT / EXPORT</button>
+          <button id="menu-options" type="button">OPTIONS</button>
+        </div>
+        <p class="title-version">VOXEL PORT · MOBILE FIRST · DESKTOP SUPPORTED</p>
+      </div>
+    </section>
     <div id="game-view" aria-label="Voxel battlefield, tap a tower then tap a grid cell to build"></div>
     <div id="startup-error" role="alert" hidden></div>
     <script>
@@ -71,7 +87,7 @@
   </main>
   <script>
     (function () {
-      var script = document.createElement("script");
+      document.addEventListener("DOMContentLoaded", function () {\n        var title = document.getElementById("title-screen");\n        var intro = document.getElementById("intro-card");\n        function begin() { title.classList.add("title-screen-hidden"); if (intro) intro.classList.add("hidden"); }\n        document.getElementById("menu-new-run").addEventListener("click", begin);\n        document.getElementById("menu-continue").addEventListener("click", begin);\n        document.getElementById("menu-mastery").addEventListener("click", function () { begin(); document.querySelector("[data-panel=\"progression\"]").click(); });\n        document.getElementById("menu-save").addEventListener("click", function () { begin(); document.querySelector("[data-panel=\"overview\"]").click(); });\n        var modal = document.getElementById("options-modal");\n        document.getElementById("menu-options").addEventListener("click", function () { modal.hidden = false; });\n        document.getElementById("options-close").addEventListener("click", function () { modal.hidden = true; });\n        document.getElementById("camera-angle").addEventListener("change", function (e) { document.dispatchEvent(new CustomEvent("skyhold-camera-angle", {detail:e.target.value})); });\n        document.getElementById("render-quality").addEventListener("change", function (e) { document.dispatchEvent(new CustomEvent("skyhold-render-quality", {detail:e.target.value})); });\n      });\n      var script = document.createElement("script");
       script.type = "module";
       script.src = "./game.js";
       script.onerror = function () {
