@@ -725,16 +725,27 @@ export function createRenderer(opts) {
     tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; tex.needsUpdate = true;
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(12), 3));
-    geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]), 2));
+    const M = 0.36;
+    geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array([-M, -M, COLS + M, -M, COLS + M, ROWS + M, -M, ROWS + M]), 2));
     geo.setIndex([0, 2, 1, 0, 3, 2]);
     const mat = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, side: THREE.DoubleSide,
-      uniforms: { map: { value: tex }, dims: { value: new THREE.Vector2(COLS, ROWS) }, uOp: { value: 0 } },
+      uniforms: { map: { value: tex }, dims: { value: new THREE.Vector2(COLS, ROWS) }, uOp: { value: 0 }, uFrame: { value: new THREE.Color("#ffffff") }, uTime: { value: 0 }, uPart: { value: 0 } },
       vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
-      fragmentShader: `varying vec2 vUv; uniform sampler2D map; uniform vec2 dims; uniform float uOp;
+      // vUv is in cells (-M..COLS+M); a glowing frame just outside the grid, hatching on blocked cells
+      fragmentShader: `varying vec2 vUv; uniform sampler2D map; uniform vec2 dims; uniform float uOp; uniform vec3 uFrame; uniform float uTime; uniform float uPart;
         void main(){
-          float m = texture2D(map, vUv).r; if (m < 0.5 || uOp <= 0.0) discard;
-          vec2 g = vUv * dims; vec2 f = fract(g);
+          if (uOp <= 0.0) discard;
+          vec2 g = vUv;
+          bool outside = g.x < 0.0 || g.y < 0.0 || g.x > dims.x || g.y > dims.y;
+          if (outside != (uPart > 0.5)) discard;
+          if (outside) {
+            float o = max(max(-g.x, g.x - dims.x), max(-g.y, g.y - dims.y));
+            float a = (1.0 - smoothstep(0.08, 0.3, o)) * (0.75 + 0.25 * sin(uTime * 3.0));
+            gl_FragColor = vec4(uFrame * 1.6, uOp * a); return;
+          }
+          float m = texture2D(map, g / dims).r; if (m < 0.5) discard;
+          vec2 f = fract(g);
           float stripe = step(0.5, fract((g.x + g.y) * 1.25));
           float edge = 1.0 - step(0.06, min(min(f.x, f.y), min(1.0 - f.x, 1.0 - f.y)));
           vec3 col = mix(vec3(0.03, 0.02, 0.08), vec3(0.92, 0.9, 1.0), stripe * 0.4);
@@ -742,12 +753,16 @@ export function createRenderer(opts) {
         }`,
     });
     const mesh = new THREE.Mesh(geo, mat); mesh.renderOrder = 2; mesh.frustumCulled = false; mesh.visible = false;
-    scene.add(mesh);
-    return { tex, geo, mesh, mat, key: "", fi: -1, job: null, ready: false };
+    // the frame draws over the curb stones around the grid (no depth test)
+    const fmat = mat.clone(); fmat.uniforms.map.value = tex; fmat.uniforms.uPart.value = 1; fmat.depthTest = false;
+    const frame = new THREE.Mesh(geo, fmat); frame.renderOrder = 3; frame.frustumCulled = false; frame.visible = false;
+    scene.add(mesh); scene.add(frame);
+    return { tex, geo, mesh, frame, mat, fmat, key: "", fi: -1, job: null, ready: false };
   })();
   function placeNoBuild(fi) {
     const pos = nb.geo.attributes.position, v = new THREE.Vector3();
-    [[0, 0], [COLS, 0], [COLS, ROWS], [0, ROWS]].forEach(([u, w], k) => { corridorToWorld(L, fi, u, w, 0.045, v); pos.setXYZ(k, v.x, v.y, v.z); });
+    const M = 0.36;
+    [[-M, -M], [COLS + M, -M], [COLS + M, ROWS + M], [-M, ROWS + M]].forEach(([u, w], k) => { corridorToWorld(L, fi, u, w, 0.045, v); pos.setXYZ(k, v.x, v.y, v.z); });
     pos.needsUpdate = true; nb.fi = ringKey + "|" + fi;
   }
   function* noBuildJob(corr, G, S) {
@@ -789,10 +804,13 @@ export function createRenderer(opts) {
   function syncNoBuild(view, dt) {
     const own = view.versus ? fieldIdx === view.me : true;
     const corr = ringCorridors(view)[fieldIdx];
-    const on = mode === "field" && !fly && own && corr && !view.spectate;
+    // only while you are placing a tower (build ring open / desktop hover footprint): otherwise a clean field
+    const on = mode === "field" && !fly && own && corr && !view.spectate && !!(view.buildMenuOpen && view.buildSpot);
+    for (const m of [nb.mat, nb.fmat]) { m.uniforms.uTime.value = clock; if (corr && DB.ELEMENTS[corr.element]) m.uniforms.uFrame.value.set(DB.ELEMENTS[corr.element].glow || DB.ELEMENTS[corr.element].color); }
     const u = nb.mat.uniforms.uOp;
-    u.value = clamp(u.value + (on && nb.ready ? dt * 4 : -dt * 6), 0, 1);
-    nb.mesh.visible = u.value > 0;
+    u.value = clamp(u.value + (on && nb.ready ? dt * 6 : -dt * 5), 0, 1);
+    nb.fmat.uniforms.uOp.value = u.value;
+    nb.mesh.visible = nb.frame.visible = u.value > 0;
     if (!corr || mode !== "field") return;
     const G = view.state.grid;
     let h = fieldIdx * 7919;

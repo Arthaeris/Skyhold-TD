@@ -485,6 +485,10 @@ export function buildCorridorIsland(DB, element, grid, seed = 1) {
       const pd = Math.min(Math.hypot(cx, cz - (ROWS / 2 + 3)), Math.hypot(cx, cz + (ROWS / 2 + 3)));
       if (pd < 12) h = Math.min(h, 0.25 + Math.max(0, pd - 8) * 0.4);
     }
+    // beyond either end of the grid the ground ramps up gently, so nothing in front of the grid can
+    // ever cover a build cell from the tilted field cameras (top 55°, close 36°)
+    const dzEnd = Math.abs(cz) - ROWS / 2;
+    if (dzEnd > 0 && kind !== "plaza") h = Math.min(h, Math.max(0.2, (dzEnd - 0.8) * 0.7));
     tops.set(tk(x, z), { x, z, cx, cz, d, h, kind, dg });
   }
   const topH = (x, z) => { const t = tops.get(tk(x, z)); if (t) return t.h; return Math.abs(x + 0.5) < COLS / 2 && Math.abs(z + 0.5) < ROWS / 2 ? 0 : -99; };
@@ -508,8 +512,9 @@ export function buildCorridorIsland(DB, element, grid, seed = 1) {
     const edge = t.d > -1.3;
     terr.box(1.0, h + 1.2, 1.0, edge ? shade(T.soil, 1.05) : T.soil, cx, (h - 1.2) / 2, cz, { top: shade(g, 0.94 + r() * 0.12), skip: 8 | sk, jitter: 0.07, ao: 0.8 });
     // grass/frost tufts on the lip, props and bigger landmarks further in
-    if (edge && r() < 0.35) terr.box(0.35, 0.3, 0.35, shade(g, 1.15), cx + (r() - 0.5) * 0.6, h + 0.15, cz + (r() - 0.5) * 0.6);
-    const nearPortal = Math.min(Math.hypot(cx, cz - (ROWS / 2 + 3)), Math.hypot(cx, cz + (ROWS / 2 + 3))) < 10;
+    const endBand = Math.abs(cz) - ROWS / 2;   // > 0: in front of / behind the grid's ends
+    if (edge && r() < 0.35 && !(endBand > 0 && endBand < 2.5)) terr.box(0.35, 0.3, 0.35, shade(g, 1.15), cx + (r() - 0.5) * 0.6, h + 0.15, cz + (r() - 0.5) * 0.6);
+    const nearPortal = Math.min(Math.hypot(cx, cz - (ROWS / 2 + 3)), Math.hypot(cx, cz + (ROWS / 2 + 3))) < 10 || (endBand > -1 && endBand < 8);
     if (!edge && !nearPortal && t.dg > 3 && r() < 0.03) {
       // rock outcrop
       const w0 = 1.2 + r() * 1.4;
@@ -526,7 +531,7 @@ export function buildCorridorIsland(DB, element, grid, seed = 1) {
 
   // a small elemental shrine on the widest stretch of each side
   for (const sx of [-1, 1]) {
-    const best = [...tops.values()].filter((t) => t.kind === "land" && Math.sign(t.cx) === sx && t.d < -2.5 && t.dg > 3.5).sort((p, q) => q.dg - p.dg)[0];
+    const best = [...tops.values()].filter((t) => t.kind === "land" && Math.sign(t.cx) === sx && t.d < -2.5 && t.dg > 3.5 && Math.abs(t.cz) < ROWS / 2 - 3).sort((p, q) => q.dg - p.dg)[0];
     if (!best) continue;
     const { cx, cz, h } = best;
     terr.box(3.2, 0.5, 3.2, WORLD.stone[1], cx, h + 0.25, cz, { top: WORLD.stoneTop, skip: 8 });
