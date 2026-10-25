@@ -108,7 +108,7 @@ export function createRenderer(opts) {
   function shotWorld() {
     const b = L.bounds, cr = contentRect();
     const ringW = b.x1 - b.x0, ringD = b.z1 - b.z0;
-    const ppu = Math.min((cr.w - 16) / ringW, cr.h / (ringD * Math.sin(EL_WORLD) + 10)) * 1.02;
+    const ppu = Math.min((cr.w - 16) / ringW, cr.h / (ringD * Math.sin(EL_WORLD) + 10)) * 0.84;
     return { tx: (b.x0 + b.x1) / 2, ty: 0, tz: (b.z0 + b.z1) / 2 + 2, az: 0, el: EL_WORLD, ppu };
   }
   function shotMenu(t) {
