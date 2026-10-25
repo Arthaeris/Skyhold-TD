@@ -14,6 +14,7 @@ These notes supersede the earlier `STYLE_AND_PORT_PLAN.md` discussion draft. Its
 | UI | Circle's layout and wording, in dark liquid glass (PixelPups' glass recipe); voxel thumbnails in the rings, sheets, mastery and wave preview. |
 | Circle assets reused | Music (`assets/audio/music.mp3`; Circle's menu and game tracks are the same file) and the app icon. Everything else is rendered. |
 | World backdrop | `render/backdrop.js`, after Circle's world background art. The ring floats high above a glowing sea (y = −110). Around it are eight elemental landmasses (volcano with lava falls, jungle temple with waterfalls, ice and storm spires, rune shrines and portals), floating islets with waterfalls, sea stacks with foam rings, a whirlpool and light beam under the vortex, mist and cloud banks, and drifting motes. Coast foam and the shadows cast by floating islands come from a mask baked on the CPU. |
+| Corridor islands | The build grid (unchanged for gameplay) sits on an organic floating island. Its outline bulges along the sides and has rocky spurs, and it tapers to the portal plazas at each end. Around the grid is terraced ground with themed trees, outcrops and a shrine on each side. Underneath is a deep layered rock mass with stalactites, roots and crystals. Water, lava, void or gold falls pour off the edges, and loose rocks drift alongside. |
 | Saves | Skyhold uses its own localStorage keys (`skyhold_*`), because Circle and Skyhold share the `arthaeris.github.io` origin. The export format is unchanged, so Circle exports import here. |
 
 ## Circle effects that exist only as data
@@ -30,7 +31,7 @@ Parity means these behave as they do in Circle, where the database describes the
 
 1. **Multiplayer.** Port `net/firebase.js` and `net/lockstep.js` and wire the Co-op and Compete cards. The sim already supports both modes.
 2. **Circle's unimplemented effects** (list above), done as deliberate, documented deviations.
-3. **Real-device pass.** The backdrop alone is about 0.5M vertices with 4 corridors and 0.8M with 8, so check phone frame rates and thin it out on the Low tier if needed. This version was verified in headless Chromium with software WebGL (all screens, a full wave, Vs NPCs, at phone and desktop sizes). It still needs testing on actual phones for frame rate, touch feel and safe areas.
+3. **Real-device pass.** The world is about 0.6M vertices with 4 corridors and 1M with 8 (the backdrop plus roughly 75k per corridor island), so check phone frame rates and thin it out on the Low tier if needed. This version was verified in headless Chromium with software WebGL (all screens, a full wave, Vs NPCs, at phone and desktop sizes). It still needs testing on actual phones for frame rate, touch feel and safe areas.
 4. **Enemy models.** Final art pass on the 7 enemies; walking and attack animation polish.
 5. **Effects polish.** Per-element projectile shapes, status visuals beyond tints and motes (root snares, curse glyphs), and boss entrance moments.
 6. **PWA/offline.** A service worker, and bundling three.js locally.

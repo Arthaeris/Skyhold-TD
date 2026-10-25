@@ -10,9 +10,9 @@
    Coordinates: 1 world unit = 1 grid tile. Corridor-local space: x = u - cols/2, z = v - rows/2 (u = column,
    v = row, both in tiles; row 0 = exit, last row = entrance), y = 0 is the build surface. */
 import * as THREE from "three";
-import { Batch, Part, MAT, rng, noise, fbm, col, shade, mix, clamp, lerp, TAU, pick } from "./kit.js";
+import { Batch, Part, MAT, rng, noise, fbm, col, shade, mix, clamp, lerp, smooth, TAU, pick } from "./kit.js";
 import { THEMES, WORLD } from "./theme.js";
-import { createBackdrop } from "./backdrop.js";
+import { createBackdrop, fallMesh, crystal, decorate, FLOAT_KIND } from "./backdrop.js";
 
 export const COLS = 31, ROWS = 61;
 const SIDE = 3.2, END = 6;             // rim width beside / beyond the build grid
@@ -410,7 +410,7 @@ export function buildCorridorIsland(DB, element, grid, seed = 1) {
   const ox = -COLS / 2, oz = -ROWS / 2;
 
   // the build grid: one inset quad per tile over a dark seam slab (grid lines read without extra geometry)
-  terr.box(COLS + 0.2, 0.5, ROWS + 0.2, mix(T.ground[3], T.seam, 0.55), 0, -0.29, 0, { jitter: 0, ao: 1 });
+  terr.box(COLS + 0.2, 0.5, ROWS + 0.2, mix(T.ground[3], T.seam, 0.4), 0, -0.29, 0, { jitter: 0, ao: 1 });
   const gc = T.ground.map((h) => col(h));
   const tmp = new THREE.Color();
   for (let rr = 0; rr < ROWS; rr++) for (let c = 0; c < COLS; c++) {
@@ -434,39 +434,175 @@ export function buildCorridorIsland(DB, element, grid, seed = 1) {
     else terr.box(0.18, 0.05, 0.14, shade(T.ground[3], 0.8), x, 0.025, z, { rotY: r() * 3 });
   }
 
-  // the rim: uneven raised stone around the grid, a paved plaza at each end for the portals
+  // ---- the island around the grid ----------------------------------------
+  // An organic outline (bulging along the sides, tapering to the portal plazas at both ends), terraced
+  // ground with a grassy/frosty/ashen lip, and a deep inverted mountain underneath with stalactite lobes,
+  // roots, crystals, falls pouring off the edges and loose rocks drifting below.
   const X0 = -HALF_W, X1 = HALF_W, Z0 = -HALF_L, Z1 = HALF_L;
-  for (let z = Z0; z < Z1; z += 1) for (let x = X0; x < X1; x += 1) {
+  // rocky spurs and headlands break up the silhouette
+  const lobes = [];
+  for (const sx of [-1, 1]) {
+    const n = 2 + Math.floor(r() * 3);
+    for (let k = 0; k < n; k++) lobes.push({ x: sx * (HALF_W + 2 + r() * 5), z: (r() * 2 - 1) * (HALF_L - 12), r: 3 + r() * 4.5, lift: 1.5 + r() * 3 });
+    if (r() < 0.7) lobes.push({ x: sx * (HALF_W - 1), z: (r() < 0.5 ? -1 : 1) * (HALF_L - 4), r: 3 + r() * 2.5, lift: 1 + r() * 2 });
+  }
+  const lobeAt = (x, z) => { let best = 1e9, lift = 0; for (const l of lobes) { const d = Math.hypot(x - l.x, z - l.z) - l.r; if (d < best) { best = d; lift = l.lift * clamp(-d / l.r, 0, 1); } } return { d: best, lift }; };
+  const landD = (x, z) => {
+    const side = x < 0 ? -1 : 1;
+    const endT = smooth(clamp((HALF_L - Math.abs(z)) / 13, 0, 1));
+    const sm = 1.0 + endT * (2.6 + 7.5 * fbm(z * 0.05 + side * 7.3 + seed * 0.71, seed * 1.3));
+    const em = 0.3 + 1.4 * fbm(x * 0.17 + seed, z > 0 ? 3 : 9);
+    const rc = 4.5, qx = Math.abs(x) - (HALF_W + sm) + rc, qz = Math.abs(z) - (HALF_L + em) + rc;
+    const body = Math.hypot(Math.max(qx, 0), Math.max(qz, 0)) + Math.min(Math.max(qx, qz), 0) - rc;
+    const wob = (noise(x * 0.22 + seed, z * 0.22) - 0.5) * 2.6 + (noise(x * 0.7 - seed, z * 0.7) - 0.5) * 0.9;
+    const lb = lobeAt(x, z).d;
+    const k = 3, hh = clamp(0.5 + 0.5 * (lb - body) / k, 0, 1);
+    return lerp(lb, body, hh) - k * hh * (1 - hh) + wob;   // smooth union with the spurs
+  };
+  const EXT = 12;
+  const crystally = element === "ice" || element === "storm" || element === "darkness" || element === "abnormal" || element === "light";
+  const topCol = T.ground.map((g) => mix(g, T.rim[0], 0.28));
+  // top terrain heights (1×1 cells)
+  const tops = new Map(), tk = (x, z) => x * 1000 + z;
+  for (let z = Math.floor(Z0 - 3); z < Z1 + 3; z++) for (let x = Math.floor(X0 - EXT); x < X1 + EXT; x++) {
     const cx = x + 0.5, cz = z + 0.5;
-    const inGrid = cx > ox && cx < -ox && cz > oz && cz < -oz;
+    const d = landD(cx, cz);
+    if (d >= 0) continue;
+    const inGrid = Math.abs(cx) < COLS / 2 && Math.abs(cz) < ROWS / 2;
     if (inGrid) continue;
-    const plaza = Math.abs(cx) < 7.5 && (cz < oz || cz > -oz);
-    const edge = Math.min(cx - X0, X1 - cx, cz - Z0, Z1 - cz);
-    const ragged = noise(cx * 0.35 + seed, cz * 0.35) ;
-    if (edge < 1 && ragged < 0.45) continue;                 // a ragged outline
-    if (plaza) {
+    const plaza = Math.abs(cx) < 7.5 && Math.abs(cz) > ROWS / 2 && Math.abs(cz) < HALF_L + 0.6;
+    const dg = Math.max(Math.abs(cx) - COLS / 2, Math.abs(cz) - ROWS / 2);
+    let h, kind;
+    if (plaza) { kind = "plaza"; h = 0.2; }
+    else if (dg < 1.05) { kind = "curb"; h = 0.3 + noise(cx * 0.9 + seed, cz * 0.9) * 0.25; }
+    else {
+      kind = "land";
+      const hill = fbm(cx * 0.09 + seed * 2, cz * 0.09), ridge = 1 - Math.abs(fbm(cx * 0.05 - seed, cz * 0.05 + 4) * 2 - 1);
+      const base = 0.5 + smooth(clamp((dg - 1) / 4, 0, 1)) * (0.8 + 3.2 * hill + 2.2 * Math.pow(ridge, 3) * smooth(clamp((dg - 3) / 4, 0, 1)));
+      const lip = smooth(clamp(-d / 1.8, 0, 1));
+      h = Math.max(0.25, Math.round((0.3 + (base + lobeAt(cx, cz).lift - 0.3) * lip) * 2) / 2);
+    }
+    tops.set(tk(x, z), { x, z, cx, cz, d, h, kind, dg });
+  }
+  const topH = (x, z) => { const t = tops.get(tk(x, z)); if (t) return t.h; return Math.abs(x + 0.5) < COLS / 2 && Math.abs(z + 0.5) < ROWS / 2 ? 0 : -99; };
+  for (const t of tops.values()) {
+    const { cx, cz, h, kind } = t;
+    const n = [topH(t.x + 1, t.z), topH(t.x - 1, t.z), topH(t.x, t.z + 1), topH(t.x, t.z - 1)];
+    const sk = (n[0] >= h ? 1 : 0) | (n[1] >= h ? 2 : 0) | (n[2] >= h ? 16 : 0) | (n[3] >= h ? 32 : 0);
+    if (kind === "plaza") {
       const ring = Math.max(Math.abs(cx) - 5.5, Math.abs(cz - (cz < 0 ? oz - 3 : -oz + 3)) - 2.2);
-      terr.box(0.96, 0.4, 0.96, pick(T.rim, r), cx, -0.2 + (ring > 0 ? 0.12 : 0), cz, { top: shade(T.rimTop, 0.85 + r() * 0.2) });
+      terr.box(0.98, 1.1, 0.98, pick(T.rim, r), cx, -0.35 + (ring > 0 ? 0.12 : 0), cz, { top: shade(T.rimTop, 0.85 + r() * 0.2), skip: 8, jitter: 0.06 });
       continue;
     }
-    const dist = Math.min(Math.abs(Math.abs(cx) - COLS / 2), Math.abs(Math.abs(cz) - ROWS / 2));
-    const h = 0.25 + Math.max(0, dist) * 0.12 + fbm(cx * 0.4, cz * 0.4 + seed) * 0.8;
-    terr.box(1.0, h + 0.4, 1.0, pick(T.rim, r), cx, (h - 0.4) / 2, cz, { top: shade(T.rimTop, 0.82 + r() * 0.25) });
-    if (dist > 0.8 && r() < 0.17 && edge > 0.8) RIM[element](props, glow, cx, h, cz, r);
+    if (kind === "curb") {
+      const stone = r() < 0.3;
+      const gc2 = topCol[Math.floor(r() * 4)];
+      terr.box(1.0, h + 0.9, 1.0, stone ? pick(T.rim, r) : T.soil, cx, (h - 0.9) / 2, cz, { top: stone ? shade(T.rimTop, 0.85 + r() * 0.2) : shade(gc2, 0.95 + r() * 0.1), skip: 8 | sk, jitter: 0.08 });
+      continue;
+    }
+    const g = topCol[clamp(Math.floor(fbm(cx * 0.09 + seed, cz * 0.09) * 4.4 - 0.7), 0, 3)];
+    const edge = t.d > -1.3;
+    terr.box(1.0, h + 1.2, 1.0, edge ? shade(T.soil, 1.05) : T.soil, cx, (h - 1.2) / 2, cz, { top: shade(g, 0.94 + r() * 0.12), skip: 8 | sk, jitter: 0.07, ao: 0.8 });
+    // grass/frost tufts on the lip, props and bigger landmarks further in
+    if (edge && r() < 0.35) terr.box(0.35, 0.3, 0.35, shade(g, 1.15), cx + (r() - 0.5) * 0.6, h + 0.15, cz + (r() - 0.5) * 0.6);
+    if (!edge && t.dg > 3 && r() < 0.03) {
+      // rock outcrop
+      const w0 = 1.2 + r() * 1.4;
+      for (let q = 0; q < 3; q++) terr.box(w0 * (1 - q * 0.28), 0.9 + r() * 0.9, w0 * (0.9 - q * 0.25), shade(q ? T.rock : T.rim[1], 1.05 + q * 0.06), cx + (r() - 0.5) * 0.6, h + 0.45 + q * 0.85, cz + (r() - 0.5) * 0.6, { rotY: r() * TAU, top: q === 2 ? shade(g, 1.05) : undefined, skip: 8, jitter: 0.06 });
+      continue;
+    }
+    if (!edge && t.dg > 1.6) {
+      const k = r();
+      if (k < 0.2) RIM[element](props, glow, cx, h, cz, r);
+      else if (k < 0.25 && t.dg > 2.5) decorate(FLOAT_KIND[element], props, glow, cx, h, cz, 0.5 + r() * 0.3, r, T);
+      else if (k < 0.27 && crystally) crystal(glow, cx, h, cz, 0.35 + r() * 0.25, T.accent, r);
+    }
   }
 
-  // the underside: an inverted mountain in coarse strata, deepest under the middle
-  const step = 3;
-  for (let z = Z0; z < Z1; z += step) for (let x = X0; x < X1; x += step) {
-    const cx = x + step / 2, cz = z + step / 2;
-    const e = Math.min(cx - X0, X1 - cx, cz - Z0, Z1 - cz) / Math.min(HALF_W, HALF_L);
-    const depth = 1.4 + Math.pow(clamp(e, 0, 1), 0.75) * 15 * (0.7 + fbm(cx * 0.12 + seed, cz * 0.12) * 0.6);
-    const w = step + 0.05, inset = e < 0.06 ? 0.6 : 0;
-    const b1 = Math.min(depth, 1.6), b2 = Math.min(depth, depth * 0.62 + 1);
-    terr.box(w - inset, b1, w - inset, T.soil, cx, -0.4 - b1 / 2, cz, { skip: 4 });
-    if (depth > b1) terr.box(w - inset - 0.2, b2 - b1, w - inset - 0.2, T.rock, cx, -0.4 - b1 - (b2 - b1) / 2, cz, { skip: 4 });
-    if (depth > b2) terr.box(w - inset - 0.5, depth - b2, w - inset - 0.5, T.deep, cx, -0.4 - b2 - (depth - b2) / 2, cz, { skip: 4 });
-    if (e < 0.12 && r() < 0.45) HANG[element](props, glow, cx + (r() - 0.5) * 2, -0.4 - b1, cz + (r() - 0.5) * 2, r);
+  // a small elemental shrine on the widest stretch of each side
+  for (const sx of [-1, 1]) {
+    const best = [...tops.values()].filter((t) => t.kind === "land" && Math.sign(t.cx) === sx && t.d < -2.5 && t.dg > 3.5).sort((p, q) => q.dg - p.dg)[0];
+    if (!best) continue;
+    const { cx, cz, h } = best;
+    terr.box(3.2, 0.5, 3.2, WORLD.stone[1], cx, h + 0.25, cz, { top: WORLD.stoneTop, skip: 8 });
+    for (const [px, pz] of [[-1.1, -1.1], [1.1, -1.1], [-1.1, 1.1], [1.1, 1.1]]) terr.box(0.55, 2.2, 0.55, WORLD.stone[2], cx + px, h + 1.6, cz + pz, { top: WORLD.stoneTop });
+    terr.box(3.0, 0.4, 3.0, WORLD.stone[0], cx, h + 2.9, cz, { top: WORLD.stoneTop });
+    glow.box(0.8, 0.8, 0.8, T.accent, cx, h + 1.5, cz, { glow: 2.4, jitter: 0, ao: 1, rotY: 0.78, rotX: 0.6 });
+  }
+
+  // ---- the underside: an inverted mountain on a 2×2 grid ----------------
+  const Q = 2, under = new Map(), uk = (i, j) => i * 1000 + j;
+  for (let j = Math.floor((Z0 - 3) / Q); j <= Math.ceil((Z1 + 3) / Q); j++) for (let i = Math.floor((X0 - EXT) / Q); i <= Math.ceil((X1 + EXT) / Q); i++) {
+    const ux = i * Q + Q / 2, uz = j * Q + Q / 2;
+    const d = landD(ux, uz);
+    if (d > -0.4) continue;
+    const coast = -d, e = clamp(coast / 15, 0, 1);
+    const lobe = Math.max(0, fbm(ux * 0.12 + 40 + seed, uz * 0.12) - 0.52) / 0.48;
+    let depth = 1.5 + Math.pow(e, 0.85) * 22 * (0.55 + 0.9 * fbm(ux * 0.07 + seed, uz * 0.07 - seed)) + 16 * Math.pow(lobe, 1.4) * e;
+    depth = Math.round(depth / 1.5) * 1.5;
+    under.set(uk(i, j), { i, j, ux, uz, depth, coast });
+  }
+  const dep = (i, j) => { const u = under.get(uk(i, j)); return u ? u.depth : -1; };
+  const BAND = 3, TOPY = -0.5;
+  const fireVein = element === "fire";
+  for (const u of under.values()) {
+    const n = [dep(u.i + 1, u.j), dep(u.i - 1, u.j), dep(u.i, u.j + 1), dep(u.i, u.j - 1)];
+    let y = 0, b = 0;
+    while (y < u.depth) {
+      const y1 = Math.min(u.depth, (b + 1) * BAND);
+      const sk = (n[0] >= y1 ? 1 : 0) | (n[1] >= y1 ? 2 : 0) | (n[2] >= y1 ? 16 : 0) | (n[3] >= y1 ? 32 : 0);
+      const tt = clamp(y / 26, 0, 1);
+      const base = b === 0 ? T.soil : mix(T.rock, T.deep, tt);
+      const colr = shade(base, (b % 2 ? 0.94 : 1.04) * (0.96 + noise(u.i * 0.4 + b, u.j * 0.4) * 0.1));
+      const inset = b === 0 ? 0 : Math.min(0.5, b * 0.05);
+      terr.box(Q - inset + 0.04, y1 - y, Q - inset + 0.04, colr, u.ux, TOPY - (y + y1) / 2, u.uz, { skip: 4 | 8 | sk, jitter: 0.06, ao: 1 });
+      if (fireVein && b > 0 && u.coast < 4 && r() < 0.06) glow.box(Q + 0.12, 0.22, Q + 0.12, T.hot, u.ux, TOPY - y - 0.3, u.uz, { glow: 2.1, jitter: 0, ao: 1 });
+      y = y1; b++;
+    }
+    // stalactites under local low points
+    if (u.depth > 7 && n.every((v) => v <= u.depth)) {
+      let w = 1.5, yy = TOPY - u.depth;
+      for (let k = 0; k < 3; k++) { const hh = 1.6 + r() * 1.4; terr.box(w, hh, w, shade(T.deep, 0.9), u.ux + (r() - 0.5) * 0.3, yy - hh / 2, u.uz + (r() - 0.5) * 0.3, { skip: 4, jitter: 0.05, ao: 1 }); yy -= hh; w *= 0.62; }
+      if (crystally && r() < 0.6) glow.box(0.45, 1.4, 0.45, T.accent, u.ux, yy - 0.5, u.uz, { glow: 2.0, jitter: 0, ao: 1 });
+      if (fireVein && r() < 0.7) glow.box(0.35, 0.9, 0.35, T.hot, u.ux, yy - 0.3, u.uz, { glow: 2.3, jitter: 0, ao: 1 });
+    }
+    // roots, icicles, drips hanging from the lip
+    if (u.coast < 2.6 && r() < 0.32) HANG[element](props, glow, u.ux + (r() - 0.5) * 1.2, TOPY - Math.min(u.depth, 2.5), u.uz + (r() - 0.5) * 1.2, r);
+    // crystals jutting out of the rock
+    if (crystally && u.coast > 1.5 && u.coast < 5 && r() < 0.05) {
+      glow.push(u.ux, TOPY - u.depth * 0.45, u.uz, r() * TAU, Math.PI * (0.62 + r() * 0.2), 0, 1);
+      crystal(glow, 0, 0, 0, 0.5 + r() * 0.35, T.accent, r);
+      glow.pop();
+    }
+  }
+  // loose rocks drifting beside and beneath the island
+  for (let k = 0; k < 12; k++) {
+    const a = r() * TAU, side = Math.cos(a), along = Math.sin(a);
+    const px = side * (HALF_W + 4 + r() * 8), pz = along * (HALF_L - 6) * (0.2 + r() * 0.8), py = -3 - r() * 22;
+    const s2 = 0.8 + r() * 1.6;
+    terr.box(s2 * 1.6, s2, s2 * 1.4, T.rock, px, py, pz, { rotY: r() * TAU, top: topCol[1], jitter: 0.08 });
+    terr.box(s2, s2 * 1.1, s2 * 0.9, shade(T.deep, 1.1), px + 0.2, py - s2, pz - 0.1, { rotY: r() * TAU, skip: 4 });
+    if (crystally && r() < 0.4) glow.box(0.3, 0.9, 0.3, T.accent, px, py + s2 * 0.9, pz, { glow: 1.9, jitter: 0, ao: 1, rotZ: 0.3 });
+  }
+  // falls pouring off the long sides (water, lava, void…), fed by a little spring on the lip
+  const FALL = { nature: "water", ice: "water", light: "gold", storm: "water", fire: "lava", darkness: "void", abnormal: "void" }[element];
+  const fallMeshes = [];
+  if (FALL) {
+    const cand = [...tops.values()].filter((t) => t.kind === "land" && t.d > -0.9 && Math.abs(t.cz) < HALF_L - 14 && Math.abs(t.cx) > HALF_W);
+    const nF = 1 + Math.floor(r() * 2);
+    const placed = [];
+    for (let k = 0; k < 60 && placed.length < nF && cand.length; k++) {
+      const t = cand[Math.floor(r() * cand.length)];
+      if (placed.some((p) => Math.abs(p.cz - t.cz) < 18 && Math.sign(p.cx) === Math.sign(t.cx))) continue;
+      placed.push(t);
+      const sx = Math.sign(t.cx);
+      const f = fallMesh(FALL, 1.3, 46, 1.3, true);
+      f.position.set(t.cx + sx * 0.7, t.h - 23, t.cz);
+      fallMeshes.push(f);
+      const wc = { water: "#7fd0ff", gold: "#ffd27a", lava: T.hot, void: "#c79bff" }[FALL];
+      glow.box(1.1, 0.12, 2.4, wc, t.cx - sx * 0.2, t.h + 0.07, t.cz, { glow: FALL === "lava" ? 2.1 : 1.3, jitter: 0, ao: 1 });
+      glow.box(2.2, 0.12, 2.2, wc, t.cx - sx * 1.6, t.h + 0.07, t.cz, { glow: FALL === "lava" ? 2.1 : 1.3, jitter: 0, ao: 1 });
+    }
   }
 
   // obstacles (grid cells == 1): Circle's two obstacle variants per element, chosen by (r + c) % 2
@@ -512,6 +648,7 @@ export function buildCorridorIsland(DB, element, grid, seed = 1) {
   const outDisc = new THREE.Mesh(new THREE.CircleGeometry(2.3, 40), portalSwirl());
   outDisc.position.set(0, 2.35, extZ - 0.05); outDisc.renderOrder = 3;
   group.add(inDisc, outDisc);
+  for (const f of fallMeshes) group.add(f);
   group.userData = { element, entZ, extZ };
   return group;
 }
@@ -650,7 +787,7 @@ export function createWorld(scene, DB) {
       const entPt = corridorToWorld(L, k, COLS / 2, ROWS + END - 0.6, 0, V).clone();
       let pts1, pts2;
       if (n === 1) {
-        pts1 = [exitPt, { x: -18, z: -HALF_L - 6 }, { x: -HALF_W - 9, z: -10 }, { x: -HALF_W - 9, z: 18 }, { x: -9, z: gp.z - 1 }, { x: gp.x - 4.5, z: gp.z }];
+        pts1 = [exitPt, { x: -18, z: -HALF_L - 6 }, { x: -HALF_W - 17, z: -10 }, { x: -HALF_W - 17, z: 18 }, { x: -9, z: gp.z - 1 }, { x: gp.x - 4.5, z: gp.z }];
         pts2 = [{ x: gp.x, z: gp.z - 4.5 }, entPt];
       } else {
         const toG = new THREE.Vector3(gp.x - exitPt.x, 0, gp.z - exitPt.z);

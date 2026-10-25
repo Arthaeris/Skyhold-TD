@@ -44,7 +44,7 @@ const fallCache = new Map();
 function fallMat(kind, fade) {
   const k = kind + (fade ? "|f" : "");
   if (fallCache.has(k)) return fallCache.get(k);
-  const P = { water: ["#2f8fff", "#dff6ff", 1.15, 1.6], lava: ["#ff4a10", "#ffd27a", 2.2, 0.8], ice: ["#7fc8ff", "#f0fbff", 1.0, 0.08] }[kind];
+  const P = { water: ["#2f8fff", "#dff6ff", 1.15, 1.6], lava: ["#ff4a10", "#ffd27a", 2.2, 0.8], ice: ["#7fc8ff", "#f0fbff", 1.0, 0.08], void: ["#5a2aa8", "#e2c8ff", 1.7, 0.9], gold: ["#ffb83a", "#fff3c2", 1.6, 1.2] }[kind];
   const m = new THREE.ShaderMaterial({
     uniforms: { uTime: TIME, uA: { value: col(P[0]).clone() }, uB: { value: col(P[1]).clone() }, uK: { value: P[2] }, uS: { value: P[3] } },
     vertexShader: VUV, transparent: true, depthWrite: false, side: THREE.DoubleSide,
@@ -61,7 +61,7 @@ function fallMat(kind, fade) {
   fallCache.set(k, m);
   return m;
 }
-function fallMesh(kind, w, h, d, fade) {
+export function fallMesh(kind, w, h, d, fade) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), fallMat(kind, fade));
   m.renderOrder = 3;
   return m;
@@ -89,7 +89,7 @@ function portalMat(el) {
 // ---------------------------------------------------------------------------
 // decorations (trees, crystals, ruins …) shared by landmasses, islets and stacks
 // ---------------------------------------------------------------------------
-function crystal(g, x, y, z, s, color, r) {
+export function crystal(g, x, y, z, s, color, r) {
   g.push(x, y, z, r() * TAU, 0, 0, s);
   g.box(0.8, 3.4, 0.8, color, 0, 1.5, 0, { glow: 2.0, ao: 1, jitter: 0, rotZ: (r() - 0.5) * 0.35 });
   g.box(0.55, 2.2, 0.55, color, 0.75, 0.9, 0.25, { glow: 1.7, ao: 1, jitter: 0, rotZ: -0.35 });
@@ -103,7 +103,7 @@ function palm(b, x, y, z, s, r) {
   for (let k = 0; k < 5; k++) b.box(2.8, 0.3, 0.8, k % 2 ? "#2f7a3a" : "#3c9444", 0.3, 3.4, 0, { rotY: (k * TAU) / 5, rotZ: 0.18, jitter: 0.1 });
   b.pop();
 }
-function decorate(kind, lit, glow, x, y, z, s, r, T) {
+export function decorate(kind, lit, glow, x, y, z, s, r, T) {
   const rot = r() * TAU;
   switch (kind) {
     case "jungle": {
@@ -430,7 +430,7 @@ function buildLandmass(el, a, b, seed) {
 // ---------------------------------------------------------------------------
 // FLOATING ISLETS — grassy (or icy, ashen…) tops with stepped rock undersides, roots and crystals hanging
 // ---------------------------------------------------------------------------
-const FLOAT_KIND = { fire: "ember", ice: "pine", nature: "jungle", storm: "rods", light: "gold", darkness: "shadow", mech: "ruin", abnormal: "weird" };
+export const FLOAT_KIND = { fire: "ember", ice: "pine", nature: "jungle", storm: "rods", light: "gold", darkness: "shadow", mech: "ruin", abnormal: "weird" };
 function buildFloater(el, s, seed) {
   const L = LAND[el], T = THEMES[el], r = rng(seed);
   const lit = new Batch(seed), glow = new Batch(seed + 1), grp = new THREE.Group();
