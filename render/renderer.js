@@ -719,6 +719,13 @@ export function createRenderer(opts) {
 
   // ---- world-map labels (Circle prints enemy counts under each gate) ---------
   let labels = [];
+  const emotes = [];
+  function emote(seat, text) {
+    if (!labelLayer) return;
+    const d = document.createElement("div"); d.className = "emote-bubble"; d.textContent = text;
+    labelLayer.appendChild(d);
+    emotes.push({ seat, el: d, t: 3 });
+  }
   function makeLabels() {
     if (!labelLayer) return;
     labelLayer.innerHTML = "";
@@ -740,7 +747,7 @@ export function createRenderer(opts) {
       if (view.versus) {
         const seat = st.players[i]; if (!seat) return;
         let inside = 0; for (const e of st.enemies) if (e.owner === i) inside++;
-        html = `<b class="${i === view.me ? "me" : ""}">${seat.alive ? (i === view.me ? "YOU" : (view.anonymous ? "RIVAL " : "NPC ") + i) : "☠"}</b><span>${seat.alive ? "❤" + seat.lives + " · " + inside : "eliminated"}</span>`;
+        html = `<b class="${i === view.me ? "me" : ""}">${seat.alive ? (i === view.me ? "YOU" : (view.seatName ? view.seatName(i) : "NPC " + i).toUpperCase()) : "☠"}</b><span>${seat.alive ? "❤" + seat.lives + " · " + inside : "eliminated"}</span>`;
         d.classList.toggle("dead", !seat.alive);
       } else {
         let inside = 0, origin = 0;
@@ -750,6 +757,15 @@ export function createRenderer(opts) {
       }
       if (d._h !== html) { d.innerHTML = html; d._h = html; }
     });
+    // emote bubbles over a seat's gate
+    for (let k = emotes.length - 1; k >= 0; k--) {
+      const em = emotes[k];
+      em.t -= 1 / 60;
+      if (em.t <= 0 || !L.gates[em.seat]) { em.el.remove(); emotes.splice(k, 1); continue; }
+      toScreen(new THREE.Vector3(L.gates[em.seat].x, 6, L.gates[em.seat].z), sp);
+      em.el.style.transform = `translate(${sp.x.toFixed(1)}px, ${(sp.y - 40 - (3 - em.t) * 6).toFixed(1)}px) translate(-50%, -100%)`;
+      em.el.style.opacity = Math.min(1, em.t * 2).toFixed(2);
+    }
     const vd = labels.vortex;
     if (vd) {
       toScreen(new THREE.Vector3(L.vortex.x, 0, L.vortex.z), sp);
@@ -795,7 +811,7 @@ export function createRenderer(opts) {
   window.addEventListener("resize", () => resize());
 
   return {
-    render, resize, snapshotPositions, onEvents, previewRing, pick, panBy, zoomAt, setMode, enterField,
+    render, resize, snapshotPositions, onEvents, previewRing, pick, panBy, zoomAt, setMode, enterField, emote,
     debug: () => ({ builders: [...brec.values()].map((b) => ({ vis: b.group.visible, pos: b.group.position.toArray().map((x) => +x.toFixed(1)), parent: !!b.group.parent, kids: b.group.children.length })) }),
     groundAt, toScreen,
     get mode() { return mode; }, get fieldIndex() { return fieldIdx; }, get flying() { return !!fly; },

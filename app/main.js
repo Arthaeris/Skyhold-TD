@@ -22,6 +22,10 @@ import { towerThumb, enemyThumb, warmThumbs } from "../render/thumbs.js";
 import { createUI } from "../ui/shell.js";
 import { icon, sigil, setIconDB } from "../ui/icons.js";
 import { createSound } from "../audio/sound.js";
+import * as rt from "../net/rtdb.js";
+import { createSession, setActiveRoom } from "../net/session.js";
+import { createLockstep, TURN, DELAY, HASH_EVERY } from "../net/lockstep.js";
+import { createOnlineUI } from "../ui/online.js";
 
 const $ = (id) => document.getElementById(id);
 const DB = window.DB;
@@ -72,7 +76,12 @@ function isVersus() { return game.gameMode === "versus"; }
 function fieldId() { return game.gameMode === "coop" ? 0 : (isVersus() ? game.activeCorridor : game.me); }
 function fieldPlayer() { return game.state.players[fieldId()]; }
 function myPlayer() { return game.state.players[game.me]; }
-function seatName(i) { return i === game.me ? "You" : (game.anonymous ? "Rival " + i : "NPC " + i); }
+function seatName(i) {
+  if (i === game.me) return "You";
+  if (game.anonymous) return "Rival " + i;
+  if (game.online && game.online.names[i]) { const nm = game.online.names[i]; return nm + (game.online.kinds[i] === "npc" && !/^NPC/.test(nm) ? " (NPC)" : ""); }
+  return "NPC " + i;
+}
 function localSimMode() { return game.gameMode === "solo" || game.gameMode === "versus"; }
 
 // the view object the renderer + ui read (player resolves live) — same shape as Circle's
@@ -84,7 +93,7 @@ const view = {
   get field() { return game.state.players[fieldId()]; },
   get screen() { return game.screen; }, get view() { return game.view; },
   get activeCorridor() { return game.activeCorridor; },
-  get time() { return game.clock; }, get speed() { return game.speed; },
+  get time() { return game.online && game.state ? game.state.tick / SIM_HZ : game.clock; }, get speed() { return game.speed; },
   get selectedTowerId() { return game.selectedTowerId; }, set selectedTowerId(x) { game.selectedTowerId = x; },
   get selectedEnemyId() { return game.selectedEnemyId; }, set selectedEnemyId(x) { game.selectedEnemyId = x; },
   get buildTile() { return game.buildTile; }, set buildTile(x) { game.buildTile = x; },
@@ -94,11 +103,14 @@ const view = {
   get builderSkin() { return game.skin || "element"; },
   get spectate() { return game.spectate; },
   get anonymous() { return game.anonymous; },
+  get online() { return !!game.online; },
+  seatName: (i) => seatName(i),
 };
 
 // ---- command emitters (solo applies on the next tick) -------------------------
 function emit(c) {
   if (!game.driver || game.spectate) return;
+  if (game.online && game.online.catchingUp) { ui.toast("Still catching up…", "warn"); return; }
   if (c.player == null) c.player = game.me;
   if (c.masteryLevel == null && (c.type === "BuildTower" || c.type === "MutateTower")) {
     const corr = fieldPlayer().corridors[c.corridorId];
@@ -294,15 +306,15 @@ function setupPreview(s, sel) {
 }
 let setupSel = 0;
 
-function startRun(cfg, seed, replay) {
+function startRun(cfg, seed, replay, online) {
   game.gameMode = cfg.gameMode || "solo";
   game.mode = cfg.mode;
   const ruleset = cfg.ruleset || "expanded";
   const mods = ruleset === "expanded" ? Object.assign({}, setup.mods, cfg.mods || {}) : {};
   const diff = DIFFICULTY[cfg.difficulty || "normal"] || DIFFICULTY.normal;
   let players, mode = cfg.mode, economy = cfg.economy;
-  if (replay) {
-    // a replay re-creates the exact recorded match
+  if (replay || online) {
+    // a replay (or an online match) brings its own exact config
     game.state = null;
   } else if (game.gameMode === "versus") {
     const seats = Math.max(3, Math.min(8, cfg.corridors || 4));
@@ -321,7 +333,7 @@ function startRun(cfg, seed, replay) {
     players = [{ corridorCount, elements: cfg.elements.slice(0, corridorCount) }];
     if (cfg.challenge) mode = "loop";
   }
-  const stateCfg = replay ? replay.cfg : { seed: seed != null ? seed : ((Math.random() * 1e9) | 0), mode, gameMode: game.gameMode, economy, statusMode: cfg.status, players, ruleset, mods, challenge: cfg.challenge || null };
+  const stateCfg = online ? online.stateCfg : replay ? replay.cfg : { seed: seed != null ? seed : ((Math.random() * 1e9) | 0), mode, gameMode: game.gameMode, economy, statusMode: cfg.status, players, ruleset, mods, challenge: cfg.challenge || null };
   game.state = createState(bal, structuredClone(stateCfg));
   game.runCfg = { ...cfg, ruleset, mods, stateCfg };
   game.recLog = replay ? null : [];
@@ -331,26 +343,191 @@ function startRun(cfg, seed, replay) {
   game.skin = xmeta.skin || "element";
   game.difficulty = cfg.difficulty || "normal";
   document.body.dataset.spectate = replay ? "replay" : "";
-  game.me = 0; game.speed = 1; game.clock = 0; game.paused = false;
+  game.me = online ? online.me : 0; game.speed = 1; game.clock = 0; game.paused = false;
+  if (!online && game.online) stopOnline();
   game.view = "world"; game.activeCorridor = 0;
   game.selectedTowerId = game.selectedEnemyId = game.buildTile = null; game.buildPreview = null;
   game.autoWave = cfg.pacing === "auto"; game.autoT = null; refreshAutoBtn();
-  game.driver = replay ? makeReplayDriver(game.state, replay.log) : makeSoloDriver(game.state);
-  if (!replay) setupBots(); else bots = [];
+  game.driver = online ? makeOnlineDriver(game.state, online) : replay ? makeReplayDriver(game.state, replay.log) : makeSoloDriver(game.state);
+  if (!replay && !online) setupBots(); else bots = [];
+  document.body.dataset.online = online ? "1" : "";
   setupSendButton();
   showScreen("game");
   ui.closeAllPanels();
   renderer.render(view, 1);       // builds the ring for this run
   setView("world", false);
   ui.updateTopBar(); ui.updateEnemyOverview(); ui.updateWavePanel();
-  if (replay) ui.toast("Watching replay — " + (replay.title || ""));
+  if (online) ui.toast(online.rejoin ? "Rejoining — catching up with the match…" : "Online match! The first wave starts in 30 seconds.", "gold");
+  else if (replay) ui.toast("Watching replay — " + (replay.title || ""));
   else if (game.state.challenge) ui.toast("Challenge: " + game.state.challenge.def.name + (game.state.challenge.hard ? " (Hard)" : ""), "boss");
   else ui.toast("Build your defenses, then start the wave.");
   sound.play("whoosh");
   warmThumbs(DB, DB.TOWERS.map((t) => t.id));
   refreshReplayBar();
-  if (!replay) { xmeta.played = (xmeta.played || 0) + 1; saveXMeta(); }
+  if (!replay && !(online && online.rejoin)) { xmeta.played = (xmeta.played || 0) + 1; saveXMeta(); }
   return stateCfg.seed;
+}
+
+// ---------------------------------------------------------------------------
+// ONLINE (Firebase Realtime Database, lockstep) — see net/lockstep.js
+// ---------------------------------------------------------------------------
+let session = null, onlineUI = null;
+function ensureSession() {
+  if (session) return session;
+  session = createSession({ version: DB.contentHash, defaultElement: DB.availableElements(masteryMap())[0], defaultMods: { builders: true, lifeSteal: true, sendStock: true } });
+  onlineUI = createOnlineUI({
+    DB, session, toast: (m, k) => ui.toast(m, k), sfx: (n) => sound.play(n), backend: rt.backendName(),
+    availableElements: () => DB.availableElements(masteryMap()),
+    onHostStart: () => {
+      const avail = DB.ELEMENT_ORDER;
+      const mods = { builders: true, lifeSteal: true, sendStock: true, ...((session.room.cfg && session.room.cfg.mods) || {}) };
+      session.start((Math.random() * 1e9) | 0, mods, avail).catch((e) => ui.toast("Couldn't start: " + e.message, "warn"));
+    },
+    onStart: () => {
+      if (game.online && game.online.code === session.code) return;
+      if (session.seat < 0) return;
+      beginOnline(rt.serverNow() - (session.room.start.at || 0) > 8000); // joining a match already under way = rejoin
+    },
+    onEmote: (s, text) => renderer.emote && renderer.emote(s, text),
+  });
+  return session;
+}
+async function openOnline(prefill) {
+  ensureSession();
+  try { await session.connect(); } catch (e) { ui.toast("Couldn't reach the online service: " + (e.message || e), "warn"); return; }
+  onlineUI.open(prefill);
+}
+function beginOnline(rejoin) {
+  const st = session.room.start; if (!st) return;
+  const players = st.players.map((p) => { const D = DIFFICULTY[p.diff] || DIFFICULTY.normal; return { corridorCount: 1, elements: [p.el], incomeMult: p.kind === "npc" ? D.incomeMult : 1, goldBonus: p.kind === "npc" ? D.goldBonus : 0 }; });
+  const mods = { ...st.mods, autoWave: 35, firstWave: 30 };
+  const stateCfg = { seed: st.seed, mode: "endless", gameMode: "versus", economy: "shared", statusMode: "standard", players, ruleset: "expanded", mods };
+  onlineUI.close();
+  game.online = { hlog: new URLSearchParams(location.search).has("nettest") ? {} : null, code: session.code, me: session.seat, n: players.length, names: st.players.map((p) => p.name), kinds: st.players.map((p) => p.kind), rejoin, catchingUp: rejoin, waitSince: 0, lastElect: 0, hashWarned: false };
+  startRun({ gameMode: "versus", mode: "endless", economy: "shared", status: "standard", pacing: "manual", elements: [players[session.seat].elements[0]], ruleset: "expanded", mods, difficulty: "normal", corridors: players.length }, st.seed, null, { stateCfg, me: session.seat, rejoin });
+  if (!rejoin) session.armPresence(session.seat);
+  setView("world", true);
+  enterCorridor(session.seat);
+}
+function stopOnline() {
+  const o = game.online; if (!o) return;
+  if (o.net) o.net.stop();
+  game.online = null;
+  document.body.dataset.online = "";
+  const w = $("net-wait"); if (w) w.classList.remove("show");
+}
+function onlineRequired(state) { const r = []; state.players.forEach((p, i) => { if (p.alive) r.push(i); }); return r; }
+function makeOnlineDriver(state, cfg) {
+  const o = game.online;
+  const net = createLockstep({
+    session, n: o.n, me: cfg.me,
+    onDesync: (t) => { if (!o.hashWarned) { o.hashWarned = true; ui.toast("⚠ Out of sync with the other players (turn " + t + "). The match may play differently on each screen.", "warn"); console.warn("[skyhold] desync at turn", t); } },
+    onReject: (s) => { if (s === cfg.me && session.room.seats[cfg.me] && session.room.seats[cfg.me].bot) rt.update(session.path("seats/" + cfg.me), { bot: false, online: true }).catch(() => {}); },
+  });
+  o.net = net; o.execTurn = -1; o.stalled = false;
+  if (cfg.rejoin) net.setDrive(cfg.me, false);
+  const tick = () => {
+    const T = state.tick + 1;
+    let cmds = [];
+    if ((T - 1) % TURN === 0) {
+      const k = (T - 1) / TURN;
+      const req = onlineRequired(state);
+      if (!net.ready(k, req)) { if (!o.stalled) { o.stalled = true; o.waitSince = performance.now(); } return false; }
+      cmds = net.commandsFor(k);
+    }
+    o.stalled = false;
+    const ordered = C.orderCommands(cmds);
+    if (ordered.length && game.recLog && game.recLog.length < 60000) game.recLog.push({ t: T, c: C.serialize(ordered) });
+    step(state, ordered, SIM_DT);
+    afterTick(state);
+    if (T % TURN === 0) {
+      o.execTurn = T / TURN - 1;
+      if (o.execTurn % HASH_EVERY === 0 && !o.catchingUp) net.reportHash(o.execTurn, hashState(state));
+      if (o.hlog && o.execTurn % 10 === 0) { o.hlog[o.execTurn] = hashState(state); } // ?nettest: per-second hashes for the two-tab test
+    }
+    if (state.finished && !o.ended) { o.ended = true; session.markEnded(); setActiveRoom(null); }
+    return true;
+  };
+  return {
+    queue(c) { if (c.type === "SetSpeed" || c.type === "StartWave") return; net.queue(c); },
+    tick,
+  };
+}
+// per frame: send acks, catch up, run the driver election and NPCs, show who we're waiting for
+function onlineFrame(dt) {
+  const o = game.online; if (!o || !o.net || !game.state) return;
+  const st = game.state, net = o.net, seats = session.room.seats || {};
+  const req = onlineRequired(st);
+  // catch up when behind (a rejoin, or a slow device): run extra ticks within a time budget
+  const others = req.filter((s) => s !== o.me);
+  const target = others.length ? net.minUp(others) : net.maxUp();
+  if (o.execTurn < target - DELAY - 2) {
+    const t0 = performance.now(), budget = o.catchingUp ? 28 : 8;
+    while (performance.now() - t0 < budget && o.execTurn < target - DELAY) { if (game.driver.tick() === false) break; }
+  }
+  if (o.catchingUp && o.execTurn >= target - DELAY - 2) {
+    o.catchingUp = false;
+    session.armPresence(o.me).then(() => rt.update(session.path("seats/" + o.me), { bot: false })).catch(() => {});
+    ui.toast("Back in the match — your corridor is yours again.", "gold");
+  }
+  // whose seats do I write? mine (unless an NPC is still holding it), and the bot seats if I'm the driver
+  const now = performance.now();
+  if (now - o.lastElect > 500) {
+    o.lastElect = now;
+    let driver = -1;
+    for (let i = 0; i < o.n; i++) { const s = seats[i]; if (s && s.kind === "human" && s.online === true) { driver = i; break; } }
+    const iDrive = driver === o.me && !o.catchingUp;
+    const mine = seats[o.me];
+    net.setDrive(o.me, !o.catchingUp && !(mine && mine.bot));
+    for (let i = 0; i < o.n; i++) {
+      if (i === o.me) continue;
+      const s = seats[i] || {};
+      const botSeat = s.kind === "npc" || s.bot === true;
+      net.setDrive(i, iDrive && botSeat);
+      // take over a seat whose player has been gone for 30 s
+      if (iDrive && s.kind === "human" && !s.bot && s.online === false && s.offAt && rt.serverNow() - s.offAt > 30500 && st.players[i] && st.players[i].alive) {
+        rt.update(session.path("seats/" + i), { bot: true }).then(() => onlineUI.pushChat({ sys: true, n: "⚙", m: (s.name || "A player") + " is away — an NPC plays their corridor until they return." })).catch(() => {});
+      }
+    }
+    // NPC brains for the seats I drive
+    const want = [];
+    for (let i = 0; i < o.n; i++) if (i !== o.me && net.drives(i)) want.push(i);
+    bots = bots.filter((b) => want.includes(b.id));
+    for (const i of want) if (!bots.find((b) => b.id === i)) bots.push({ id: i, D: DIFFICULTY[(seats[i] && seats[i].diff) || "normal"] || DIFFICULTY.normal, nextAt: game.clock + 0.8 });
+  }
+  // acks are paced by the wall clock (not the frame rate), a little ahead of what we've run
+  if (!o.t0) o.t0 = now - Math.max(0, o.execTurn) * TURN * 1000 / SIM_HZ;
+  const wallTurn = Math.floor((now - o.t0) / (TURN * 1000 / SIM_HZ));
+  if (wallTurn < o.execTurn - 4) o.t0 = now - o.execTurn * TURN * 1000 / SIM_HZ; // don't let a stall bank up time
+  const ahead = Math.min(wallTurn + DELAY, o.execTurn + DELAY + 8);
+  net.pump(o.execTurn, document.hidden ? net.maxUp() + 12 : ahead);
+  // the waiting banner
+  const w = $("net-wait");
+  if (w) {
+    const waiting = o.stalled && now - o.waitSince > 700 ? net.waitingFor(o.execTurn + 1, req).filter((s) => s !== o.me) : [];
+    if (waiting.length) {
+      const parts = waiting.map((i) => { const s = seats[i] || {}; const name = s.name || seatName(i); if (s.online === false && s.offAt && !s.bot) { const left = Math.max(0, Math.ceil(30 - (rt.serverNow() - s.offAt) / 1000)); return `${name} <i>(disconnected — NPC takes over in ${left}s)</i>`; } return name; });
+      const html = `⏳ Waiting for ${parts.join(", ")}…`;
+      if (w._h !== html) { w.innerHTML = html; w._h = html; }
+      w.classList.add("show");
+    } else w.classList.remove("show");
+  }
+  // shared wave timer on the dock
+  const b = $("quick-start-wave");
+  if (b && st.nextWaveTick != null) {
+    const secs = Math.max(0, Math.ceil((st.nextWaveTick - st.tick) / SIM_HZ));
+    const html = `${icon("wave", "xs")} Wave ${myPlayer().wave + 1} in ${secs}s`;
+    if (b._h !== html) { b.innerHTML = html; b._h = html; }
+    b.classList.add("disabled");
+  } else if (b && st.tick < 900) { const secs = Math.ceil((900 - st.tick) / SIM_HZ); const html = `${icon("wave", "xs")} First wave in ${secs}s`; if (b._h !== html) { b.innerHTML = html; b._h = html; } b.classList.add("disabled"); }
+}
+function leaveOnline() {
+  if (!game.online) return;
+  storeReplay("Left");
+  stopOnline();
+  if (session) session.leave();
+  game.driver = null;
+  showScreen("menu"); refreshMenu();
 }
 
 // ---------------------------------------------------------------------------
@@ -548,6 +725,7 @@ function endScreen(win) {
   sc.querySelector("#end-title").className = win ? "win" : "lose";
   const eb = sc.querySelector("#end-endless"); if (eb) eb.style.display = (win && game.mode !== "endless" && !ch) ? "" : "none";
   const spb = $("end-spectate"); if (spb) spb.style.display = (!win && isVersus() && game.state.x && !game.state.finished) ? "" : "none";
+  const eag = $("end-again"); if (eag) eag.textContent = game.online ? "Back to Online" : "Play Again";
   let html = `<div class="end-stat"><span>${icon("wave", "xs")} Waves</span><b>${pl.wave}</b></div><div class="end-stat"><span>${icon("skull", "xs")} Kills</span><b>${pl.stats.kills}</b></div><div class="end-stat"><span>${icon("trophy", "xs")} Bosses</span><b>${pl.stats.bossesKilled}</b></div><div class="end-stat"><span>${icon("star", "xs")} Score</span><b>${pl.stats.score}</b></div>`;
   if (win && !ch) {
     const seen = new Set();
@@ -788,6 +966,8 @@ function boot() {
     if (i < steps.length) setTimeout(work, 0);
     else {
       showScreen("menu"); refreshMenu(); renderer.setMode("menu", true);
+      const roomQ = new URLSearchParams(location.search).get("room");
+      if (roomQ) setTimeout(() => openOnline(roomQ), 300);
       // portraits for the menus are drawn in the background, a few per frame
       setTimeout(() => { Object.keys(DB.ENEMIES).forEach((k) => enemyThumb(DB, k)); warmThumbs(DB, DB.TOWERS.map((t) => t.id)); }, 600);
     }
@@ -797,6 +977,7 @@ function boot() {
   loop = createLoop({
     onTick: () => { if (game.driver && game.screen === "game") game.driver.tick(); },
     onFrame: (dt, running) => {
+      if (game.online && game.screen === "game") onlineFrame(dt);
       if (!running) return;
       game.clock += dt;
       if (game.autoT != null) {
@@ -812,11 +993,11 @@ function boot() {
       if (game.screen !== "game" || game.paused || !game.state) return false;
       return phaseRunning();
     },
-    renderFps: 60,
+    renderFps: +(new URLSearchParams(location.search).get("fps") || 60), // ?fps= (dev/testing)
   });
   loop.start();
   setInterval(() => { if (game.screen === "game" && game.state) { ui.updateTopBar(); ui.refreshPanels(); ui.updateEnemyOverview(); refreshAutoBtn(); refreshWaveFab(); if (game.spectate) refreshReplayBar(); } }, 250);
-  window.__skyhold = { game, view, renderer, cmd, DB, startRun, setView, enterCorridor, onTap, ui, botTick, openStats, openReplays, openChallenges, endScreen, watchReplay, loadReplays };
+  window.__skyhold = { openOnline, getSession: () => session, leaveOnline, game, view, renderer, cmd, DB, startRun, setView, enterCorridor, onTap, ui, botTick, openStats, openReplays, openChallenges, endScreen, watchReplay, loadReplays };
   // dev/test helper: fast-forward n ticks (bots included)
   window.__skyhold.ff = (n) => { for (let i = 0; i < n && game.driver; i++) { game.clock += 1 / 30; botTick(); game.driver.tick(); if (game.state.finished) break; } return game.state.tick; };
 }
@@ -827,6 +1008,7 @@ function refreshAutoBtn() {
 }
 function phaseRunning() {
   if (!game.state) return false;
+  if (game.online) return !game.state.finished; // online: the world never stops for one player
   if (game.spectate) return game.replay ? true : !game.state.finished;
   const pl = game.state.players[game.me]; return ["build", "wave", "prep", "endboss"].includes(pl.phase);
 }
@@ -838,11 +1020,13 @@ function bindUI() {
   bind("btn-continue", () => { if (hasRun()) continueRun(); });
   bind("btn-mastery", () => ui.openMastery());
   bind("btn-menu-save", () => { const m = $("save-modal"); if (m) m.classList.add("show"); });
-  bind("btn-multiplayer", () => ui.toast("Multiplayer (Co-op & Compete) is coming to Skyhold soon.", "warn"));
+  bind("btn-multiplayer", () => openOnline());
+  bind("btn-chat", () => onlineUI && onlineUI.toggleChatInput());
+  bind("btn-emote", () => onlineUI && onlineUI.toggleEmotes());
   bind("btn-challenges", openChallenges);
   bind("btn-replays", openReplays);
   bind("pause-stats", () => { openStats(); });
-  bind("end-spectate", () => { const sc = $("end-screen"); if (sc) sc.classList.remove("show"); game.spectate = true; game.paused = false; document.body.dataset.spectate = "live"; refreshReplayBar(); ui.toast("Spectating — the match plays on without you."); });
+  bind("end-spectate", () => { const sc = $("end-screen"); if (sc) sc.classList.remove("show"); game.spectate = !game.online; game.paused = false; document.body.dataset.spectate = "live"; refreshReplayBar(); ui.toast("Spectating — the match plays on without you."); });
   bind("end-replay", () => { const sc = $("end-screen"); if (sc) sc.classList.remove("show"); const r = loadReplays()[0]; if (r) watchReplay(r); else ui.toast("No replay saved for this match.", "warn"); });
   document.querySelectorAll("[data-ruleset]").forEach((b) => b.onclick = () => { setup.ruleset = b.dataset.ruleset; setup._lastTouched = "ruleset"; ui.renderSetup(setup, avail()); sound.play("click"); });
   document.querySelectorAll("[data-diff]").forEach((b) => b.onclick = () => { setup.difficulty = b.dataset.diff; setup._lastTouched = "difficulty"; ui.renderSetup(setup, avail()); sound.play("click"); });
@@ -914,15 +1098,15 @@ function bindUI() {
     refreshAutoBtn();
     ui.toast(game.autoWave ? "Auto wave-start ON — waves begin 5s after a clear" : "Auto wave-start OFF");
   });
-  bind("quick-speed-cycle", () => { game.speed = game.speed >= 3 ? 1 : game.speed + 1; ui.updateWavePanel(); sound.play("click"); });
+  bind("quick-speed-cycle", () => { if (game.online) return; game.speed = game.speed >= 3 ? 1 : game.speed + 1; ui.updateWavePanel(); sound.play("click"); });
   bind("btn-send-panel", () => ui.toggleSendPanel());
   bind("btn-settings-ingame", () => togglePause(true));
   bind("pause-resume", () => togglePause(false));
   bind("pause-restart", () => { togglePause(false); startRun(rematchCfg()); });
   bind("pause-save", () => { autosave(); ui.toast("Run saved to this device"); });
-  bind("pause-exit", () => { togglePause(false); storeReplay("Abandoned"); game.driver = null; showScreen("menu"); refreshMenu(); });
-  bind("end-again", () => { const sc = $("end-screen"); if (sc) sc.classList.remove("show"); startRun(rematchCfg()); });
-  bind("end-menu", () => { const sc = $("end-screen"); if (sc) sc.classList.remove("show"); game.driver = null; showScreen("menu"); refreshMenu(); });
+  bind("pause-exit", () => { togglePause(false); if (game.online) { leaveOnline(); return; } storeReplay("Abandoned"); game.driver = null; showScreen("menu"); refreshMenu(); });
+  bind("end-again", () => { const sc = $("end-screen"); if (sc) sc.classList.remove("show"); if (game.online) { leaveOnline(); openOnline(); return; } startRun(rematchCfg()); });
+  bind("end-menu", () => { const sc = $("end-screen"); if (sc) sc.classList.remove("show"); if (game.online) { leaveOnline(); return; } game.driver = null; showScreen("menu"); refreshMenu(); });
   bind("btn-bestiary", () => ui.openBestiary());
   bind("end-endless", () => { const sc = $("end-screen"); if (sc) sc.classList.remove("show"); game.state.players[game.me].phase = "build"; game.state.mode = "endless"; game.mode = "endless"; ui.updateTopBar(); ui.updateWavePanel(); ui.toast("Endless Mode!"); });
   // Save / Import / Export (Circle's flow)
@@ -949,7 +1133,8 @@ function bindUI() {
     else if (e.key.toLowerCase() === "w") setView("world");
     else if (e.key === "ArrowLeft" || e.key.toLowerCase() === "q") enterCorridor((game.activeCorridor - 1 + corridorNavCount()) % corridorNavCount());
     else if (e.key === "ArrowRight" || e.key.toLowerCase() === "e") enterCorridor((game.activeCorridor + 1) % corridorNavCount());
-    else if (e.key === "1" || e.key === "2" || e.key === "3") { game.speed = +e.key; ui.updateWavePanel(); }
+    else if (e.key === "Enter" && game.online) { e.preventDefault(); onlineUI.toggleChatInput(true); }
+    else if ((e.key === "1" || e.key === "2" || e.key === "3") && !game.online) { game.speed = +e.key; ui.updateWavePanel(); }
   });
 }
 function bind(id, fn) { const e = $(id); if (e) e.onclick = (ev) => { sound.unlock(); fn(ev); }; }
@@ -977,7 +1162,10 @@ function togglePause(force) {
   const o = $("pause-overlay");
   const want = force != null ? force : !(o && o.classList.contains("show"));
   if (o) o.classList.toggle("show", want);
-  game.paused = want;
+  game.paused = want && !game.online; // online: the pause menu doesn't stop the match
+  const pr = $("pause-restart"); if (pr) pr.style.display = game.online ? "none" : "";
+  const ph = $("pause-title"); if (ph) ph.textContent = game.online ? "Menu — the match keeps running" : "Paused";
+  const px = $("pause-exit"); if (px) px.textContent = game.online ? "Leave Match" : "Exit to Menu";
   refreshQualityButtons();
 }
 function setupSendButton() { const b = $("btn-send-panel"); if (!b) return; b.style.display = (game.gameMode === "competitive" || game.gameMode === "versus") ? "" : "none"; }

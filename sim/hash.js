@@ -88,6 +88,7 @@ export function hashState(state) {
     }
     for (const e of state.enemies) { h = mixInt(h, e.shieldHp | 0); h = mixInt(h, e.invulnT | 0); }
     h = mixInt(h, state.zones.length);
+    h = mixInt(h, state.nextWaveTick | 0);
   }
   return h >>> 0;
 }

@@ -23,7 +23,7 @@ Open <http://localhost:8000>. three.js r186 and the fonts come from CDNs, so the
 - **Modes:**
   - Solo, with Loop, Single and Endless waves, 1–8 corridors, Gold or Essence economy, Single or Stacking statuses, and Manual or Auto pacing.
   - Vs NPCs, with Circle's maze-building bots, sends and the send panel.
-  - Co-op and Compete are shown as *Soon*. The sim supports them; only the network lobby is missing.
+  - **Play Online:** Vs for 2–8 players over Firebase, with room codes, NPC seats, chat and emotes, and rejoin after a disconnect. Add `?mocknet` to test with two local tabs. Co-op and Compete are still *Soon*.
 - **Circle's shell:**
   - Menu, setup, HUD, survivors-by-origin panel, corridor nav and the wave dock with its next-wave preview.
   - Radial build and tower rings with tap-again-to-confirm, the tower sheet with stats, targeting, synergies and mutations, the enemy sheet, boss bar and toasts.

@@ -52,7 +52,7 @@ export function createLoop(opts) {
       accumulator += dtReal * (getSpeed() || 1);
       let ticks = 0;
       while (accumulator >= SIM_DT_SEC && ticks < maxTicksPerFrame) {
-        onTick(SIM_DT_FX);
+        if (onTick(SIM_DT_FX) === false) { accumulator = Math.min(accumulator, SIM_DT_SEC); break; } // the sim is waiting (online lockstep)
         accumulator -= SIM_DT_SEC;
         ticks++;
       }

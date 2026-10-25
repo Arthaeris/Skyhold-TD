@@ -32,7 +32,7 @@ export function ringLayout(n) {
   const tanH = Math.tan(half);
   // far enough out that neighbouring islands never overlap (inner corner stays on its side of the
   // bisector) and the corner between two islands leaves room for the gate island
-  const Rm = Math.max(HALF_W + (HALF_L + 9) / tanH, 34);
+  const Rm = n === 2 ? 50 : Math.max(HALF_W + (HALF_L + 9) / tanH, 34); // a duel: two islands side by side, the vortex between them
   for (let i = 0; i < n; i++) {
     const phi = -Math.PI / 2 + (TAU * i) / n + half;           // edge midpoint angle (y-down / z-down map)
     const x = Math.cos(phi) * Rm, z = Math.sin(phi) * Rm;

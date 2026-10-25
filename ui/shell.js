@@ -198,7 +198,7 @@ export function createUI(opts) {
       v.state.players.forEach((p, i) => {
         const el = DB.ELEMENTS[p.elements[0]];
         let inside = 0; for (const e of v.state.enemies) if (e.owner === i) inside++;
-        const name = i === v.me ? "You" : (v.anonymous ? "Rival " : "NPC ") + i;
+        const name = v.seatName ? v.seatName(i) : (i === v.me ? "You" : (v.anonymous ? "Rival " : "NPC ") + i);
         const hide = v.anonymous && i !== v.me;
         html += `<div class="ov-row ${p.alive ? "" : "dead"}" data-ci="${i}">
           <span class="ov-el" style="color:${hide ? "#c8c8e0" : el.color}">${hide ? "🎭" : sigil(p.elements[0], "xs")} ${name}</span>
@@ -227,6 +227,8 @@ export function createUI(opts) {
     if (pl.phase === "prep") label = `${icon("skull")} Summon Boss`;
     if (pl.phase === "endboss") label = "Boss Active";
     const b = $("quick-start-wave");
+    if (v.online) { const sb0 = $("quick-speed-cycle"); if (sb0) sb0.style.display = "none"; updateWavePreview(); return; }
+    { const sb0 = $("quick-speed-cycle"); if (sb0) sb0.style.display = ""; }
     if (b) { if (b._h !== label) { b.innerHTML = label; b._h = label; } b.classList.toggle("disabled", pl.phase === "endboss"); b.classList.toggle("boss", pl.phase === "prep"); }
     const sb = $("quick-speed-cycle"); if (sb) sb.innerHTML = `${icon("speed")}<span>×${v.speed}</span>`;
     updateWavePreview();
@@ -370,7 +372,7 @@ export function createUI(opts) {
       <div class="ep-head">${e.boss ? "☠ " : ""}${name}${e.end ? " (END BOSS)" : ""}${e.sent ? " · SENT" : ""}${affix ? ` · ${affix.icon} ${affix.name.toUpperCase()}` : ""}</div>
       <div class="exp-bar big"><div style="width:${Math.min(1, Math.max(0, e.hp) / e.maxHp) * 100}%;background:#ff4d6d"></div></div>
       <div class="exp-label">${Math.max(0, toI(e.hp))} / ${toI(e.maxHp)} HP</div></div></div>
-      <div class="tp-stats">${statRow("Origin", sigil(oid, "xs") + " " + oel.name)}${statRow("Loops", e.loopCount)}${statRow("Armor", toI(e.armor) + (e.auraArmor ? " +" + toI(e.auraArmor) : ""))}${statRow("Reward", e.reward)}${e.shieldHp > 0 ? statRow("Shield", toI(e.shieldHp)) : ""}${e.sentBy != null && v.versus ? statRow("Sent by", e.sentBy === v.me ? "You" : (v.anonymous ? "Rival " + e.sentBy : "NPC " + e.sentBy)) : ""}</div>
+      <div class="tp-stats">${statRow("Origin", sigil(oid, "xs") + " " + oel.name)}${statRow("Loops", e.loopCount)}${statRow("Armor", toI(e.armor) + (e.auraArmor ? " +" + toI(e.auraArmor) : ""))}${statRow("Reward", e.reward)}${e.shieldHp > 0 ? statRow("Shield", toI(e.shieldHp)) : ""}${e.sentBy != null && v.versus ? statRow("Sent by", v.seatName ? v.seatName(e.sentBy) : "NPC " + e.sentBy) : ""}</div>
       ${mobTraitsHtml(e.type, e)}
       <div class="ep-status">${stk.length ? stk.map((s) => `<span class="stag" style="--sc:${s.color}">${s.icon} ${s.name}</span>`).join("") : "<span class='dim'>No status</span>"}</div>
       ${adapts.length ? `<div class="ep-adapt-head">↻ Loop adaptations</div><div class="ep-status">${adapts.join("")}</div>` : ""}`;

@@ -46,9 +46,26 @@ Parity means these behave as they do in Circle, where the database describes the
 - **Armour classes** are recorded on every creep (unarmored, light, medium, heavy, fortified, ethereal), waiting for the damage-type pass.
 - **Multiplayer:** the expanded sim is deterministic (the soak runs every scenario twice and compares hashes every tick), so lockstep can use it as-is. Ranked play and ratings come with multiplayer.
 
+## Online play (Firebase Realtime Database)
+
+- **What it is:** online Vs for 2 to 8 seats, played on the Expanded rules at 1× speed, with waves on a shared 35-second timer (the first at 30 s).
+- **Rooms:** created and joined by a 5-letter code or an invite link (`?room=CODE`). The host sets the seat count, fills seats with NPCs (Easy to Insane) and sets the match rules. Everyone picks their own element and readies up.
+- **Netcode:** deterministic lockstep (`net/lockstep.js`). Turns are 3 ticks long and commands are scheduled 2 turns ahead, so every action takes effect 200 ms later for everyone.
+  - The database stores per seat an ack `u` and write-once commands `c/$turn`. The rules (`database.rules.json`) make these consistent, so no client ever runs a turn it doesn't have every command for.
+  - State hashes are compared every 15 s, and a toast warns if the screens drift apart.
+- **Disconnects:** the match waits (with a countdown banner). After 30 s the "driver" (the lowest connected human) flags the seat as bot and plays it with the NPC brain.
+  - The player can come back from the menu ("Rejoin room") or the invite link.
+  - Their client re-simulates the match from the seed and every recorded command, then takes the seat back.
+- **Social:** chat (140 characters, rate-limited) and eight emotes. Tap a name in the feed to mute that player.
+- **Identity:** Firebase anonymous auth plus a nickname.
+- **Local testing:** `?mocknet` switches to an in-browser stand-in server (`net/mock-worker.js`, a SharedWorker), so two tabs can play each other offline. It enforces the same lockstep rules.
+- **Setup:** paste `database.rules.json` into the Firebase console under Realtime Database → Regeln (Rules) and publish. Anonymous sign-in must be enabled, and the hosting domain must be in Authentication → Settings → authorised domains.
+- **Not yet:** the public lobby browser (backlog), team modes, ranked play, ratings and leaderboards.
+- **Data cost:** about 10 small writes per second per player. Rooms older than 6 hours can be deleted by any signed-in client (the rules allow it); there's no automatic clean-up yet.
+
 ## Backlog
 
-1. **Multiplayer.** Port `net/firebase.js` and `net/lockstep.js` and wire the Co-op and Compete cards. The sim already supports both modes.
+1. **Multiplayer, phase 2.** Public lobby browser, Co-op and team modes, ranked play and seasons. Online Vs is in.
 2. **Circle's unimplemented effects** (list above), done as deliberate, documented deviations.
 3. **Real-device pass.** The world is about 0.6M vertices with 4 corridors and 1M with 8 (the backdrop plus roughly 75k per corridor island), so check phone frame rates and thin it out on the Low tier if needed. This version was verified in headless Chromium with software WebGL (all screens, a full wave, Vs NPCs, at phone and desktop sizes). It still needs testing on actual phones for frame rate, touch feel and safe areas.
 4. **Enemy models.** Final art pass on the 7 enemies; walking and attack animation polish.

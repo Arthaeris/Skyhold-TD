@@ -24,7 +24,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&family=Nunito:wght@600;700;800;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=2">
+  <link rel="stylesheet" href="style.css?v=3">
   <script type="importmap">
     { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.min.js" } }
   </script>
@@ -65,7 +65,7 @@
         <button id="btn-replays" class="btn">▶ Replays <i class="pill">0</i></button>
         <button id="btn-bestiary" class="btn">📖 Bestiary</button>
       </div>
-      <button id="btn-multiplayer" class="btn ghost soon">Multiplayer <span class="pill">Soon</span></button>
+      <button id="btn-multiplayer" class="btn">🌐 Play Online</button>
     </div>
   </section>
 
@@ -189,6 +189,10 @@
       <div id="radial-menu"></div>
       <button id="wave-fab" class="btn primary" style="display:none" aria-label="Start next wave">▶</button>
       <div id="replay-bar" class="glass"></div>
+      <div id="net-wait" class="glass"></div>
+      <div id="chat-feed"></div>
+      <div id="chat-input-row" class="glass"><input id="chat-input" maxlength="140" placeholder="Message everyone… (Enter)"><button class="btn small" id="chat-send">Send</button></div>
+      <div id="emote-bar" class="glass"></div>
     </div>
     <div id="quick-wave-controls" class="glass">
       <button id="dock-handle" aria-label="Collapse controls">▾</button>
@@ -197,12 +201,14 @@
         <button id="quick-auto-wave" class="btn ghost dock-btn" aria-label="Toggle automatic wave start">Auto</button>
         <button id="quick-start-wave" class="btn primary">Start Wave</button>
         <button id="btn-send-panel" class="btn ghost dock-btn" style="display:none" aria-label="Open send menu"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M5 19l9.5-9.5M14.5 5H19v4.5L9.5 19M4 15l5 5"/><path d="M19 19 14 14M15 20l5-5"/></svg><span>Sends</span></button>
+        <button id="btn-chat" class="btn ghost dock-btn online-only" aria-label="Chat">💬</button>
+        <button id="btn-emote" class="btn ghost dock-btn online-only" aria-label="Emote">😀</button>
         <button id="quick-speed-cycle" class="btn ghost dock-btn">×1</button>
       </div>
     </div>
     <div id="pause-overlay" class="modal-overlay">
       <div class="modal glass">
-        <h2>Paused</h2>
+        <h2 id="pause-title">Paused</h2>
         <div class="modal-buttons">
           <button id="pause-resume" class="btn primary">Resume</button>
           <button id="pause-restart" class="btn">Restart</button>
@@ -240,6 +246,7 @@
   <div id="replays-modal" class="modal-overlay"></div>
   <div id="challenges-modal" class="modal-overlay"></div>
   <div id="bestiary-modal" class="modal-overlay"></div>
+  <div id="online-modal" class="modal-overlay"></div>
 
   <div id="save-modal" class="modal-overlay">
     <div class="modal wide glass">

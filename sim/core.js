@@ -318,6 +318,7 @@ function cmdSetTargetMode(state, pl, cmd) {
 }
 
 function cmdStartWave(state, pl, cmd) {
+  if (state.x && state.x.autoWave) return; // [X] the timer calls waves
   // Versus: waves are synchronized — the human seat (player 0) starts the wave
   // for EVERY living corridor at once, so all seats face equal PvE pressure.
   if (state.gameMode === "versus") {
@@ -1216,6 +1217,8 @@ function xMods(m) {
     lifeSteal: m.lifeSteal !== false, sendStock: m.sendStock !== false, builders: m.builders !== false,
     noFlyers: !!m.noFlyers, noDisruptors: !!m.noDisruptors, noStealth: !!m.noStealth, turbo: !!m.turbo,
     goldMult: F(m.goldMult || 1), livesMult: F(m.livesMult || 1),
+    // online Vs: waves start on a shared timer (seconds), nobody calls them
+    autoWave: m.autoWave ? (m.autoWave * SIM_HZ) | 0 : 0, firstWave: ((m.firstWave || 30) * SIM_HZ) | 0,
   };
 }
 function xInitPlayer(state, pl, pc) {
@@ -1329,6 +1332,13 @@ function xPostStep(state, dt) {
     z.t -= dt;
     for (const e of state.enemies) if (e.alive && e.corr === z.corr && e.owner === z.owner && fx.dist2(e.fx, e.fy, z.x, z.y) <= sq(z.r)) xHeal(e, fx.mul(fx.mul(e.maxHp, z.heal), dt));
     if (z.t <= 0) state.zones.splice(i, 1);
+  }
+  if (state.x.autoWave && state.gameMode === "versus") {
+    if (state.nextWaveTick == null) state.nextWaveTick = state.x.firstWave;
+    if (state.tick >= state.nextWaveTick) {
+      state.nextWaveTick = state.tick + state.x.autoWave;
+      for (const p of state.players) if (p.alive) queueWaveFor(state, p);
+    }
   }
   if (state.xSpawn.length) { const q = state.xSpawn; state.xSpawn = []; for (const m of q) xSpawnMinions(state, m); }
   if (state.xDirty) { state.enemies = state.enemies.filter((e) => e.alive); state.xDirty = false; }
