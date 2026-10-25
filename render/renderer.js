@@ -7,6 +7,7 @@
    view), and drifts around the ring behind the menus. */
 import * as THREE from "three";
 import * as fx from "../sim/fx.js";
+import * as pf from "../sim/pathfind.js";
 import { createWorld, ringLayout, corridorToWorld, worldToCorridor, COLS, ROWS } from "./world.js";
 import { createTowerModel, towerStage } from "./towers.js";
 import { createEnemyRenderer, enemyScale } from "./enemies.js";
@@ -133,10 +134,12 @@ export function createRenderer(opts) {
   function fieldPPU() {
     // portrait phones fit the corridor's width (like Circle, scrolling along its length);
     // landscape screens fit the whole corridor
+    // the whole build grid always fits at zoom 1 (portrait: just the grid; landscape: with the portal plazas)
     const cr = contentRect(true);
-    const byW = (cr.w - 12) / (COLS + 1.5);
-    const byH = cr.h / ((ROWS + 6) * Math.sin(EL_FIELD) + 3);
-    return (cr.w / cr.h < 0.85 ? byW : Math.min(byW, byH)) * pan.zoom * (closeView ? 1.2 : 1);
+    const portrait = cr.w / cr.h < 0.85;
+    const byW = (cr.w - 10) / (COLS + 0.8);
+    const byH = (cr.h - 6) / ((portrait ? ROWS + 1.2 : ROWS + 6) * Math.sin(EL_FIELD) + 2.5);
+    return Math.min(byW, byH) * pan.zoom * (closeView ? 1.2 : 1);
   }
   function clampPan() {
     pan.zoom = clamp(pan.zoom, 1, 4);
@@ -715,8 +718,93 @@ export function createRenderer(opts) {
     projs.end();
   }
 
+  // ---- "can't build here": hatched cells no 3×3 tower can cover -------------------------------
+  // Worked out on a private copy of the grid (never the sim's), in slices across frames.
+  const nb = (() => {
+    const tex = new THREE.DataTexture(new Uint8Array(COLS * ROWS * 4), COLS, ROWS, THREE.RGBAFormat);
+    tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; tex.needsUpdate = true;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(12), 3));
+    geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]), 2));
+    geo.setIndex([0, 2, 1, 0, 3, 2]);
+    const mat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      uniforms: { map: { value: tex }, dims: { value: new THREE.Vector2(COLS, ROWS) }, uOp: { value: 0 } },
+      vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+      fragmentShader: `varying vec2 vUv; uniform sampler2D map; uniform vec2 dims; uniform float uOp;
+        void main(){
+          float m = texture2D(map, vUv).r; if (m < 0.5 || uOp <= 0.0) discard;
+          vec2 g = vUv * dims; vec2 f = fract(g);
+          float stripe = step(0.5, fract((g.x + g.y) * 1.25));
+          float edge = 1.0 - step(0.06, min(min(f.x, f.y), min(1.0 - f.x, 1.0 - f.y)));
+          vec3 col = mix(vec3(0.03, 0.02, 0.08), vec3(0.92, 0.9, 1.0), stripe * 0.4);
+          gl_FragColor = vec4(col, uOp * (0.5 + stripe * 0.05 + edge * 0.12));
+        }`,
+    });
+    const mesh = new THREE.Mesh(geo, mat); mesh.renderOrder = 2; mesh.frustumCulled = false; mesh.visible = false;
+    scene.add(mesh);
+    return { tex, geo, mesh, mat, key: "", fi: -1, job: null, ready: false };
+  })();
+  function placeNoBuild(fi) {
+    const pos = nb.geo.attributes.position, v = new THREE.Vector3();
+    [[0, 0], [COLS, 0], [COLS, ROWS], [0, ROWS]].forEach(([u, w], k) => { corridorToWorld(L, fi, u, w, 0.045, v); pos.setXYZ(k, v.x, v.y, v.z); });
+    pos.needsUpdate = true; nb.fi = ringKey + "|" + fi;
+  }
+  function* noBuildJob(corr, G, S) {
+    const cols = G.cols, rows = G.rows;
+    const tmp = { grid: corr.grid.slice(), exit: corr.exit, entrance: corr.entrance, dist: null };
+    const grid = tmp.grid;
+    pf.computeFlow(tmp, cols, rows);
+    // the current route (+ its neighbours): only towers touching it could cut the path
+    const hot = new Uint8Array(cols * rows);
+    let c = corr.entrance.c, r = corr.entrance.r;
+    for (let g = 0; g < cols * rows; g++) {
+      for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) { const x = c + dc, y = r + dr; if (x >= 0 && y >= 0 && x < cols && y < rows) hot[y * cols + x] = 1; }
+      const k = pf.bestNeighbor(tmp, cols, rows, c, r); if (k == null) break;
+      c += pf.NB[k][0]; r += pf.NB[k][1];
+    }
+    const cover = new Uint8Array(cols * rows);
+    let n = 0;
+    for (let ar = 0; ar + S <= rows; ar++) for (let ac = 0; ac + S <= cols; ac++) {
+      let ok = true, isHot = false;
+      for (let rr = ar; rr < ar + S && ok; rr++) for (let cc = ac; cc < ac + S; cc++) {
+        if (grid[rr * cols + cc] !== 0) { ok = false; break; }
+        if (rr <= 1 && Math.abs(cc - corr.exit.c) <= 1) { ok = false; break; }
+        if (rr >= rows - 2 && Math.abs(cc - corr.entrance.c) <= 1) { ok = false; break; }
+        if (hot[rr * cols + cc]) isHot = true;
+      }
+      if (ok && isHot) {
+        for (let rr = ar; rr < ar + S; rr++) for (let cc = ac; cc < ac + S; cc++) grid[rr * cols + cc] = 2;
+        pf.computeFlow(tmp, cols, rows);
+        ok = pf.reachable(tmp, cols);
+        for (let rr = ar; rr < ar + S; rr++) for (let cc = ac; cc < ac + S; cc++) grid[rr * cols + cc] = 0;
+        if (++n % 40 === 0) yield;
+      }
+      if (ok) for (let rr = ar; rr < ar + S; rr++) for (let cc = ac; cc < ac + S; cc++) cover[rr * cols + cc] = 1;
+    }
+    const d = nb.tex.image.data;
+    for (let i = 0; i < cols * rows; i++) d[i * 4] = grid[i] === 0 && !cover[i] ? 255 : 0;
+    nb.tex.needsUpdate = true; nb.ready = true;
+  }
+  function syncNoBuild(view, dt) {
+    const own = view.versus ? fieldIdx === view.me : true;
+    const corr = ringCorridors(view)[fieldIdx];
+    const on = mode === "field" && !fly && own && corr && !view.spectate;
+    const u = nb.mat.uniforms.uOp;
+    u.value = clamp(u.value + (on && nb.ready ? dt * 4 : -dt * 6), 0, 1);
+    nb.mesh.visible = u.value > 0;
+    if (!corr || mode !== "field") return;
+    const G = view.state.grid;
+    let h = fieldIdx * 7919;
+    for (let i = 0; i < corr.grid.length; i++) if (corr.grid[i]) h = (h * 31 + i * (corr.grid[i] + 1)) | 0;
+    const key = ringKey + "|" + fieldIdx + ":" + h;
+    if (key !== nb.key) { nb.key = key; nb.job = noBuildJob(corr, G, DB.CONFIG.towerSize); if (nb.fi !== ringKey + "|" + fieldIdx) { placeNoBuild(fieldIdx); u.value = 0; nb.ready = false; } }
+    if (nb.job) { const t0 = performance.now(); while (performance.now() - t0 < 6) { if (nb.job.next().done) { nb.job = null; break; } } }
+  }
+
   // the green 3×3 footprint, range circles, and the route chevrons
   function syncOverlays(view) {
+    syncNoBuild(view, frameDt);
     if (mode !== "field" || !view.state) { previews.hideFoot(); previews.hideRange(); route.clear(); routeSig = ""; return; }
     const isl = world.ring && world.ring.islands[fieldIdx];
     const c = L.corridors[fieldIdx];
