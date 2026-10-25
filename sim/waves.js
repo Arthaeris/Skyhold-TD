@@ -66,4 +66,72 @@ export function waveAffix(seedBase, wave, bossEvery) {
   return AFFIXES[AFFIX_ORDER[(h >>> 4) % AFFIX_ORDER.length]];
 }
 
-export default { generateWave, enemyScale, totalWaves, waveAffix, AFFIXES };
+// ---------------------------------------------------------------------------
+// [Skyhold expanded] WAVES WITH THE BESTIARY
+// Circle's wave stays the backbone (its counts trimmed to 60%), and one or two
+// "featured" mobs from the roster join it, taking about 45% of the wave's HP
+// budget. Bosses bring an elite from wave 20. Treasure goblins turn up now and
+// then. Like waveAffix, this is a pure integer hash of (seed, wave): no sim RNG
+// draws, so it is identical on every client and the UI can preview it.
+// opts: { roster, filter(r) -> bool }
+// ---------------------------------------------------------------------------
+function hmix(a, b) {
+  let h = ((a | 0) ^ Math.imul(b | 0, 2654435761)) >>> 0;
+  h = Math.imul(h ^ (h >>> 15), 2246822519) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 3266489917) >>> 0;
+  return (h ^ (h >>> 16)) >>> 0;
+}
+const CLASSIC_HP = { grunt: 60, runner: 34, swarm: 20, brute: 200, tank: 420, boss: 2400 };
+export function generateWaveExpanded(seedBase, wave, corridorCount, bossEvery, opts) {
+  const base = generateWave(wave, corridorCount, bossEvery);
+  const roster = (opts && opts.roster) || [];
+  const ok = (r) => !opts || !opts.filter || opts.filter(r);
+  const isBoss = wave % bossEvery === 0;
+  let budget = 0;
+  for (const g of base) budget += g.count * (CLASSIC_HP[g.type] || 60);
+  const out = base.map((g) => (g.type === "boss" ? g : { ...g, count: Math.max(1, Math.round(g.count * 0.6)) }));
+  const pool = roster.filter((r) => r.minWave <= wave && !r.elite && !r.treasure && ok(r));
+  if (pool.length) {
+    const nFeat = wave >= 8 ? 2 : 1;
+    const picked = [];
+    for (let k = 0; k < nFeat * 4 && picked.length < nFeat; k++) {
+      // bias toward mobs that unlocked recently, so new faces show up
+      const h = hmix(seedBase + k * 7919, wave * 31 + k);
+      const weighted = [];
+      for (const r of pool) { const w = wave - r.minWave < 8 ? 3 : 1; for (let i = 0; i < w; i++) weighted.push(r); }
+      const r = weighted[h % weighted.length];
+      if (!picked.includes(r)) picked.push(r);
+    }
+    const share = (budget * 0.45) / picked.length;
+    picked.forEach((r, i) => {
+      const units = Math.max(1, Math.min(12, Math.round(share / (r.hp * r.pack))));
+      out.push({ type: r.id, count: units * r.pack, gap: fromFloat(r.pack > 1 ? 0.25 : 0.9), delay: fromFloat(1.6 + i * 1.4) });
+    });
+  }
+  if (isBoss && wave >= 20) {
+    const elites = roster.filter((r) => r.elite && !r.treasure && r.minWave <= wave && ok(r));
+    if (elites.length) out.push({ type: elites[hmix(seedBase, wave * 17) % elites.length].id, count: 1, gap: 0, delay: fromFloat(4) });
+  }
+  if (!isBoss && wave >= 5 && hmix(seedBase ^ 0x5eed, wave) % 9 === 0) {
+    const tg = roster.find((r) => r.treasure);
+    if (tg) out.push({ type: tg.id, count: 1, gap: 0, delay: fromFloat(3) });
+  }
+  return out;
+}
+
+// challenge waves: the challenge's own pool, rising in size over 10 waves
+export function generateChallengeWave(seedBase, wave, challenge, roster) {
+  const pool = roster.filter((r) => challenge.pool.includes(r.id));
+  const out = [];
+  const budget = 500 + wave * 260;
+  const n = Math.min(pool.length, 1 + Math.floor(wave / 3));
+  for (let k = 0; k < n; k++) {
+    const r = pool[(hmix(seedBase + k, wave) + k) % pool.length];
+    const units = Math.max(1, Math.min(14, Math.round(budget / n / (r.hp * r.pack))));
+    out.push({ type: r.id, count: units * r.pack, gap: fromFloat(r.pack > 1 ? 0.22 : 0.8), delay: fromFloat(k * 1.5) });
+  }
+  out.push({ type: "grunt", count: 4 + wave, gap: fromFloat(0.6), delay: 0 });
+  return out;
+}
+
+export default { generateWave, generateWaveExpanded, generateChallengeWave, enemyScale, totalWaves, waveAffix, AFFIXES };

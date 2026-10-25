@@ -76,6 +76,19 @@ export function hashState(state) {
   for (const p of state.projectiles) {
     h = mixInt(h, p.x); h = mixInt(h, p.y);
   }
+  // [Skyhold expanded] builders, construction, tower debuffs, shields (never present in Classic)
+  if (state.x) {
+    for (const pl of state.players) {
+      for (const corr of pl.corridors) {
+        const b = corr.builder;
+        if (b) { h = mixInt(h, b.x); h = mixInt(h, b.y); h = mixInt(h, b.cur | 0); }
+        for (const t of corr.towers) { h = mixInt(h, t.bState | 0); h = mixInt(h, t.bT | 0); h = mixInt(h, t.stunT | 0); h = mixInt(h, t.upT | 0); }
+      }
+      for (const k in pl.sendStock) h = mixInt(h, pl.sendStock[k].n);
+    }
+    for (const e of state.enemies) { h = mixInt(h, e.shieldHp | 0); h = mixInt(h, e.invulnT | 0); }
+    h = mixInt(h, state.zones.length);
+  }
   return h >>> 0;
 }
 

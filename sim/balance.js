@@ -114,7 +114,30 @@ export function buildBalance(DB) {
       id: e.id, hp: F(e.hp), speed: F(e.speed), armor: F(e.armor || 0),
       reward: e.reward, radius: F(e.radius), boss: !!e.boss, end: !!e.end,
     };
+    // [Skyhold expanded] bestiary data (content/mobs.js); ignored by the Classic ruleset
+    if (e.skyhold) {
+      const x = e.skyhold;
+      bal.enemies[k].x = {
+        family: x.family, armorClass: x.armorClass, pack: x.pack | 0, tier: x.tier | 0, minWave: x.minWave | 0,
+        element: x.element, mech: !!x.mech, minion: !!x.minion, elite: !!x.elite, noSend: !!x.noSend,
+        t: convertTraits(x.traits || {}),
+      };
+    }
   }
+  // [Skyhold expanded] the roster the expanded wave generator draws from (stable DB order)
+  bal.roster = [];
+  for (const k in DB.ENEMIES) {
+    const x = bal.enemies[k].x;
+    if (!x || x.minion || x.family === "challenge") continue;
+    bal.roster.push({ id: k, minWave: x.minWave, hp: DB.ENEMIES[k].hp, pack: x.pack || 1, elite: x.elite, treasure: !!x.t.treasure,
+      fly: !!x.t.fly, stealth: !!(x.t.invisible || x.t.cloakCycle || x.t.cloakAura), disrupt: isDisruptorTraits(x.t) });
+  }
+  if (DB.SENDS_EXPANDED) bal.sendsX = normalizeSendCatalog(DB, DB.SENDS_EXPANDED);
+  if (DB.SEND_TIERS) {
+    bal.sendTiers = {};
+    for (const t in DB.SEND_TIERS) { const T = DB.SEND_TIERS[t]; bal.sendTiers[t] = { unlockTicks: T.unlockAt * 30, stock: T.stock, rechargeTicks: T.recharge * 30 }; }
+  }
+  if (DB.CHALLENGES) bal.challenges = Object.fromEntries(DB.CHALLENGES.map((c) => [c.id, c]));
 
   return bal;
 }
@@ -142,6 +165,37 @@ function normalizeCompetitive(C) {
     maxActiveSentPerTarget: C.maxActiveSentPerTarget != null ? C.maxActiveSentPerTarget : 40, // §8.3 cap
     catchupPerLifeBehind: C.catchupPerLifeBehind != null ? C.catchupPerLifeBehind : 1, // §8.3 catch-up income
   };
+}
+
+// [Skyhold expanded] traits: every number becomes fixed-point except counts
+const INT_KEYS = new Set(["n", "max"]);
+function convertTraits(t) {
+  const conv = (k, v) => {
+    if (typeof v === "number") return INT_KEYS.has(k) ? (v | 0) : fromFloat(v);
+    if (Array.isArray(v)) return v.map((x) => (typeof x === "number" ? fromFloat(x) : x));
+    if (v && typeof v === "object") { const o = {}; for (const kk in v) o[kk] = conv(kk, v[kk]); return o; }
+    return v;
+  };
+  const out = {};
+  for (const k in t) out[k] = typeof t[k] === "boolean" ? t[k] : conv(k, t[k]);
+  return out;
+}
+function isDisruptorTraits(t) { return !!(t.jamPass || t.corrodeAura || t.chillAura || t.chillFly || t.confuseAura || t.boulder || t.rootTower || t.curseTower || t.deathTowerSlow || t.deathStun || t.shredObstacle); }
+function normalizeSendCatalog(DB, S) {
+  const MAX = DB.SEND_MAX_LEVEL || 5;
+  const out = {};
+  for (const type in S) {
+    const s = S[type];
+    const cost = [], upgradeCost = [], hpMult = [], rewardMult = [];
+    for (let l = 1; l <= MAX; l++) {
+      cost.push(Math.round(s.baseCost * Math.pow(s.costGrowth, l - 1)));
+      hpMult.push(fromFloat(Math.pow(s.hpGrowth, l - 1)));
+      rewardMult.push(fromFloat(1 + 0.5 * (l - 1)));
+      if (l < MAX) upgradeCost.push(Math.round(s.baseCost * 4 * l));
+    }
+    out[type] = { count: s.count || 1, cost, upgradeCost, hpMult, rewardMult, maxLevel: MAX, tier: s.tier || 1 };
+  }
+  return out;
 }
 
 // Bake the authored send catalog into per-level integer/fixed tables.

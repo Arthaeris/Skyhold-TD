@@ -15,6 +15,9 @@ These notes supersede the earlier `STYLE_AND_PORT_PLAN.md` discussion draft. Its
 | Circle assets reused | Music (`assets/audio/music.mp3`; Circle's menu and game tracks are the same file) and the app icon. Everything else is rendered. |
 | World backdrop | `render/backdrop.js`, after Circle's world background art. The ring floats high above a glowing sea (y = −110). Around it are eight elemental landmasses (volcano with lava falls, jungle temple with waterfalls, ice and storm spires, rune shrines and portals), floating islets with waterfalls, sea stacks with foam rings, a whirlpool and light beam under the vortex, mist and cloud banks, and drifting motes. Coast foam and the shadows cast by floating islands come from a mask baked on the CPU. |
 | Corridor islands | The build grid (unchanged for gameplay) sits on an organic floating island. Its outline bulges along the sides and has rocky spurs, and it tapers to the portal plazas at each end. Around the grid is terraced ground with themed trees, outcrops and a shrine on each side. Underneath is a deep layered rock mass with stalactites, roots and crystals. Water, lava, void or gold falls pour off the edges, and loose rocks drift alongside. |
+| Rulesets | **Classic** is Circle exactly; the parity test runs it. **Expanded** (the default) is Skyhold's own rules, gated on `state.x` in `sim/core.js` (the `[X]` hooks plus the EXPANDED section at the end of the file). It adds: 72 new creeps with traits (`content/mobs.js`); builders; send tiers with stock and unlock times; life steal; match modifiers; NPC difficulty; challenges; per-player stats. |
+| Builders | One per corridor, Warcraft 3 style. A new tower waits for the builder to walk over, then rises over 1.2–5 s and can't fire until it's done. Upgrades take about a second. Selling an unfinished tower refunds it in full. The builders can be switched off in the match rules. |
+| Flying / stealth | Flyers ignore the maze and fly portal to portal. Splash and melee towers can't hit them; everything else can. Stealthed creeps can only be targeted while a detecting tower (any Light tower, any tower at Lv 7+, any support tower) has them in range. |
 | Saves | Skyhold uses its own localStorage keys (`skyhold_*`), because Circle and Skyhold share the `arthaeris.github.io` origin. The export format is unchanged, so Circle exports import here. |
 
 ## Circle effects that exist only as data
@@ -25,7 +28,23 @@ Parity means these behave as they do in Circle, where the database describes the
 - **Lifted:** a `custom` status whose handler is empty, so it does not slow (the comment in Circle says it should act slow-like).
 - **Loop adaptations:** Momentum, Hardened and Veteran are applied after loops but have no effect.
 - **Mutation flags never read by the sim:** `moltenBoost` (Eruption), `volatileChain` (Rebirth), `slowBoost` (Deep Chill), `spreadBoost` (Plague), `splashOnDeath` (Bloomling), `regen` (Grove), `shockBoost` (Static Field), `rampBoost` (Focus), `tagBoost` (Drone Swarm), `rewriteBoost` (Rewrite). The Hex mutation's `curseBoost: true` is never copied onto the Cursed status either.
+- **16.16 overflow (a real Circle bug):** HP above about 32,767 wraps negative. With 4 corridors, Circle's End Boss (18000 HP × the wave-40 scale) spawns with negative HP and dies on its first hit. Loop adaptations and level-5 sends can also overflow. Expanded caps HP at 32,000; Classic keeps Circle's behaviour.
 - **Mastery gating:** the sim gates towers and mutations by the `masteryLevel` the client sends. Skyhold sends real mastery, as Circle does; Circle's restore path sends 5.
+
+## Expanded ruleset — what's in, what's next
+
+- **In:**
+  - 72 creeps across 20 families, plus minions and four challenge bosses. Every trait in `content/mobs.js` is implemented and exercised by `tools/expanded-soak.mjs`.
+  - Send tiers I–IV: unlock at 0:00, 2:30, 6:00 and 11:00, with stock 6/4/2/1 and recharge times of 4/8/16/30 s.
+  - Life steal; modifiers (no flyers, no stealth, no disruptors, turbo income, random lanes, doppelgängers, anonymous, gold and lives multipliers).
+  - NPCs at Easy, Normal, Hard and Insane (×0.75–×1.5 income, faster play; Hard and up scout your maze and send counters).
+  - Match stats and a leak report (time, mob, HP left, wave, sender).
+  - Replays: seed plus command log, verified by state hash at the end, with export and import.
+  - Spectating after a Vs defeat.
+  - Four challenges with Normal and Hard modes; eight builder skins.
+- **Tune later:** all of the numbers are a first pass, including mob HP and costs, wave mixing (featured creeps take about 45% of each wave's HP budget) and tier timings.
+- **Armour classes** are recorded on every creep (unarmored, light, medium, heavy, fortified, ethereal), waiting for the damage-type pass.
+- **Multiplayer:** the expanded sim is deterministic (the soak runs every scenario twice and compares hashes every tick), so lockstep can use it as-is. Ranked play and ratings come with multiplayer.
 
 ## Backlog
 
@@ -39,6 +58,8 @@ Parity means these behave as they do in Circle, where the database describes the
 
 ## Dev tools
 
-- `node tools/parity-test.mjs ../Circle-TD` runs both sims on the same scripted sessions and compares state hashes on every tick.
+- `node tools/parity-test.mjs ../Circle-TD` runs both sims on the same scripted sessions and compares state hashes on every tick (Classic ruleset).
+- `node tools/expanded-soak.mjs [ticks]` soaks the Expanded ruleset (Vs with every send, a deep solo loop, a Hard challenge). It checks for crashes and bad values, confirms determinism and reports which mobs and abilities appeared.
+- `tools/gallery.html?what=bestiary&page=0..3` and `&builders` show the new models.
 - `tools/preview.html?n=4&view=world|field&i=0` shows the world ring without the game. World view also takes `z` (zoom out), `el` (tilt in degrees), `az` (radians) and `tx/ty/tz` (target), and logs the vertex count.
 - `tools/gallery.html?stage=0..3&mut=0..2`, `?el=fire` (one element, all stages) and `?what=enemies` show the models.

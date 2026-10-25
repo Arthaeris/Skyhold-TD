@@ -13,7 +13,8 @@ import { createEnemyRenderer, enemyScale } from "./enemies.js";
 import { createSparks, createBits, createStreaks, createRings, createProjectiles, createBars, createRoute, createPreviews } from "./effects.js";
 import { createPost, QUALITY } from "./post.js";
 import { WORLD } from "./theme.js";
-import { clamp, lerp, easeInOut, TAU } from "./kit.js";
+import { clamp, lerp, easeInOut, TAU, Part } from "./kit.js";
+import { builderModel, mobColor } from "./mobmodels.js";
 
 const TILE = (v) => fx.toFloat(v);
 const EL_FIELD = 55 * Math.PI / 180, EL_WORLD = 62 * Math.PI / 180, EL_MENU = 38 * Math.PI / 180;
@@ -269,9 +270,11 @@ export function createRenderer(opts) {
   const trec = new Map();   // tower id -> { model, ri, stage, muts, def, aimYaw, recoil, target, pulseT }
   const erec = new Map();   // enemy id -> { pu,pv,cu,cv, pri, ri, hp, flash, yaw, walk, world, alive, type }
   const prec = new Map();   // projectile id -> { pu,pv,cu,cv, ri, element, arche, splash, seen }
+  const brec = new Map();   // ring slot -> builder { group, armR, ... }
   function clearEntities() {
     for (const r of trec.values()) r.model.root.parent && r.model.root.parent.remove(r.model.root);
-    trec.clear(); erec.clear(); prec.clear();
+    for (const b of brec.values()) { b.group.parent && b.group.parent.remove(b.group); b.ring && b.ring.parent && b.ring.parent.remove(b.ring); }
+    trec.clear(); erec.clear(); prec.clear(); brec.clear();
     route.clear(); routeSig = "";
   }
 
@@ -318,6 +321,37 @@ export function createRenderer(opts) {
       r.seen = true;
     }
     for (const [id, r] of prec) if (!r.seen) { impactFx(r); prec.delete(id); }
+    // builders (expanded ruleset): remember last and current spots for interpolation
+    if (V && state.x) ringCorridors(V).forEach((corr, ri) => {
+      const b = corr.builder; if (!b) return;
+      let r = brec.get(ri);
+      const u = TILE(b.x), v = TILE(b.y);
+      if (!r || r.element !== corr.element || r.skin !== (V.builderSkin || "element")) { if (r) { r.group.parent && r.group.parent.remove(r.group); r.ring.parent && r.ring.parent.remove(r.ring); } r = makeBuilder(corr.element, V.builderSkin || "element"); r.pu = r.cu = u; r.pv = r.cv = v; brec.set(ri, r); }
+      else { r.pu = r.cu; r.pv = r.cv; r.cu = u; r.cv = v; }
+      r.corr = corr; r.b = b;
+    });
+  }
+  function makeBuilder(element, skin) {
+    const M = builderModel(skin && skin !== "element" ? skin : element);
+    const group = new THREE.Group();
+    let armR = null, armL = null, wings = [];
+    for (const [name, fn] of Object.entries(M.parts)) {
+      const P = new Part(11 + name.length); fn(P);
+      const part = P.build(true);
+      const piv = (M.pivots && M.pivots[name]) || [0, 0, 0];
+      const holder = new THREE.Group(); holder.position.set(...piv); holder.add(part);
+      group.add(holder);
+      if (name === "armR") armR = holder; else if (name === "armL") armL = holder; else if (name.startsWith("wing")) wings.push({ holder, side: name === "wingL" ? 1 : -1 });
+    }
+    group.scale.setScalar(3.3);
+    scene.add(group);
+    // a glowing marker on the ground under the builder, so it reads at any zoom
+    const gc = (DB.ELEMENTS[element] && DB.ELEMENTS[element].glow) || "#ffffff";
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.75, 1.15, 28), new THREE.MeshBasicMaterial({ color: new THREE.Color(gc).multiplyScalar(1.6), transparent: true, opacity: 0.75, depthWrite: false, blending: THREE.AdditiveBlending }));
+    ring.rotation.x = -Math.PI / 2; ring.renderOrder = 4;
+    group.userData.ring = ring;
+    scene.add(ring);
+    return { group, ring, armR, armL, wings, element, skin, yaw: 0, sparkT: 0, M };
   }
 
   const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
@@ -331,8 +365,8 @@ export function createRenderer(opts) {
   function deathFx(r, killed) {
     if (r.ri < 0 || !L.corridors[r.ri]) return;
     const p = r.world, s = enemyScale(DB, r.type);
-    const big = r.type === "boss" || r.type === "endboss";
-    bits.burst(p.x, p.y + 0.4 * s, p.z, (DB.ENEMIES[r.type] || {}).color || "#a33a26", big ? 26 : 8, big ? 7 : 4, big ? 0.32 : 0.18, 0.02);
+    const big = r.type === "boss" || r.type === "endboss" || !!(DB.ENEMIES[r.type] && DB.ENEMIES[r.type].boss);
+    bits.burst(p.x, p.y + 0.4 * s, p.z, mobColor(r.type) || (DB.ENEMIES[r.type] || {}).color || "#a33a26", big ? 26 : 8, big ? 7 : 4, big ? 0.32 : 0.18, 0.02);
     sparks.burst(p.x, p.y + 0.5 * s, p.z, killed ? "#ffe9a8" : "#ff9a9a", big ? 30 : 8, big ? 7 : 4, 0.5, big ? 0.9 : 0.4, 3);
     if (big) rings.add(p.clone().setY(0.1), "#ff5fa2", 0.5, 6, 0.9, 2);
   }
@@ -354,6 +388,29 @@ export function createRenderer(opts) {
       else if (ev.kind === "kill") { const r = erec.get(ev.enemy); if (r) { r.killed = true; deathFx(r, true); } }
       else if (ev.kind === "synergy") { const r = erec.get(ev.enemy); if (r && r.ri >= 0) { rings.add(r.world.clone().setY(0.1), (DB.SYNERGIES && Object.values(DB.SYNERGIES).find((s) => s.name === ev.name) || {}).color || "#ffffff", 0.3, 2.4, 0.5, 2.2); sparks.burst(r.world.x, r.world.y + 0.6, r.world.z, "#ffffff", 8, 4, 0.4, 0.4, 2); } }
       else if (ev.kind === "life") lifeFlash = 1;
+      else abilityFx(ev);
+    }
+  }
+  const towerWorld = (id, out) => { const tr = trec.get(id); if (!tr) return null; tr.model.root.getWorldPosition(out); return out; };
+  function abilityFx(ev) {
+    const r = ev.enemy != null ? erec.get(ev.enemy) : null;
+    const at = r && r.ri >= 0 && L.corridors[r.ri] ? corridorToWorld(L, r.ri, r.cu, r.cv, 0.02, new THREE.Vector3()) : null;
+    switch (ev.kind) {
+      case "jump": if (at) { const c = ev.style === "dash" ? "#ffb15c" : ev.style === "escape" ? "#7fe8ff" : ev.style === "phase" ? "#9fe8ff" : "#c77dff"; sparks.burst(at.x, at.y + 0.6, at.z, c, 12, 5, 0.45, 0.4, 3); rings.add(at.clone().setY(0.1), c, 0.3, 1.6, 0.4, 2); } break;
+      case "meteor": if (at) { rings.add(at.clone().setY(0.1), "#ff6a2a", 0.5, 4, 0.7, 2.4); sparks.burst(at.x, at.y + 1, at.z, "#ffb15c", 30, 8, 0.6, 0.7, 3); bits.burst(at.x, 0.5, at.z, "#3a2026", 14, 5, 0.3, 0.02); sfx("boom"); } break;
+      case "boulder": case "curse": case "root": {
+        const tp = towerWorld(ev.tower, tmpB);
+        if (tp && at) { const from = at.clone(); from.y += 1.2; const to = tp.clone(); to.y += 1.5; const c = ev.kind === "boulder" ? "#c8b89a" : ev.kind === "curse" ? "#b58cff" : "#7fcf5a"; streaks.bolt(from, to, c, 0.16, 0.3, 3); }
+        if (tp) { bits.burst(tp.x, 2, tp.z, ev.kind === "boulder" ? "#7a7a6a" : ev.kind === "root" ? "#4f8f3a" : "#5a3a7a", 10, 4, 0.22, 0.02); rings.add(tp.clone().setY(0.1), ev.kind === "root" ? "#7fcf5a" : ev.kind === "curse" ? "#b58cff" : "#ffe066", 0.4, 2.2, 0.5, 2); if (ev.kind === "boulder") sfx("boom"); }
+        break;
+      }
+      case "shred": if (at) { bits.burst(at.x, 0.6, at.z, "#6a6a62", 16, 5, 0.28, 0.02); sparks.burst(at.x, 0.8, at.z, "#ffe9a8", 14, 5, 0.4, 0.4, 4); } break;
+      case "form": if (at) { const c = ev.style === "divine" ? "#ffe066" : ev.style === "revive" ? "#9cff7a" : ev.style === "glitch" ? "#ff5fa2" : "#c8d0e0"; rings.add(at.clone().setY(0.1), c, 0.4, 2.4, 0.6, 2.2); sparks.burst(at.x, at.y + 0.8, at.z, c, 14, 5, 0.45, 0.5, 2); } break;
+      case "pulse": if (at) { const c = ev.style === "barrier" ? "#7fe8ff" : ev.style === "repair" ? "#ffb15c" : "#9cff7a"; rings.add(at.clone().setY(0.1), c, 0.4, ev.style === "mend" ? 1.2 : 2.6, 0.6, 1.6); } break;
+      case "dodge": if (at) sparks.burst(at.x, at.y + 0.7, at.z, "#ffffff", 4, 3, 0.25, 0.3, 4); break;
+      case "devour": if (at) { sparks.burst(at.x, at.y + 0.6, at.z, "#5dffb0", 16, 5, 0.4, 0.5, 2); rings.add(at.clone().setY(0.1), "#5dffb0", 0.3, 2, 0.4, 2); } break;
+      case "minion": if (at) sparks.burst(at.x, at.y + 0.3, at.z, "#c77dff", 5, 3, 0.3, 0.3, 2); break;
+      case "steal": lifeFlash = Math.max(lifeFlash, 0.4); break;
     }
   }
   function zapFx(ev) {
@@ -392,7 +449,7 @@ export function createRenderer(opts) {
   }
   function syncRing(view) {
     const corrs = ringCorridors(view);
-    const key = "game:" + view.state.seedBase + ":" + (view.versus ? "v" : view.fieldId) + ":" + corrs.map((c) => c.element).join(",");
+    const key = "game:" + view.state.seedBase + ":" + (view.versus ? "v" : view.fieldId) + ":" + corrs.map((c) => c.element + (c.obsRev ? "~" + c.obsRev : "")).join(",");
     if (key !== ringKey) buildRing(corrs.map((c, i) => ({ element: c.element, grid: c.grid, seed: (view.state.seedBase % 997) + i * 13 + 1 })), key);
   }
 
@@ -438,7 +495,8 @@ export function createRenderer(opts) {
           isl.add(m.root);
           r = { model: m, ri, stage, muts, def: tw.def, recoil: 0, target: null, pulseT: Math.random(), rise: view.state.tick > 2 ? 0 : 1 };
           trec.set(tw.id, r);
-          if (r.rise === 0) {
+          if (tw.bState) { r.rise = 1; m.root.scale.set(1, 0.08, 1); }
+          else if (r.rise === 0) {
             sfx("build");
             m.root.getWorldPosition(tmpA);
             bits.burst(tmpA.x, 0.3, tmpA.z, "#8a8270", 10, 3, 0.2, 0.02);
@@ -461,6 +519,37 @@ export function createRenderer(opts) {
     // animate
     for (const r of trec.values()) {
       const m = r.model, ud = m.ud;
+      const tw = r.tw;
+      if (tw && tw.bState) {
+        // waiting for the builder: a flat blueprint; under construction: rising from the scaffold
+        const prog = tw.bState === 2 && tw.bMax ? 1 - tw.bT / tw.bMax : 0;
+        m.root.scale.set(1, 0.08 + 0.92 * easeInOut(prog), 1);
+        r.rise = 1; r.wasBuilding = true;
+        r.pulseT += dt;
+        if (r.pulseT > (tw.bState === 2 ? 0.12 : 0.6)) {
+          r.pulseT = 0; m.root.getWorldPosition(tmpA);
+          if (tw.bState === 2) { sparks.burst(tmpA.x + (Math.random() - 0.5) * 1.6, 0.4 + prog * 2.2, tmpA.z + (Math.random() - 0.5) * 1.6, "#ffd27a", 3, 3, 0.25, 0.3, 4); bits.burst(tmpA.x, 0.3, tmpA.z, "#a8946a", 1, 2, 0.12, 0.02); }
+          else rings.add(tmpA.clone().setY(0.08), DB.ELEMENTS[tw.def.element].glow, 0.6, 1.6, 0.6, 1.1);
+        }
+        continue;
+      }
+      if (r.wasBuilding) {
+        r.wasBuilding = false; m.root.scale.set(1, 1, 1);
+        m.root.getWorldPosition(tmpA);
+        rings.add(tmpA.clone().setY(0.12), DB.ELEMENTS[tw.def.element].color, 0.4, 2.6, 0.6, 2);
+        sparks.burst(tmpA.x, 1.4, tmpA.z, DB.ELEMENTS[tw.def.element].glow, 14, 5, 0.5, 0.4, 3);
+        sfx("build");
+      }
+      if (tw && tw.upT > 0) { r.upT = (r.upT || 0) + dt; if (r.upT > 0.1) { r.upT = 0; m.root.getWorldPosition(tmpA); sparks.spawn({ x: tmpA.x + (Math.random() - 0.5) * 1.4, y: 0.3, z: tmpA.z + (Math.random() - 0.5) * 1.4, vy: 2.4, color: DB.ELEMENTS[tw.def.element].glow, life: 0.7, size: 0.3, drag: 0.5, glow: 2 }); } }
+      if (tw && (tw.stunT > 0 || tw.jamT > 0 || tw.curseT > 0 || tw.confused || (tw.xDmg && tw.xDmg < fx.ONE) || (tw.xRate && tw.xRate < fx.ONE))) {
+        r.dbT = (r.dbT || 0) + dt;
+        if (r.dbT > 0.18) {
+          r.dbT = 0; m.root.getWorldPosition(tmpA);
+          const a = clock * 5 + r.pulseT * 9;
+          const c = tw.stunT > 0 ? "#ffe066" : tw.confused ? "#ff7ad0" : tw.curseT > 0 ? "#b58cff" : (tw.xDmg && tw.xDmg < fx.ONE) ? "#9cff5a" : "#9fd8ff";
+          sparks.spawn({ x: tmpA.x + Math.cos(a) * 0.9, y: 3.0 + Math.sin(a * 2) * 0.15, z: tmpA.z + Math.sin(a) * 0.9, vy: tw.stunT > 0 ? 0 : -0.3, color: c, life: 0.5, size: 0.34, drag: 1, glow: 2 });
+        }
+      }
       if (r.rise < 1) { r.rise = Math.min(1, r.rise + dt * 3); const k = easeInOut(r.rise); m.root.scale.set(1, 0.2 + 0.8 * k, 1); }
       if (m.spin && ud.spinRate) { if (ud.spinAxis === "z") m.spin.rotation.z += ud.spinRate * dt; else if (ud.spinAxis === "xyz") { m.spin.rotation.x += ud.spinRate * dt * 0.7; m.spin.rotation.y += ud.spinRate * dt; } else m.spin.rotation.y += ud.spinRate * dt; }
       if (m.float && ud.bob) m.float.position.y = ud.fy + Math.sin(clock * 2 + r.pulseT * 6) * ud.bob;
@@ -509,7 +598,13 @@ export function createRenderer(opts) {
       for (const k of sk) { const d = DB.STATUSES[k]; if (d && !d.adaptive) { stat = k; break; } }
       const frozen = !!(e.statuses && (e.statuses.frozen || e.statuses.rooted));
       r.flash = Math.max(0, r.flash - dt * 9);
-      enemies.add(e.type, p, r.yaw, r.walk, clock + id, s, stat, r.flash * 0.8, frozen && !!e.statuses.frozen);
+      let ex = null;
+      if (e.tr) {
+        const shield = e.invulnT > 0 ? 1 : (e.shieldHp > 0 ? Math.min(1, e.shieldHp / Math.max(1, e.maxHp * 0.4)) : 0);
+        ex = { ghost: !!e.hidden, shield, shieldColor: e.invulnT > 0 ? "#ffe066" : "#7fe8ff", fly: !!e.fly };
+        if (e.stoneT > 0 || e.shellT > 0) stat = "brittle";
+      }
+      enemies.add(e.type, p, r.yaw, r.walk, clock + id, s, stat, r.flash * 0.8, frozen && !!e.statuses.frozen, ex);
       // status motes
       if (stat) {
         const k = (statusT.get(id) || 0) + dt;
@@ -517,6 +612,7 @@ export function createRenderer(opts) {
         else statusT.set(id, k);
       }
       // HP bar, origin ring, markers
+      if (e.hidden && Math.random() < dt * 4) sparks.spawn({ x: p.x + (Math.random() - 0.5) * 0.7, y: p.y + r.h * Math.random(), z: p.z + (Math.random() - 0.5) * 0.7, vy: 0.4, color: "#9fd8ff", life: 0.5, size: 0.22, drag: 1, glow: 1.3 });
       const top = tmpB.set(p.x, p.y + r.h + 0.35, p.z);
       const frac = clamp(e.hp / e.maxHp, 0, 1);
       bars.bar(top, frac, e.boss ? 1.6 : 0.9, frac > 0.5 ? "#5fe07a" : frac > 0.25 ? "#ffd23d" : "#ff4d6d");
@@ -531,6 +627,30 @@ export function createRenderer(opts) {
     }
     enemies.end();
     bars.end();
+  }
+
+  function syncBuilders(view, alpha, dt) {
+    for (const [ri, r] of brec) {
+      const b = r.b;
+      if (!b || !L.corridors[ri]) { r.group.visible = false; r.ring.visible = false; continue; }
+      r.group.visible = true; r.ring.visible = true;
+      const u = r.pu + (r.cu - r.pu) * alpha, v = r.pv + (r.cv - r.pv) * alpha;
+      const working = !b.moving && !!b.cur;
+      const p = corridorToWorld(L, ri, u, v, 2.4 + Math.sin(clock * 3 + ri) * 0.22 + (working ? 1.2 : 0), tmpA);
+      const moved = Math.hypot(p.x - r.group.position.x, p.z - r.group.position.z);
+      if (moved > 0.002 && moved < 4) { const want = Math.atan2(p.x - r.group.position.x, p.z - r.group.position.z); let d = want - r.yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); r.yaw += d * Math.min(1, dt * 8); }
+      r.group.position.copy(p);
+      r.group.rotation.y = r.yaw;
+      r.ring.position.set(p.x, 0.07, p.z);
+      r.ring.scale.setScalar(1 + Math.sin(clock * 4 + ri) * 0.08 + (working ? 0.25 : 0));
+      if (r.armR) r.armR.rotation.x = working ? -0.6 + Math.sin(clock * 11) * 0.9 : Math.sin(clock * 3) * 0.25;
+      if (r.armL) r.armL.rotation.x = Math.sin(clock * 3 + 1) * 0.2;
+      for (const w of r.wings) w.holder.rotation.z = Math.sin(clock * 40) * 0.5 * w.side;
+      if (working) {
+        r.sparkT += dt;
+        if (r.sparkT > 0.15) { r.sparkT = 0; sparks.burst(p.x, 0.8, p.z, "#ffe9a8", 4, 3, 0.3, 0.3, 4); streaks.bolt(new THREE.Vector3(p.x, p.y + 0.4, p.z), new THREE.Vector3(p.x + (Math.random() - 0.5), 0.4, p.z + (Math.random() - 0.5)), DB.ELEMENTS[r.element] ? DB.ELEMENTS[r.element].glow : "#ffffff", 0.06, 0.12, 2); if (ri === fieldIdx && mode === "field" && Math.random() < 0.35) sfx("hammer"); }
+      } else if (b.moving && Math.random() < dt * 8) sparks.spawn({ x: p.x, y: p.y - 0.4, z: p.z, vy: -0.4, color: DB.ELEMENTS[r.element] ? DB.ELEMENTS[r.element].glow : "#ffffff", life: 0.5, size: 0.25, drag: 1, glow: 1.6 });
+    }
   }
 
   function syncProjectiles(alpha) {
@@ -620,7 +740,7 @@ export function createRenderer(opts) {
       if (view.versus) {
         const seat = st.players[i]; if (!seat) return;
         let inside = 0; for (const e of st.enemies) if (e.owner === i) inside++;
-        html = `<b class="${i === view.me ? "me" : ""}">${seat.alive ? (i === view.me ? "YOU" : "NPC " + i) : "☠"}</b><span>${seat.alive ? "❤" + seat.lives + " · " + inside : "eliminated"}</span>`;
+        html = `<b class="${i === view.me ? "me" : ""}">${seat.alive ? (i === view.me ? "YOU" : (view.anonymous ? "RIVAL " : "NPC ") + i) : "☠"}</b><span>${seat.alive ? "❤" + seat.lives + " · " + inside : "eliminated"}</span>`;
         d.classList.toggle("dead", !seat.alive);
       } else {
         let inside = 0, origin = 0;
@@ -656,8 +776,8 @@ export function createRenderer(opts) {
     updateCamera(rawDt); // camera flights run on wall-clock time so slow devices still arrive
     const active = V ? ((V.versus ? V.state.players[V.me] : V.field).phase === "prep") : false;
     world.update(dt, clock, active);
-    if (V) { syncEnemies(V, alpha, dt); syncProjectiles(alpha); syncOverlays(V); }
-    else { enemies.begin(); enemies.end(); bars.begin(camera); bars.end(); projs.begin(); projs.end(); previews.hideFoot(); previews.hideRange(); route.clear(); }
+    if (V) { syncEnemies(V, alpha, dt); syncProjectiles(alpha); syncOverlays(V); syncBuilders(V, alpha, dt); }
+    else { for (const b of brec.values()) { b.group.visible = false; b.ring.visible = false; } enemies.begin(); enemies.end(); bars.begin(camera); bars.end(); projs.begin(); projs.end(); previews.hideFoot(); previews.hideRange(); route.clear(); }
     route.update(clock, mode === "field" && V && V.field && (V.field.phase === "build" || (V.buildMenuOpen)) ? 1 : 0.45);
     sparks.update(dt); bits.update(dt); streaks.update(dt); rings.update(dt);
     syncLabels(V);
@@ -676,6 +796,7 @@ export function createRenderer(opts) {
 
   return {
     render, resize, snapshotPositions, onEvents, previewRing, pick, panBy, zoomAt, setMode, enterField,
+    debug: () => ({ builders: [...brec.values()].map((b) => ({ vis: b.group.visible, pos: b.group.position.toArray().map((x) => +x.toFixed(1)), parent: !!b.group.parent, kids: b.group.children.length })) }),
     groundAt, toScreen,
     get mode() { return mode; }, get fieldIndex() { return fieldIdx; }, get flying() { return !!fly; },
     get ringCount() { return L.corridors.length; },

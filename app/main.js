@@ -11,9 +11,10 @@
  * ===========================================================================*/
 import * as fx from "../sim/fx.js";
 import { createState, step, SIM_HZ, findBuildSpot } from "../sim/core.js";
-import { AFFIXES } from "../sim/waves.js";
+import { AFFIXES, generateWaveExpanded, generateChallengeWave } from "../sim/waves.js";
+import { extendDB, MOB_BY_ID, CHALLENGES, BUILDER_SKINS, mobTier } from "../content/mobs.js";
 import { buildBalance } from "../sim/balance.js";
-import { hashContent } from "../sim/hash.js";
+import { hashContent, hashState } from "../sim/hash.js";
 import * as C from "../net/commands.js";
 import { createLoop } from "./loop.js";
 import { createRenderer } from "../render/renderer.js";
@@ -27,6 +28,7 @@ const DB = window.DB;
 const SaveSystem = window.SaveSystem;
 const RUN_KEY = "skyhold_run_v2";
 setIconDB(DB);
+extendDB(DB); // the expanded bestiary, send tiers, challenges and builder skins (content/mobs.js)
 
 const bal = buildBalance(DB);
 DB.contentHash = hashContent(DB);
@@ -43,7 +45,23 @@ const game = {
   selectedTowerId: null, selectedEnemyId: null, buildTile: null, buildMenuOpen: false, buildSpot: null, buildPreview: null,
   driver: null, paused: false,
   autoWave: false, autoT: null,
+  spectate: false, replay: null, recLog: null, runCfg: null, anonymous: false, skin: "element",
 };
+// ---- Skyhold progress beyond Circle's mastery: matches played, challenges, builder skins -----------
+const XMETA_KEY = "skyhold_xmeta_v1";
+let xmeta = { played: 0, wins: 0, challenges: {}, skin: "element" };
+try { Object.assign(xmeta, JSON.parse(localStorage.getItem(XMETA_KEY)) || {}); } catch (e) { /* fine */ }
+function saveXMeta() { try { localStorage.setItem(XMETA_KEY, JSON.stringify(xmeta)); } catch (e) { /* fine */ } }
+function skinUnlocked(sk) {
+  const u = sk.unlock; if (!u) return true;
+  if (UNLOCK_ALL) return true;
+  if (u.played) return xmeta.played >= u.played;
+  if (u.wins) return xmeta.wins >= u.wins;
+  if (u.challenge) return !!(xmeta.challenges[u.challenge] && xmeta.challenges[u.challenge].normal);
+  if (u.allHard) return CHALLENGES.every((c) => xmeta.challenges[c.id] && xmeta.challenges[c.id].hard);
+  return false;
+}
+function challengesOpen() { return UNLOCK_ALL || (meta.totalWins || 0) > 0 || xmeta.wins > 0; }
 let meta = SaveSystem ? SaveSystem.loadMeta() : { mastery: {} };
 let renderer, ui, loop;
 const sound = createSound();
@@ -54,7 +72,7 @@ function isVersus() { return game.gameMode === "versus"; }
 function fieldId() { return game.gameMode === "coop" ? 0 : (isVersus() ? game.activeCorridor : game.me); }
 function fieldPlayer() { return game.state.players[fieldId()]; }
 function myPlayer() { return game.state.players[game.me]; }
-function seatName(i) { return i === game.me ? "You" : "NPC " + i; }
+function seatName(i) { return i === game.me ? "You" : (game.anonymous ? "Rival " + i : "NPC " + i); }
 function localSimMode() { return game.gameMode === "solo" || game.gameMode === "versus"; }
 
 // the view object the renderer + ui read (player resolves live) — same shape as Circle's
@@ -73,11 +91,14 @@ const view = {
   get buildMenuOpen() { return game.buildMenuOpen; }, set buildMenuOpen(x) { game.buildMenuOpen = x; },
   get buildSpot() { return game.buildSpot; }, set buildSpot(x) { game.buildSpot = x; },
   get buildPreview() { return game.buildPreview; }, set buildPreview(x) { game.buildPreview = x; },
+  get builderSkin() { return game.skin || "element"; },
+  get spectate() { return game.spectate; },
+  get anonymous() { return game.anonymous; },
 };
 
 // ---- command emitters (solo applies on the next tick) -------------------------
 function emit(c) {
-  if (!game.driver) return;
+  if (!game.driver || game.spectate) return;
   if (c.player == null) c.player = game.me;
   if (c.masteryLevel == null && (c.type === "BuildTower" || c.type === "MutateTower")) {
     const corr = fieldPlayer().corridors[c.corridorId];
@@ -110,8 +131,31 @@ function makeSoloDriver(state) {
     queue(c) { pending.push(c); },
     tick() {
       const cmds = pending; pending = [];
-      step(state, C.orderCommands(cmds), SIM_DT);
+      const ordered = C.orderCommands(cmds);
+      if (ordered.length && game.recLog && game.recLog.length < 60000) game.recLog.push({ t: state.tick + 1, c: C.serialize(ordered) });
+      step(state, ordered, SIM_DT);
       afterTick(state);
+    },
+  };
+}
+// replays re-run the sim from its seed and the recorded commands
+function makeReplayDriver(state, log) {
+  let idx = 0;
+  return {
+    queue() { /* spectators never emit */ },
+    tick() {
+      const t = state.tick + 1;
+      let cmds = [];
+      while (idx < log.length && log[idx].t < t) idx++;
+      while (idx < log.length && log[idx].t === t) { cmds = cmds.concat(C.deserialize(log[idx].c)); idx++; }
+      step(state, cmds, SIM_DT);
+      afterTick(state);
+      if (game.replay && state.tick === game.replay.ticks) {
+        game.paused = true;
+        const ok = game.replay.hash == null || hashState(state) === game.replay.hash;
+        ui.toast(ok ? "Replay finished — verified identical to the original match" : "Replay finished — it drifted from the original (made with another version?)", ok ? "gold" : "warn");
+        refreshReplayBar();
+      }
     },
   };
 }
@@ -136,6 +180,11 @@ function handleEvent(ev) {
   if (ev.kind === "sent" && ev.from === game.me) { ui.toast("⚔ Sent " + (ev.count > 1 ? ev.count + "× " : "") + ev.type + " (Lv" + (ev.level || 1) + ")"); ui.updateTopBar(); return; }
   if (ev.kind === "sendLevel") { ui.toast("⬆ " + ev.type + " sends upgraded to Lv" + ev.level); ui.updateTopBar(); return; }
   if (ev.kind === "leak" && isVersus()) { flash(); sound.play("life"); ui.updateTopBar(); return; }
+  if (ev.kind === "steal") {
+    if (ev.to === game.me) { ui.toast("❤ +" + ev.n + " — stole a life from " + seatName(ev.from), "gold"); sound.play("steal"); }
+    else if (ev.from === game.me) ui.toast("💔 " + seatName(ev.to) + " stole a life from you", "warn");
+    ui.updateTopBar(); return;
+  }
   switch (ev.kind) {
     case "wave": {
       game.autoT = null;
@@ -152,7 +201,7 @@ function handleEvent(ev) {
       if (!synergyToastAt[key] || now - synergyToastAt[key] > 4000) { synergyToastAt[key] = now; ui.toast("⚗ " + ev.name + "!", "syn"); sound.play("synergy"); }
       break;
     }
-    case "reject": { const M = { funds: (game.state.economy === "shared" ? "Not enough gold." : "Not enough essence."), noRoom: "No room — towers need 3×3 space and can’t fully block the path.", needMax: "Reach max level to mutate.", noSlots: "No mutation slots — raise Mastery." }; ui.toast(M[ev.reason] || "Cannot do that here.", "warn"); sound.play("reject"); break; }
+    case "reject": { const M = { funds: (game.state.economy === "shared" ? "Not enough gold." : "Not enough essence."), noRoom: "No room — towers need 3×3 space and can’t fully block the path.", needMax: "Reach max level to mutate.", noSlots: "No mutation slots — raise Mastery.", locked: "That send tier hasn't unlocked yet.", stock: "Out of stock — it's recharging.", rule: "Not allowed by this match's rules.", busy: "That tower is still being built or upgraded." }; ui.toast(M[ev.reason] || "Cannot do that here.", "warn"); sound.play("reject"); break; }
     case "waveClear":
       ui.toast(`Wave ${ev.wave} cleared! +${ev.bonus}`, "gold");
       sound.play("clear");
@@ -164,6 +213,7 @@ function handleEvent(ev) {
     case "life": ui.updateTopBar(); flash(); sound.play("life"); break;
     case "victory": endScreen(true); break;
     case "defeat": endScreen(false); break;
+    case "built": break;
   }
 }
 
@@ -173,6 +223,7 @@ function handleEvent(ev) {
 function showScreen(s) {
   game.screen = s;
   ["loading", "menu", "setup", "game"].forEach((x) => { const el = $("screen-" + x); if (el) el.classList.toggle("active", x === s); });
+  if (s !== "game") { game.spectate = false; game.replay = null; document.body.dataset.spectate = ""; }
   document.body.dataset.screen = s;
   sound.playMusic(s !== "loading");
   if (s === "menu") { renderer.previewRing(DB.ELEMENT_ORDER.slice(), "menu"); renderer.setMode("menu"); }
@@ -201,6 +252,8 @@ function refreshWaveFab() {
 }
 function refreshMenu() {
   const c = $("btn-continue"); if (c) c.classList.toggle("disabled", !hasRun());
+  const ch = $("btn-challenges"); if (ch) { ch.classList.toggle("locked", !challengesOpen()); }
+  const rp = $("btn-replays"); if (rp) rp.querySelector("i") && (rp.querySelector("i").textContent = String(loadReplays().length));
   const sub = $("menu-progress");
   if (sub) {
     const avail = DB.availableElements(masteryMap());
@@ -211,7 +264,15 @@ function refreshMenu() {
 // ---------------------------------------------------------------------------
 // SETUP -> START RUN
 // ---------------------------------------------------------------------------
-const setup = { mode: "loop", corridors: 4, economy: "shared", status: "standard", gameMode: "solo", pacing: "manual", elements: [] };
+const setup = { mode: "loop", corridors: 4, economy: "shared", status: "standard", gameMode: "solo", pacing: "manual", elements: [],
+  ruleset: "expanded", difficulty: "normal",
+  mods: { lifeSteal: true, sendStock: true, builders: true, noFlyers: false, noDisruptors: false, noStealth: false, turbo: false, randomLanes: false, anonymous: false, doppel: false, goldMult: 1, livesMult: 1 } };
+const DIFFICULTY = {
+  easy: { incomeMult: 0.75, goldBonus: 0, act: [2.2, 3.0], towers: 14, up: 0.25, maxTier: 2, aggro: 0.3, counter: false, label: "Easy" },
+  normal: { incomeMult: 1.0, goldBonus: 0, act: [1.4, 2.0], towers: 20, up: 0.45, maxTier: 3, aggro: 0.55, counter: false, label: "Normal" },
+  hard: { incomeMult: 1.25, goldBonus: 100, act: [1.0, 1.4], towers: 24, up: 0.6, maxTier: 4, aggro: 0.75, counter: true, label: "Hard" },
+  insane: { incomeMult: 1.5, goldBonus: 250, act: [0.7, 1.0], towers: 26, up: 0.7, maxTier: 4, aggro: 0.9, counter: true, label: "Insane" },
+};
 function openSetup() {
   const avail = DB.availableElements(masteryMap());
   setup.elements = []; for (let i = 0; i < 8; i++) setup.elements.push(avail[i % avail.length]);
@@ -233,39 +294,62 @@ function setupPreview(s, sel) {
 }
 let setupSel = 0;
 
-function startRun(cfg, seed) {
+function startRun(cfg, seed, replay) {
   game.gameMode = cfg.gameMode || "solo";
   game.mode = cfg.mode;
+  const ruleset = cfg.ruleset || "expanded";
+  const mods = ruleset === "expanded" ? Object.assign({}, setup.mods, cfg.mods || {}) : {};
+  const diff = DIFFICULTY[cfg.difficulty || "normal"] || DIFFICULTY.normal;
   let players, mode = cfg.mode, economy = cfg.economy;
-  if (game.gameMode === "versus") {
+  if (replay) {
+    // a replay re-creates the exact recorded match
+    game.state = null;
+  } else if (game.gameMode === "versus") {
     const seats = Math.max(3, Math.min(8, cfg.corridors || 4));
-    const mine = cfg.elements[0] || "fire";
+    let mine = cfg.elements[0] || "fire";
     const pool = DB.ELEMENT_ORDER.filter((e) => e !== mine);
     for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+    if (mods.randomLanes) { const all = DB.ELEMENT_ORDER.slice(); mine = all[Math.floor(Math.random() * all.length)]; }
     players = [{ corridorCount: 1, elements: [mine] }];
-    for (let i = 0; i < seats - 1; i++) players.push({ corridorCount: 1, elements: [pool[i % pool.length]] });
+    for (let i = 0; i < seats - 1; i++) {
+      const el = mods.doppel ? mine : (mods.randomLanes ? DB.ELEMENT_ORDER[Math.floor(Math.random() * 8)] : pool[i % pool.length]);
+      players.push({ corridorCount: 1, elements: [el], incomeMult: ruleset === "expanded" ? diff.incomeMult : 1, goldBonus: ruleset === "expanded" ? diff.goldBonus : 0 });
+    }
     mode = "endless"; economy = "shared"; game.mode = "endless";
   } else {
-    const corridorCount = cfg.mode === "single" ? 1 : cfg.corridors;
+    const corridorCount = cfg.challenge ? 1 : (cfg.mode === "single" ? 1 : cfg.corridors);
     players = [{ corridorCount, elements: cfg.elements.slice(0, corridorCount) }];
+    if (cfg.challenge) mode = "loop";
   }
-  const stateCfg = { seed: seed != null ? seed : ((Math.random() * 1e9) | 0), mode, gameMode: game.gameMode, economy, statusMode: cfg.status, players };
-  game.state = createState(bal, stateCfg);
+  const stateCfg = replay ? replay.cfg : { seed: seed != null ? seed : ((Math.random() * 1e9) | 0), mode, gameMode: game.gameMode, economy, statusMode: cfg.status, players, ruleset, mods, challenge: cfg.challenge || null };
+  game.state = createState(bal, structuredClone(stateCfg));
+  game.runCfg = { ...cfg, ruleset, mods, stateCfg };
+  game.recLog = replay ? null : [];
+  game.replay = replay ? { ...replay } : null;
+  game.spectate = !!replay;
+  game.anonymous = !!(mods.anonymous && game.gameMode === "versus");
+  game.skin = xmeta.skin || "element";
+  game.difficulty = cfg.difficulty || "normal";
+  document.body.dataset.spectate = replay ? "replay" : "";
   game.me = 0; game.speed = 1; game.clock = 0; game.paused = false;
   game.view = "world"; game.activeCorridor = 0;
   game.selectedTowerId = game.selectedEnemyId = game.buildTile = null; game.buildPreview = null;
   game.autoWave = cfg.pacing === "auto"; game.autoT = null; refreshAutoBtn();
-  game.driver = makeSoloDriver(game.state);
-  setupBots();
+  game.driver = replay ? makeReplayDriver(game.state, replay.log) : makeSoloDriver(game.state);
+  if (!replay) setupBots(); else bots = [];
   setupSendButton();
   showScreen("game");
   ui.closeAllPanels();
   renderer.render(view, 1);       // builds the ring for this run
   setView("world", false);
   ui.updateTopBar(); ui.updateEnemyOverview(); ui.updateWavePanel();
-  ui.toast("Build your defenses, then start the wave.");
+  if (replay) ui.toast("Watching replay — " + (replay.title || ""));
+  else if (game.state.challenge) ui.toast("Challenge: " + game.state.challenge.def.name + (game.state.challenge.hard ? " (Hard)" : ""), "boss");
+  else ui.toast("Build your defenses, then start the wave.");
   sound.play("whoosh");
   warmThumbs(DB, DB.TOWERS.map((t) => t.id));
+  refreshReplayBar();
+  if (!replay) { xmeta.played = (xmeta.played || 0) + 1; saveXMeta(); }
   return stateCfg.seed;
 }
 
@@ -275,7 +359,7 @@ function startRun(cfg, seed) {
 function serializeRun() {
   const s = game.state, pl = s.players[game.me];
   return {
-    v: 2, seed: s.seedBase, mode: s.mode, gameMode: "solo", economy: s.economy, statusMode: s.statusMode,
+    v: 2, seed: s.seedBase, mode: s.mode, gameMode: "solo", economy: s.economy, statusMode: s.statusMode, ruleset: s.ruleset, mods: game.runCfg && game.runCfg.mods,
     corridorCount: pl.corridorCount, elements: pl.elements.slice(),
     pacing: game.autoWave ? "auto" : "manual",
     gold: pl.gold, essence: Object.assign({}, pl.essence), lives: pl.lives, wave: pl.wave, phase: pl.phase,
@@ -292,7 +376,7 @@ function continueRun() {
   restoreRun(d);
 }
 function restoreRun(d) {
-  startRun({ mode: d.mode, corridors: d.corridorCount, economy: d.economy, status: d.statusMode, gameMode: "solo", pacing: d.pacing || "manual", elements: d.elements }, d.seed);
+  startRun({ mode: d.mode, corridors: d.corridorCount, economy: d.economy, status: d.statusMode, gameMode: "solo", pacing: d.pacing || "manual", elements: d.elements, ruleset: d.ruleset || "classic", mods: d.mods || {} }, d.seed);
   const pl = game.state.players[0];
   pl.lives = d.lives; pl.wave = d.wave; pl.phase = d.phase === "wave" || d.phase === "endboss" ? "build" : d.phase;
   pl.stats = Object.assign(pl.stats, d.stats || {});
@@ -300,6 +384,8 @@ function restoreRun(d) {
   pl.gold = 1e9; for (const k in pl.essence) pl.essence[k] = 1e9;
   d.corridors.forEach((cd, ci) => { cd.towers.forEach((t) => { emit(C.buildTower(0, ci, t.c + 1, t.r + 1, t.defId, 5)); }); });
   game.driver.tick();
+  game.recLog = null; // a restored run can't be replayed from its seed
+  for (const corr of pl.corridors) { for (const t of corr.towers) { t.bState = 0; t.bT = 0; } if (corr.builder) { corr.builder.queue.length = 0; corr.builder.cur = 0; } }
   pl.gold = d.gold; pl.essence = Object.assign(pl.essence, d.essence);
   d.corridors.forEach((cd, ci) => { const corr = pl.corridors[ci]; cd.towers.forEach((tDef, i) => { const tw = corr.towers[i]; if (!tw) return; tw.level = tDef.level; tw.expert = tDef.expert; tw.kills = tDef.kills; tw.mutations = tDef.mutations.slice(); tw.targetMode = tDef.targetMode || "first"; }); });
   ui.updateTopBar(); ui.updateEnemyOverview(); ui.updateWavePanel();
@@ -440,20 +526,30 @@ function bindPointer() {
 // END SCREEN
 // ---------------------------------------------------------------------------
 function endScreen(win) {
+  if (game.replay) return; // replays just play out
   const pl = game.state.players[game.me];
   let unlockMsgs = [];
-  if (SaveSystem) {
+  if (SaveSystem && !game.state.challenge) {
     const proxy = { mode: game.mode, elements: pl.elements, wave: pl.wave, totalWaves: pl.totalWaves, score: pl.stats.score };
     try { if (win) unlockMsgs = SaveSystem.recordVictory(meta, proxy) || []; else SaveSystem.recordDefeat(meta, proxy); SaveSystem.saveMeta(meta); } catch (e) { /* fine */ }
   }
+  // Skyhold progress: wins, challenges, builder skins
+  const skinsBefore = BUILDER_SKINS.filter(skinUnlocked).map((k) => k.id);
+  if (win) xmeta.wins = (xmeta.wins || 0) + 1;
+  const ch = game.state.challenge;
+  if (win && ch) { const c = xmeta.challenges[ch.id] || (xmeta.challenges[ch.id] = {}); c.normal = true; if (ch.hard) c.hard = true; }
+  saveXMeta();
+  for (const k of BUILDER_SKINS) if (skinUnlocked(k) && !skinsBefore.includes(k.id)) unlockMsgs.push("Builder skin unlocked: " + k.name);
   try { localStorage.removeItem(RUN_KEY); } catch (e) { /* fine */ }
+  storeReplay(win ? "Victory" : "Defeat");
   sound.play(win ? "victory" : "defeat");
   const sc = $("end-screen"); if (!sc) return;
-  sc.querySelector("#end-title").textContent = win ? "VICTORY" : "DEFEAT";
+  sc.querySelector("#end-title").textContent = win ? (ch ? "CHALLENGE COMPLETE" : "VICTORY") : "DEFEAT";
   sc.querySelector("#end-title").className = win ? "win" : "lose";
-  const eb = sc.querySelector("#end-endless"); if (eb) eb.style.display = (win && game.mode !== "endless") ? "" : "none";
+  const eb = sc.querySelector("#end-endless"); if (eb) eb.style.display = (win && game.mode !== "endless" && !ch) ? "" : "none";
+  const spb = $("end-spectate"); if (spb) spb.style.display = (!win && isVersus() && game.state.x && !game.state.finished) ? "" : "none";
   let html = `<div class="end-stat"><span>${icon("wave", "xs")} Waves</span><b>${pl.wave}</b></div><div class="end-stat"><span>${icon("skull", "xs")} Kills</span><b>${pl.stats.kills}</b></div><div class="end-stat"><span>${icon("trophy", "xs")} Bosses</span><b>${pl.stats.bossesKilled}</b></div><div class="end-stat"><span>${icon("star", "xs")} Score</span><b>${pl.stats.score}</b></div>`;
-  if (win) {
+  if (win && !ch) {
     const seen = new Set();
     for (const eid of pl.elements) {
       if (seen.has(eid)) continue; seen.add(eid);
@@ -468,9 +564,161 @@ function endScreen(win) {
     }
   }
   if (unlockMsgs.length) html += `<div class="end-unlocks">${unlockMsgs.map((m) => `<span class="unlock">🎉 ${m}</span>`).join("")}</div>`;
-  sc.querySelector("#end-body").innerHTML = html;
+  if (game.state.x) html += `<div class="end-stats-wrap">${statsHTML(game.state)}</div>`;
+  const body = sc.querySelector("#end-body");
+  body.innerHTML = html;
+  bindStatsTabs(body);
   sc.classList.add("show");
   refreshMenu();
+}
+
+// ---- match stats: summary, leak report, towers, sends ---------------------------------
+function fmtT(ticks) { const s = Math.floor(ticks / SIM_HZ); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }
+function mobName(t) { return (DB.ENEMIES[t] && DB.ENEMIES[t].name) || t; }
+function statsHTML(st) {
+  const me = st.players[game.me], L = me.log;
+  if (!L) return "";
+  const tabs = [["sum", "Summary"], ["leaks", "Leaks"], ["towers", "Towers"], ["sends", "Sends"]];
+  let h = `<div class="st-tabs">${tabs.map(([k, n], i) => `<button class="seg ${i ? "" : "sel"}" data-st="${k}">${n}</button>`).join("")}</div>`;
+  // summary
+  const killTop = Object.entries(L.kills).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  h += `<div class="st-pane show" data-pane="sum"><div class="st-grid">
+    <div><span>Gold earned</span><b>${L.goldEarned}</b></div><div><span>Gold spent</span><b>${L.goldSpent}</b></div>
+    <div><span>Lives lost</span><b>${L.livesLost}</b></div><div><span>Lives stolen</span><b>${L.livesStolen}</b></div>
+    <div><span>Leaks</span><b>${L.leaks.length}</b></div><div><span>Match time</span><b>${fmtT(st.tick)}</b></div></div>
+    <div class="st-sub">Most killed</div><div class="st-list">${killTop.map(([t, n]) => `<span class="st-chip"><img src="${enemyThumb(DB, t)}" alt="">${mobName(t)} ×${n}</span>`).join("") || "<span class='dim'>—</span>"}</div>`;
+  if (isVersus()) {
+    h += `<div class="st-sub">Seats</div><table class="st-table"><tr><th>Seat</th><th>Lives</th><th>Stolen</th><th>Kills</th><th>Sent</th></tr>`;
+    st.players.forEach((p, i) => { const sent = p.log ? Object.values(p.log.sent).reduce((a, b) => a + b, 0) : 0; h += `<tr class="${p.alive ? "" : "dead"}"><td>${game.anonymous && i !== game.me ? "" : sigil(p.elements[0], "xs")} ${seatName(i)}</td><td>${p.alive ? p.lives : "☠"}</td><td>${p.log ? p.log.livesStolen : 0}</td><td>${p.stats.kills}</td><td>${sent}</td></tr>`; });
+    h += `</table>`;
+  }
+  h += `</div>`;
+  // leaks
+  const agg = {};
+  for (const l of L.leaks) { const a = agg[l.type] || (agg[l.type] = { n: 0, hp: 0 }); a.n++; a.hp += l.hp; }
+  const aggTop = Object.entries(agg).sort((a, b) => b[1].n - a[1].n).slice(0, 8);
+  h += `<div class="st-pane" data-pane="leaks">${L.leaks.length ? `<div class="st-sub">What got through</div><div class="st-list">${aggTop.map(([t, a]) => `<span class="st-chip"><img src="${enemyThumb(DB, t)}" alt="">${mobName(t)} ×${a.n} <em>avg ${Math.round(a.hp / a.n)}% HP</em></span>`).join("")}</div>
+    <div class="st-sub">Every leak</div><table class="st-table"><tr><th>Time</th><th>Mob</th><th>HP left</th><th>Wave</th>${isVersus() ? "<th>Sent by</th>" : "<th>Corridor</th>"}</tr>${L.leaks.slice(-80).reverse().map((l) => `<tr><td>${fmtT(l.t)}</td><td>${mobName(l.type)}</td><td>${l.hp}%</td><td>${l.wave}</td><td>${isVersus() ? (l.from != null ? seatName(l.from) : "wave") : (l.corridor + 1)}</td></tr>`).join("")}</table>` : "<p class='dim'>Nothing leaked. Flawless.</p>"}</div>`;
+  // towers
+  const towers = [];
+  for (const corr of me.corridors) for (const tw of corr.towers) towers.push(tw);
+  towers.sort((a, b) => (b.dmgDone || 0) - (a.dmgDone || 0));
+  const totalDmg = towers.reduce((a, t) => a + (t.dmgDone || 0), 0) || 1;
+  h += `<div class="st-pane" data-pane="towers">${towers.length ? `<table class="st-table"><tr><th>Tower</th><th>Lv</th><th>Kills</th><th>Damage</th></tr>${towers.slice(0, 30).map((t) => `<tr><td>${sigil(t.def.element, "xs")} ${(DB.TOWER_BY_ID[t.def.id] || {}).name || t.def.id}</td><td>${t.level}</td><td>${t.kills}</td><td>${Math.round((t.dmgDone || 0) / 65536)} <em>${Math.round(((t.dmgDone || 0) / totalDmg) * 100)}%</em></td></tr>`).join("")}</table>` : "<p class='dim'>No towers standing.</p>"}</div>`;
+  // sends
+  const sent = Object.entries(L.sent).sort((a, b) => b[1] - a[1]);
+  h += `<div class="st-pane" data-pane="sends">${sent.length ? `<div class="st-list">${sent.map(([t, n]) => `<span class="st-chip"><img src="${enemyThumb(DB, t)}" alt="">${mobName(t)} ×${n}</span>`).join("")}</div>` : "<p class='dim'>No sends this match.</p>"}${Object.keys(L.stolenBy).length ? `<div class="st-sub">Lives stolen from you</div><div class="st-list">${Object.entries(L.stolenBy).map(([k, n]) => `<span class="st-chip">${seatName(+k)} −${n}</span>`).join("")}</div>` : ""}</div>`;
+  return h;
+}
+function bindStatsTabs(root) {
+  root.querySelectorAll("[data-st]").forEach((b) => b.onclick = () => {
+    root.querySelectorAll("[data-st]").forEach((x) => x.classList.toggle("sel", x === b));
+    root.querySelectorAll("[data-pane]").forEach((p) => p.classList.toggle("show", p.dataset.pane === b.dataset.st));
+  });
+}
+function openStats() {
+  const m = $("stats-modal"); if (!m || !game.state) return;
+  m.innerHTML = `<div class="modal wide glass"><button class="panel-close" id="stm-close">${icon("close")}</button><h2>Match Stats</h2>${game.state.x ? statsHTML(game.state) : "<p class='dim'>Detailed stats are tracked under the Expanded rules.</p>"}</div>`;
+  bindStatsTabs(m);
+  m.classList.add("show");
+  $("stm-close").onclick = () => m.classList.remove("show");
+}
+
+// ---- replays --------------------------------------------------------------------------
+const REPLAY_KEY = "skyhold_replays_v1";
+function loadReplays() { try { return JSON.parse(localStorage.getItem(REPLAY_KEY)) || []; } catch (e) { return []; } }
+function saveReplays(list) {
+  for (let n = list.length; n >= 0; n--) {
+    try { localStorage.setItem(REPLAY_KEY, JSON.stringify(list.slice(0, n))); return true; } catch (e) { /* storage full: keep fewer */ }
+  }
+  return false;
+}
+function replayTitle(st) {
+  const pl = st.players[0];
+  if (st.challenge) return st.challenge.def.name + (st.challenge.hard ? " (Hard)" : "");
+  if (st.gameMode === "versus") return "Vs " + (st.players.length - 1) + " NPCs · " + DB.ELEMENTS[pl.elements[0]].name;
+  return (st.mode === "single" ? "Single" : st.mode === "endless" ? "Endless" : "Loop") + " · " + pl.elements.map((e) => DB.ELEMENTS[e].name).join(", ");
+}
+function storeReplay(result) {
+  if (!game.state || !game.recLog || !game.runCfg || game.replay || game.state.tick < 300 || game._storedReplay === game.state) return;
+  game._storedReplay = game.state;
+  const st = game.state;
+  const rec = { id: Date.now().toString(36), date: new Date().toISOString(), title: replayTitle(st), result, ticks: st.tick, wave: st.players[0].wave,
+    cfg: game.runCfg.stateCfg, log: game.recLog, version: DB.contentHash, gameMode: st.gameMode, hash: hashState(st) };
+  const list = loadReplays(); list.unshift(rec);
+  saveReplays(list.slice(0, 6));
+}
+function openReplays() {
+  const m = $("replays-modal"); if (!m) return;
+  const list = loadReplays();
+  m.innerHTML = `<div class="modal wide glass"><button class="panel-close" id="rp-close">${icon("close")}</button><h2>Replays</h2>
+    <p class="dim">Your last six matches are kept on this device. A replay re-runs the match from its seed and every command, so it plays back exactly.</p>
+    <div class="rp-list">${list.length ? list.map((r, i) => `<div class="rp-row"><div class="rp-info"><b>${r.title}</b><span class="dim">${new Date(r.date).toLocaleString()} · ${fmtT(r.ticks)} · wave ${r.wave} · ${r.result}</span>${r.version !== DB.contentHash ? `<span class="warn">made with another game version — may play back differently</span>` : ""}</div>
+      <button class="btn small primary" data-watch="${i}">Watch</button><button class="btn small" data-exp="${i}">Export</button><button class="btn small ghost" data-del="${i}">✕</button></div>`).join("") : "<p class='dim'>No replays yet — finish a match.</p>"}</div>
+    <div class="sm-actions"><button class="btn" id="rp-import">⬆ Import replay file</button></div><input type="file" id="rp-file" accept=".json,application/json" hidden></div>`;
+  m.classList.add("show");
+  $("rp-close").onclick = () => m.classList.remove("show");
+  m.querySelectorAll("[data-watch]").forEach((b) => b.onclick = () => { m.classList.remove("show"); watchReplay(list[+b.dataset.watch]); });
+  m.querySelectorAll("[data-exp]").forEach((b) => b.onclick = () => { const r = list[+b.dataset.exp]; if (SaveSystem) SaveSystem.downloadText(JSON.stringify({ skyholdReplay: 1, ...r }), "skyhold-replay-" + r.id + ".json"); });
+  m.querySelectorAll("[data-del]").forEach((b) => b.onclick = () => { list.splice(+b.dataset.del, 1); saveReplays(list); openReplays(); refreshMenu(); });
+  $("rp-import").onclick = () => $("rp-file").click();
+  $("rp-file").onchange = (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => { try { const r = JSON.parse(rd.result); if (!r.skyholdReplay || !r.cfg || !r.log) throw new Error("not a Skyhold replay"); delete r.skyholdReplay; const l = loadReplays(); l.unshift(r); saveReplays(l.slice(0, 6)); openReplays(); refreshMenu(); ui.toast("Replay imported"); } catch (err) { ui.toast("Import failed: " + err.message, "warn"); } };
+    rd.readAsText(f);
+  };
+}
+function watchReplay(r) {
+  const c = r.cfg;
+  startRun({ gameMode: c.gameMode, mode: c.mode, economy: c.economy, status: c.statusMode, corridors: c.players[0].corridorCount, elements: c.players[0].elements, ruleset: c.ruleset, mods: c.mods, challenge: c.challenge, pacing: "manual" }, c.seed, r);
+  game.speed = 2;
+}
+function refreshReplayBar() {
+  const b = $("replay-bar"); if (!b) return;
+  const on = !!(game.spectate && game.state);
+  b.classList.toggle("show", on);
+  if (!on) return;
+  const st = game.state, tot = game.replay ? game.replay.ticks : 0;
+  const html = `<button class="btn small" id="rb-play">${game.paused ? "▶" : "⏸"}</button><button class="btn small" id="rb-speed">×${game.speed}</button>
+    <span class="rb-time">${game.replay ? "▶" : "👁"} ${fmtT(st.tick)}${tot ? " / " + fmtT(tot) : ""}</span>
+    ${game.replay ? `<button class="btn small" id="rb-skip">+30s</button>` : ""}<button class="btn small" id="rb-stats">Stats</button><button class="btn small ghost" id="rb-exit">Exit</button>`;
+  if (b._h !== html) {
+    b.innerHTML = html; b._h = html;
+    $("rb-play").onclick = () => { if (game.replay && st.tick >= game.replay.ticks) return; game.paused = !game.paused; refreshReplayBar(); };
+    $("rb-speed").onclick = () => { const S = [1, 2, 4, 8]; game.speed = S[(S.indexOf(game.speed) + 1) % S.length]; refreshReplayBar(); };
+    const sk = $("rb-skip"); if (sk) sk.onclick = () => { const end = Math.min(game.replay.ticks, game.state.tick + 900); while (game.state.tick < end) game.driver.tick(); refreshReplayBar(); };
+    $("rb-stats").onclick = openStats;
+    $("rb-exit").onclick = () => { game.driver = null; showScreen("menu"); refreshMenu(); refreshReplayBar(); };
+  }
+}
+
+// ---- challenges -----------------------------------------------------------------------
+function openChallenges() {
+  const m = $("challenges-modal"); if (!m) return;
+  if (!challengesOpen()) { ui.toast("Win any match to open the Challenges."); return; }
+  const avail = DB.availableElements(masteryMap());
+  if (!avail.includes(game.chEl)) game.chEl = avail[0];
+  const skinName = (id) => (BUILDER_SKINS.find((k) => k.id === id) || {}).name || id;
+  m.innerHTML = `<div class="modal wide glass"><button class="panel-close" id="ch-close">${icon("close")}</button><h2>Challenges</h2>
+    <p class="dim">Ten waves, then a boss. Hard mode adds a restriction. Beat one to unlock a builder skin.</p>
+    <div class="assign-opts ch-els">${avail.map((e) => `<button class="elbtn ${e === game.chEl ? "sel" : ""}" style="--ec:${DB.ELEMENTS[e].color}" data-chel="${e}">${sigil(e, "sm")}<span>${DB.ELEMENTS[e].name}</span></button>`).join("")}</div>
+    <div class="ch-list">${CHALLENGES.map((c) => { const done = xmeta.challenges[c.id] || {}; return `<div class="ch-card"><img src="${enemyThumb(DB, c.boss)}" alt=""><div class="ch-info"><b>${c.name}</b><span>${c.desc}</span><span class="dim">Boss: ${mobName(c.boss)} · Reward: ${skinName(c.reward)} builder</span><span class="dim">Hard: ${c.hard.label}</span></div>
+      <div class="ch-btns"><button class="btn small primary" data-ch="${c.id}">${done.normal ? "✓ " : ""}Normal</button><button class="btn small danger" data-chh="${c.id}">${done.hard ? "✓ " : ""}Hard</button></div></div>`; }).join("")}</div></div>`;
+  m.classList.add("show");
+  $("ch-close").onclick = () => m.classList.remove("show");
+  m.querySelectorAll("[data-chel]").forEach((b) => b.onclick = () => { game.chEl = b.dataset.chel; openChallenges(); });
+  const go = (id, hard) => { m.classList.remove("show"); startRun({ gameMode: "solo", mode: "loop", corridors: 1, economy: "shared", status: "standard", pacing: "manual", elements: [game.chEl], ruleset: "expanded", mods: {}, challenge: { id, hard } }); };
+  m.querySelectorAll("[data-ch]").forEach((b) => b.onclick = () => go(b.dataset.ch, false));
+  m.querySelectorAll("[data-chh]").forEach((b) => b.onclick = () => go(b.dataset.chh, true));
+}
+
+// wave preview for the dock (mirrors the sim's wave generator, so it's exact)
+function previewWave(state, fp, wave) {
+  if (!state.x) return null;
+  if (state.challenge) return generateChallengeWave(state.seedBase, wave, state.challenge.def, bal.roster);
+  const m = state.x;
+  return generateWaveExpanded(state.seedBase, wave, fp.corridorCount, DB.CONFIG.bossEvery, { roster: bal.roster, filter: (r) => !(m.noFlyers && r.fly) && !(m.noDisruptors && r.disrupt) && !(m.noStealth && r.stealth) });
 }
 
 // ---------------------------------------------------------------------------
@@ -514,6 +762,11 @@ function boot() {
     towerThumb: (id, stage) => towerThumb(DB, id, stage == null ? 1 : stage), enemyThumb: (t) => enemyThumb(DB, t),
     sfx: (n) => sound.play(n),
     onSetupPreview: setupPreview,
+    previewWave,
+    bal,
+    getSkins: () => BUILDER_SKINS.map((k) => ({ ...k, unlocked: skinUnlocked(k) })),
+    getSkin: () => xmeta.skin || "element",
+    setSkin: (id) => { xmeta.skin = id; game.skin = id; saveXMeta(); },
   });
   loadDockPref();
   document.addEventListener("pointerdown", () => sound.unlock(), { once: true });
@@ -553,6 +806,7 @@ function boot() {
       botTick();
     },
     getSpeed: () => game.speed,
+    maxTicksPerFrame: 10,
     onRender: (alpha) => renderer.render(game.screen === "game" ? view : null, alpha),
     isRunning: () => {
       if (game.screen !== "game" || game.paused || !game.state) return false;
@@ -561,15 +815,21 @@ function boot() {
     renderFps: 60,
   });
   loop.start();
-  setInterval(() => { if (game.screen === "game" && game.state) { ui.updateTopBar(); ui.refreshPanels(); ui.updateEnemyOverview(); refreshAutoBtn(); refreshWaveFab(); } }, 250);
-  window.__skyhold = { game, view, renderer, cmd, DB, startRun, setView, enterCorridor, onTap, ui };
+  setInterval(() => { if (game.screen === "game" && game.state) { ui.updateTopBar(); ui.refreshPanels(); ui.updateEnemyOverview(); refreshAutoBtn(); refreshWaveFab(); if (game.spectate) refreshReplayBar(); } }, 250);
+  window.__skyhold = { game, view, renderer, cmd, DB, startRun, setView, enterCorridor, onTap, ui, botTick, openStats, openReplays, openChallenges, endScreen, watchReplay, loadReplays };
+  // dev/test helper: fast-forward n ticks (bots included)
+  window.__skyhold.ff = (n) => { for (let i = 0; i < n && game.driver; i++) { game.clock += 1 / 30; botTick(); game.driver.tick(); if (game.state.finished) break; } return game.state.tick; };
 }
 function refreshAutoBtn() {
   const b = $("quick-auto-wave"); if (!b) return;
   b.classList.toggle("on", !!game.autoWave);
   b.innerHTML = icon("auto") + "<span>" + (game.autoWave ? (game.autoT != null ? Math.max(1, Math.ceil(game.autoT)) + "s" : "Auto ✓") : "Auto") + "</span>";
 }
-function phaseRunning() { if (!game.state) return false; const pl = game.state.players[game.me]; return ["build", "wave", "prep", "endboss"].includes(pl.phase); }
+function phaseRunning() {
+  if (!game.state) return false;
+  if (game.spectate) return game.replay ? true : !game.state.finished;
+  const pl = game.state.players[game.me]; return ["build", "wave", "prep", "endboss"].includes(pl.phase);
+}
 
 function bindUI() {
   const ovp = $("enemy-overview");
@@ -579,8 +839,26 @@ function bindUI() {
   bind("btn-mastery", () => ui.openMastery());
   bind("btn-menu-save", () => { const m = $("save-modal"); if (m) m.classList.add("show"); });
   bind("btn-multiplayer", () => ui.toast("Multiplayer (Co-op & Compete) is coming to Skyhold soon.", "warn"));
+  bind("btn-challenges", openChallenges);
+  bind("btn-replays", openReplays);
+  bind("pause-stats", () => { openStats(); });
+  bind("end-spectate", () => { const sc = $("end-screen"); if (sc) sc.classList.remove("show"); game.spectate = true; game.paused = false; document.body.dataset.spectate = "live"; refreshReplayBar(); ui.toast("Spectating — the match plays on without you."); });
+  bind("end-replay", () => { const sc = $("end-screen"); if (sc) sc.classList.remove("show"); const r = loadReplays()[0]; if (r) watchReplay(r); else ui.toast("No replay saved for this match.", "warn"); });
+  document.querySelectorAll("[data-ruleset]").forEach((b) => b.onclick = () => { setup.ruleset = b.dataset.ruleset; setup._lastTouched = "ruleset"; ui.renderSetup(setup, avail()); sound.play("click"); });
+  document.querySelectorAll("[data-diff]").forEach((b) => b.onclick = () => { setup.difficulty = b.dataset.diff; setup._lastTouched = "difficulty"; ui.renderSetup(setup, avail()); sound.play("click"); });
+  document.querySelectorAll("[data-mod]").forEach((b) => b.onclick = () => {
+    const k = b.dataset.mod;
+    if (k === "goldMult" || k === "livesMult") { const S = [0.5, 1, 2]; setup.mods[k] = S[(S.indexOf(setup.mods[k]) + 1) % S.length]; }
+    else setup.mods[k] = !setup.mods[k];
+    setup._lastTouched = "mod:" + k; ui.renderSetup(setup, avail()); sound.play("click");
+  });
+  const RULES_KEY = "skyhold_setuprules_v1";
+  const applyRules = (open) => { const m = $("rules-body"); if (m) m.classList.toggle("open", open); const ch = $("rules-chev"); if (ch) ch.textContent = open ? "▴" : "▾"; };
+  let rulesOpen = false; try { rulesOpen = localStorage.getItem(RULES_KEY) === "1"; } catch (e) { /* fine */ }
+  applyRules(rulesOpen);
+  bind("setup-rules", () => { rulesOpen = !rulesOpen; try { localStorage.setItem(RULES_KEY, rulesOpen ? "1" : "0"); } catch (e) { /* fine */ } applyRules(rulesOpen); });
   bind("btn-setup-back", () => { showScreen("menu"); refreshMenu(); });
-  bind("btn-start-run", () => startRun({ mode: setup.mode, corridors: setup.corridors, economy: setup.economy, status: setup.status, gameMode: setup.gameMode, pacing: setup.pacing, elements: setup.elements }));
+  bind("btn-start-run", () => startRun({ mode: setup.mode, corridors: setup.corridors, economy: setup.economy, status: setup.status, gameMode: setup.gameMode, pacing: setup.pacing, elements: setup.elements, ruleset: setup.ruleset, mods: { ...setup.mods }, difficulty: setup.difficulty }));
   const avail = () => DB.availableElements(masteryMap());
   document.querySelectorAll("[data-mode]").forEach((b) => b.onclick = () => { setup.mode = b.dataset.mode; if (setup.mode === "single") setup.corridors = 1; else if (setup.corridors < 3) setup.corridors = 4; setup._lastTouched = "mode"; ui.renderSetup(setup, avail()); sound.play("click"); });
   document.querySelectorAll("[data-econ]").forEach((b) => b.onclick = () => { setup.economy = b.dataset.econ; setup._lastTouched = "econ"; ui.renderSetup(setup, avail()); sound.play("click"); });
@@ -642,9 +920,10 @@ function bindUI() {
   bind("pause-resume", () => togglePause(false));
   bind("pause-restart", () => { togglePause(false); startRun(rematchCfg()); });
   bind("pause-save", () => { autosave(); ui.toast("Run saved to this device"); });
-  bind("pause-exit", () => { togglePause(false); game.driver = null; showScreen("menu"); refreshMenu(); });
+  bind("pause-exit", () => { togglePause(false); storeReplay("Abandoned"); game.driver = null; showScreen("menu"); refreshMenu(); });
   bind("end-again", () => { const sc = $("end-screen"); if (sc) sc.classList.remove("show"); startRun(rematchCfg()); });
   bind("end-menu", () => { const sc = $("end-screen"); if (sc) sc.classList.remove("show"); game.driver = null; showScreen("menu"); refreshMenu(); });
+  bind("btn-bestiary", () => ui.openBestiary());
   bind("end-endless", () => { const sc = $("end-screen"); if (sc) sc.classList.remove("show"); game.state.players[game.me].phase = "build"; game.state.mode = "endless"; game.mode = "endless"; ui.updateTopBar(); ui.updateWavePanel(); ui.toast("Endless Mode!"); });
   // Save / Import / Export (Circle's flow)
   bind("sm-close", () => $("save-modal").classList.remove("show"));
@@ -682,8 +961,10 @@ function refreshAudio() {
 }
 function rematchCfg() {
   const pacing = game.autoWave ? "auto" : "manual";
-  if (isVersus()) return { mode: "endless", corridors: game.state.players.length, economy: "shared", status: game.state.statusMode, gameMode: "versus", pacing, elements: [myPlayer().elements[0]] };
-  return { mode: game.mode === "endless" ? "loop" : game.mode, corridors: myPlayer().corridorCount, economy: game.state.economy, status: game.state.statusMode, gameMode: "solo", pacing, elements: myPlayer().elements };
+  const rc = game.runCfg || {};
+  const keep = { ruleset: game.state.ruleset, mods: rc.mods, difficulty: rc.difficulty, challenge: rc.challenge };
+  if (isVersus()) return { mode: "endless", corridors: game.state.players.length, economy: "shared", status: game.state.statusMode, gameMode: "versus", pacing, elements: [myPlayer().elements[0]], ...keep };
+  return { mode: game.mode === "endless" ? "loop" : game.mode, corridors: myPlayer().corridorCount, economy: game.state.economy, status: game.state.statusMode, gameMode: "solo", pacing, elements: myPlayer().elements, ...keep };
 }
 function updateGameModeButtons() {
   document.querySelectorAll("[data-gamemode]").forEach((b) => {
@@ -708,78 +989,140 @@ let bots = [];
 function setupBots() {
   bots = [];
   if (!isVersus() || !game.state) return;
-  for (let i = 1; i < game.state.players.length; i++) bots.push({ id: i, nextAt: game.clock + 1.5 + i * 0.5 });
+  const D = DIFFICULTY[game.difficulty] || DIFFICULTY.normal;
+  for (let i = 1; i < game.state.players.length; i++) bots.push({ id: i, D, nextAt: game.clock + 1.5 + i * 0.5 });
 }
 function botTick() {
-  if (!isVersus() || !game.state || game.state.finished) return;
+  if (!isVersus() || !game.state || game.state.finished || game.replay) return;
   for (const b of bots) {
     if (game.clock < b.nextAt) continue;
-    b.nextAt = game.clock + 1.1 + Math.random() * 0.9;
+    const D = b.D || DIFFICULTY.normal;
+    b.nextAt = game.clock + D.act[0] + Math.random() * (D.act[1] - D.act[0]);
     botAct(b);
   }
+}
+// what the next corridor's defence is weak against (Hard/Insane pick sends that exploit it)
+function scoutDefence(st, target) {
+  const corr = target.corridors[0]; if (!corr) return null;
+  let air = 0, splash = 0, detect = 0, n = 0;
+  for (const tw of corr.towers) {
+    const d = DB.TOWER_BY_ID[tw.def.id]; if (!d) continue;
+    n++;
+    const a = d.archetype;
+    if (a !== "splash" && a !== "melee" && a !== "support") air++;
+    if (a === "splash" || a === "melee") splash++;
+    if (d.element === "light" || tw.level >= 7 || a === "support") detect++;
+  }
+  return { n, air, splash, detect };
 }
 function botAct(b) {
   const st = game.state, pl = st.players[b.id];
   if (!pl || !pl.alive) return;
+  const D = b.D || DIFFICULTY.normal;
   const corr = pl.corridors[0];
   const q = (c) => game.driver.queue(c);
   const wave = Math.max(1, pl.wave);
   const reserve = 30 + wave * 6;
   const G = st.grid;
+  const X = !!st.x;
   if (!b.plan) { b.plan = DB.makeMazePlan(G.cols, G.rows, DB.CONFIG.towerSize); b.fails = {}; }
   if (b.lastBuild != null) {
     if (corr.towers.length <= b.lastBuild.count) b.fails[b.lastBuild.idx] = (b.fails[b.lastBuild.idx] || 0) + 1;
     b.lastBuild = null;
   }
-  const want = Math.min(24, 3 + Math.ceil(wave * 0.8));
-  if (corr.towers.length < want) {
+  // build the maze (with builders, don't queue up more than a couple of constructions)
+  const pending = X && corr.builder ? corr.builder.queue.length + (corr.builder.cur ? 1 : 0) : 0;
+  const want = Math.min(D.towers, 3 + Math.ceil(wave * 0.8));
+  if (corr.towers.length < want && pending < 2) {
     let idx = -1;
     for (let i = 0; i < b.plan.length; i++) {
       if ((b.fails[i] || 0) >= 3) continue;
-      const s = b.plan[i];
-      if (corr.grid[(s.r + 1) * G.cols + (s.c + 1)] === 2) continue;
+      const sp = b.plan[i];
+      if (corr.grid[(sp.r + 1) * G.cols + (sp.c + 1)] === 2) continue;
       idx = i; break;
     }
     if (idx >= 0) {
-      const options = DB.TOWERS.filter((t) => t.element === corr.element && t.cost <= pl.gold - 20).sort((a, z) => z.cost - a.cost);
+      let options = DB.TOWERS.filter((t) => t.element === corr.element && t.cost <= pl.gold - 20).sort((a, z) => z.cost - a.cost);
+      // smarter bots keep some anti-air and detection in the mix once flyers and stealth appear
+      if (D.counter && X && options.length) {
+        const mine = scoutDefence(st, pl);
+        const needAir = mine && mine.n >= 4 && mine.air < mine.n * 0.5;
+        if (needAir) { const aa = options.filter((t) => t.archetype !== "splash" && t.archetype !== "melee" && t.archetype !== "support"); if (aa.length) options = aa; }
+      }
       if (options.length) {
         const t = Math.random() < 0.6 ? options[0] : options[Math.floor(Math.random() * options.length)];
-        const s = b.plan[idx];
+        const sp = b.plan[idx];
         b.lastBuild = { idx, count: corr.towers.length };
-        q(C.buildTower(b.id, 0, s.c + 1, s.r + 1, t.id, 5));
+        q(C.buildTower(b.id, 0, sp.c + 1, sp.r + 1, t.id, 5));
         return;
       }
     }
   }
-  if (corr.towers.length && Math.random() < 0.5) {
-    let tw = corr.towers[0];
-    for (const t of corr.towers) if (t.level < tw.level) tw = t;
-    if (tw.level < DB.CONFIG.maxLevel) {
+  if (corr.towers.length && Math.random() < D.up) {
+    let tw = null;
+    for (const t of corr.towers) if (!t.bState && !(t.upT > 0) && (!tw || t.level < tw.level)) tw = t;
+    if (tw && tw.level < DB.CONFIG.maxLevel) {
       const cost = Math.round(tw.def.cost * DB.SCALING.upgradeCostBase * Math.pow(DB.SCALING.costGrowth, tw.level - 1));
       if (pl.gold > cost + reserve) { q(C.upgradeTower(b.id, 0, tw.id)); return; }
-    } else if (tw.mutations.length < 2 && tw.def.mutations.length) {
+    } else if (tw && tw.mutations.length < 2 && tw.def.mutations.length) {
       const m = tw.def.mutations[Math.floor(Math.random() * tw.def.mutations.length)];
       q(C.mutateTower(b.id, 0, tw.id, m.id, 5)); return;
     }
   }
-  if (corr.towers.length >= 3 && wave >= 2) {
-    const types = Object.keys(DB.SENDS);
-    if (Math.random() < 0.25) {
-      const t = types[Math.floor(Math.random() * types.length)];
-      const lvl = (pl.sendLevels && pl.sendLevels[t]) || 1;
-      if (lvl < DB.SEND_MAX_LEVEL && pl.gold > DB.sendUpgradeCost(t, lvl) + reserve * 2) { q(C.upgradeSend(b.id, t)); return; }
+  if (corr.towers.length < 3 || wave < 2 || Math.random() > D.aggro) return;
+  // sends
+  const catalog = X ? DB.SENDS_EXPANDED : DB.SENDS;
+  const costOf = X ? DB.sendCostX : DB.sendCost, upOf = X ? DB.sendUpgradeCostX : DB.sendUpgradeCost;
+  const tiers = st.bal.sendTiers;
+  const usable = Object.keys(catalog).filter((t) => {
+    if (!X) return true;
+    const s = catalog[t];
+    if (s.tier > D.maxTier) return false;
+    const d = st.bal.enemies[t] && st.bal.enemies[t].x; const tt = d ? d.t : {};
+    const m = st.x;
+    if ((m.noFlyers && tt.fly) || (m.noStealth && (tt.invisible || tt.cloakCycle || tt.cloakAura))) return false;
+    if (m.noDisruptors && MOB_BY_ID[t] && (tt.jamPass || tt.corrodeAura || tt.chillAura || tt.chillFly || tt.confuseAura || tt.boulder || tt.rootTower || tt.curseTower || tt.deathTowerSlow || tt.deathStun || tt.shredObstacle)) return false;
+    if (m.sendStock && tiers && tiers[s.tier]) {
+      if (st.tick < tiers[s.tier].unlockTicks) return false;
+      const sk = pl.sendStock[t]; if (sk && sk.n <= 0) return false;
     }
-    const budget = pl.gold - reserve * 2;
-    let bestT = null, bestC = 0;
-    for (const t of types) {
-      const lvl = (pl.sendLevels && pl.sendLevels[t]) || 1;
-      const c = DB.sendCost(t, lvl);
-      if (c <= budget && c > bestC) { bestC = c; bestT = t; }
-    }
-    if (bestT && Math.random() < 0.7) {
-      const n = Math.max(1, Math.min(3, Math.floor(budget / bestC)));
-      for (let i = 0; i < n; i++) q(C.sendEnemy(b.id, 0, bestT));
-    }
+    return true;
+  });
+  if (!usable.length) return;
+  if (Math.random() < 0.2) {
+    const t = usable[Math.floor(Math.random() * usable.length)];
+    const lvl = (pl.sendLevels && pl.sendLevels[t]) || 1;
+    if (lvl < DB.SEND_MAX_LEVEL && pl.gold > upOf(t, lvl) + reserve * 2) { q(C.upgradeSend(b.id, t)); return; }
+  }
+  const budget = pl.gold - reserve * 2;
+  let pick = null;
+  if (D.counter && X) {
+    // exploit the neighbour's defence: flyers vs ground-only mazes, stealth vs no detection, swarms vs single-target
+    let target = null; for (let i = 1; i < st.players.length; i++) { const p = st.players[(b.id + i) % st.players.length]; if (p.alive) { target = p; break; } }
+    const sc = target && scoutDefence(st, target);
+    const traitsOf = (t) => (st.bal.enemies[t] && st.bal.enemies[t].x && st.bal.enemies[t].x.t) || {};
+    const fit = (t) => {
+      const tt = traitsOf(t), c = costOf(t, (pl.sendLevels && pl.sendLevels[t]) || 1);
+      if (c > budget) return -1;
+      let v = c;
+      if (sc && sc.n) {
+        if (tt.fly && sc.air < sc.n * 0.4) v *= 2.2;
+        if ((tt.invisible || tt.cloakAura) && sc.detect === 0) v *= 2.5;
+        if ((catalog[t].count || 1) >= 4 && sc.splash < sc.n * 0.25) v *= 1.6;
+        if (tt.splashResist && sc.splash > sc.n * 0.4) v *= 1.6;
+      }
+      return v;
+    };
+    let best = -1;
+    for (const t of usable) { const v = fit(t); if (v > best) { best = v; pick = t; } }
+  } else {
+    let bestC = 0;
+    for (const t of usable) { const c = costOf(t, (pl.sendLevels && pl.sendLevels[t]) || 1); if (c <= budget && c > bestC && Math.random() < 0.85) { bestC = c; pick = t; } }
+  }
+  if (pick) {
+    const c = costOf(pick, (pl.sendLevels && pl.sendLevels[pick]) || 1);
+    const n = Math.max(1, Math.min(3, Math.floor(budget / Math.max(1, c))));
+    for (let i = 0; i < n; i++) q(C.sendEnemy(b.id, 0, pick));
   }
 }
 

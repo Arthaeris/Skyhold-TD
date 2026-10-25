@@ -20,7 +20,21 @@ scene.add(new THREE.HemisphereLight("#a9b8ff", "#2a1d4a", 1.7));
 const sun = new THREE.DirectionalLight("#ffe8cf", 2.6); sun.position.set(-30, 60, 40); scene.add(sun);
 const DB = window.DB;
 const items = [];
-if (what === "enemies") {
+if (what === "bestiary") {
+  // every expanded mob (and builders with &builders): ?what=bestiary&page=0
+  const { MOB_SPECS, builderModel, BUILDER_SPECS } = await import("../render/mobmodels.js");
+  const { buildEnemyPreview, enemyModels } = await import("../render/enemies.js");
+  const { Part } = await import("../render/kit.js");
+  let ids = Object.keys(MOB_SPECS);
+  const page = +(P.get("page") || 0), per = 24;
+  if (P.has("builders")) {
+    ids = Object.keys(BUILDER_SPECS);
+    ids.forEach((id, i) => { const M = builderModel(id); const g = new THREE.Group(); for (const [name, fn] of Object.entries(M.parts)) { const pp = new Part(7); fn(pp); const part = pp.build(true); const piv = M.pivots[name] || [0, 0, 0]; part.position.set(...piv); g.add(part); } g.position.set((i % 5) * 3.4 - 6.8, 0.3, Math.floor(i / 5) * 3.6 - 4); g.scale.setScalar(1.4); scene.add(g); });
+  } else {
+    ids = ids.slice(page * per, page * per + per);
+    ids.forEach((id, i) => { const g = buildEnemyPreview(DB, id); const M = enemyModels[id]; const sc = Math.min(1.25, 2.2 / Math.max(M.height + (M.hover || 0), M.size)); g.scale.setScalar(sc); g.position.x = (i % 6) * 4.2 - 10.5; g.position.z = Math.floor(i / 6) * 4.6 - 7; g.position.y = (M.hover || 0) * sc; g.rotation.y = 0.75; scene.add(g); });
+  }
+} else if (what === "enemies") {
   const { buildEnemyPreview } = await import("../render/enemies.js");
   Object.keys(DB.ENEMIES).forEach((id, i) => { const g = buildEnemyPreview(DB, id); g.position.set((i % 4) * 5 - 7.5, 0, Math.floor(i / 4) * 6); scene.add(g); items.push(g); });
 } else if (one) {
@@ -29,7 +43,7 @@ if (what === "enemies") {
   DB.TOWERS.forEach((t, i) => { const m = createTowerModel(DB, t.id, stage, mut); m.root.position.set((i % 5) * 5 - 10, 0, Math.floor(i / 5) * 5.4 - 19); scene.add(m.root); });
 }
 const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 500);
-const aspect = innerWidth / innerHeight, halfW = what === "enemies" ? 11 : 13.5;
+const aspect = innerWidth / innerHeight, halfW = what === "enemies" ? 11 : what === "bestiary" ? 13.5 : 13.5;
 cam.left = -halfW; cam.right = halfW; cam.top = halfW / aspect; cam.bottom = -halfW / aspect; cam.updateProjectionMatrix();
 const e = 40 * Math.PI / 180;
 cam.position.set(0, Math.sin(e) * 100, Math.cos(e) * 100 + (what === "enemies" ? 4 : 0)); cam.lookAt(0, 0, what === "enemies" ? 4 : 0);

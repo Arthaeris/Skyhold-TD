@@ -8,6 +8,7 @@
 import * as fx from "../sim/fx.js";
 import { generateWave, waveAffix, AFFIXES } from "../sim/waves.js";
 import { icon, sigil } from "./icons.js";
+import { traitList, MOB_BY_ID, ARMOR_CLASSES, SEND_TIERS } from "../content/mobs.js";
 
 const $ = (id) => document.getElementById(id);
 const toI = (v) => fx.toInt(v);
@@ -197,9 +198,10 @@ export function createUI(opts) {
       v.state.players.forEach((p, i) => {
         const el = DB.ELEMENTS[p.elements[0]];
         let inside = 0; for (const e of v.state.enemies) if (e.owner === i) inside++;
-        const name = i === v.me ? "You" : "NPC " + i;
+        const name = i === v.me ? "You" : (v.anonymous ? "Rival " : "NPC ") + i;
+        const hide = v.anonymous && i !== v.me;
         html += `<div class="ov-row ${p.alive ? "" : "dead"}" data-ci="${i}">
-          <span class="ov-el" style="color:${el.color}">${sigil(p.elements[0], "xs")} ${name}</span>
+          <span class="ov-el" style="color:${hide ? "#c8c8e0" : el.color}">${hide ? "🎭" : sigil(p.elements[0], "xs")} ${name}</span>
           <span class="ov-num">${p.alive ? "❤" + p.lives + " · " + inside : "☠ out"}</span>
           <div class="ov-bar"><div style="width:${Math.min(100, (p.lives / p.maxLives) * 100)}%;background:${p.alive ? el.color : "#555"}"></div></div></div>`;
       });
@@ -239,17 +241,21 @@ export function createUI(opts) {
       const next = pl.wave + 1;
       const isBoss = next % DB.CONFIG.bossEvery === 0;
       const agg = {};
-      for (const g of generateWave(next, pl.corridorCount, DB.CONFIG.bossEvery)) agg[g.type] = (agg[g.type] || 0) + g.count;
+      const groups = (v.state.x && opts.previewWave) ? opts.previewWave(v.state, pl, next) : generateWave(next, pl.corridorCount, DB.CONFIG.bossEvery);
+      for (const g of groups) agg[g.type] = (agg[g.type] || 0) + g.count;
       const affix = waveAffix(v.state.seedBase, next, DB.CONFIG.bossEvery);
       const parts = Object.keys(agg).map((t) => {
         const d = DB.ENEMIES[t] || { name: t };
         const n = (affix && affix.countMult) ? Math.max(1, Math.round(agg[t] * affix.countMult)) : agg[t];
-        return `<span class="wprev-item${d.boss ? " boss" : ""}"><img src="${ethumb(t)}" alt="">${n}× ${d.name}</span>`;
+        const m = MOB_BY_ID[t], tr = m ? m.traits : {};
+        const tag = tr.fly ? " 🪽" : (tr.invisible || tr.cloakCycle) ? " 👁" : "";
+        return `<span class="wprev-item${d.boss || (m && m.elite) ? " boss" : ""}" title="${m ? m.desc : ""}"><img src="${ethumb(t)}" alt="">${n}× ${d.name}${tag}</span>`;
       });
       html = `<span class="wprev-label${isBoss ? " boss" : ""}">${isBoss ? "⚠ Boss Wave " + next : "Next"}</span> ${parts.join("")}`;
       if (affix) html += ` <span class="wprev-affix" title="${affix.desc}">${affix.icon} ${affix.name}</span>`;
     } else if (pl.phase === "prep") {
-      html = `<span class="wprev-label boss">⚠ Final</span> <span class="wprev-item boss"><img src="${ethumb("endboss")}" alt="">1× ${(DB.ENEMIES.endboss && DB.ENEMIES.endboss.name) || "End Boss"}</span>`;
+      const bossT = v.state.challenge ? v.state.challenge.def.boss : "endboss";
+      html = `<span class="wprev-label boss">⚠ Final</span> <span class="wprev-item boss"><img src="${ethumb(bossT)}" alt="">1× ${(DB.ENEMIES[bossT] && DB.ENEMIES[bossT].name) || "End Boss"}</span>`;
     }
     if (wp._h !== html) { wp.innerHTML = html; wp._h = html; }
     wp.classList.toggle("show", !!html);
@@ -271,6 +277,7 @@ export function createUI(opts) {
     let html = `<button class="panel-close" id="tp-close">${icon("close")}</button>
       <div class="tp-head" style="--ec:${el.color}"><img class="tp-thumb" src="${thumb(def.id, Math.min(3, tw.level >= 10 ? 3 : tw.level >= 7 ? 2 : tw.level >= 4 ? 1 : 0))}" alt=""><div><div class="tp-name">${def.name}</div><div class="tp-sub">${sigil(def.element, "xs")} ${el.name} · ${def.archetype}</div><div class="tp-desc">${def.desc || ""}</div></div></div>
       <div class="tp-levels"><span class="badge">Lv ${tw.level}/10</span><span class="badge gold">${icon("star", "xs")} Expert ${tw.expert}/5</span></div>
+      ${v.state.x ? towerBadges(tw, def) : ""}
       <div class="exp-bar"><div style="width:${expPct * 100}%"></div></div>
       <div class="exp-label">${tw.expert < 5 ? tw.kills + " / " + expNeed + " kills" : "MAX EXPERTISE"} · ${tw.kills} total kills</div>
       <div class="tp-stats">
@@ -298,15 +305,31 @@ export function createUI(opts) {
     $("tp-sell").onclick = () => { cmd.sell(corr.index, tw.id); closeAllPanels(); };
     p.querySelectorAll("[data-mut]").forEach((b) => b.onclick = () => cmd.mutate(corr.index, tw.id, b.dataset.mut));
     p.querySelectorAll("[data-tm]").forEach((b) => b.onclick = () => cmd.setTarget(corr.index, tw.id, b.dataset.tm));
-    _twSig = tw.level + "/" + tw.expert + "/" + tw.kills + "/" + tw.mutations.length + "/" + (tw.targetMode || "first");
+    _twSig = twSig(tw);
     if (opts.onPanels) opts.onPanels();
   }
+  function twSig(t) { return t.level + "/" + t.expert + "/" + t.kills + "/" + t.mutations.length + "/" + (t.targetMode || "first") + "/" + (t.bState || 0) + (t.upT > 0 ? "u" : "") + (t.stunT > 0 ? "s" : "") + (t.jamT > 0 ? "j" : "") + (t.curseT > 0 ? "c" : "") + (t.confused ? "f" : ""); }
   function towerSynergyHtml(def) {
     const { setsUp, triggers } = synergiesForTower(def);
     if (!setsUp.length && !triggers.length) return "";
     let h = `<div class="tp-syn"><div class="tp-syn-head">${icon("flask", "xs")} Synergies</div>`;
     for (const s of setsUp) h += `<div class="tp-syn-row">${s.status.icon}+${sigil(s.el.id, "xs")} <b style="color:${s.syn.color}">${s.syn.name}</b> — hit ${s.status.name} enemies with ${s.el.name}: ${synergyEffectText(s.syn)}</div>`;
     for (const s of triggers) h += `<div class="tp-syn-row">${s.status.icon}+${sigil(s.el.id, "xs")} <b style="color:${s.syn.color}">${s.syn.name}</b> — this tower triggers it on ${s.status.name} enemies: ${synergyEffectText(s.syn)}</div>`;
+    return h + `</div>`;
+  }
+  function towerBadges(tw, def) {
+    let arche = def.archetype;
+    for (const mid of tw.mutations) { const m = def.mutations.find((x) => x.id === mid); if (m && m.mods.archetype) arche = m.mods.archetype; }
+    const air = arche !== "splash" && arche !== "melee";
+    const det = def.element === "light" || tw.level >= 7 || arche === "support";
+    let h = `<div class="tw-badges"><span class="${air ? "" : "no"}">🪽 ${arche === "support" ? "Aura reaches air" : "Hits air"}</span><span class="${det ? "" : "no"}">👁 ${det ? "Detects stealth" : "Detects at Lv 7"}</span>`;
+    if (tw.bState) h += `<span class="warn">🔨 ${tw.bState === 1 ? "Waiting for the builder" : "Under construction"}</span>`;
+    if (tw.upT > 0) h += `<span class="warn">⬆ Upgrading…</span>`;
+    if (tw.stunT > 0) h += `<span class="warn">💫 Stunned</span>`;
+    if (tw.jamT > 0 || (tw.xRate && tw.xRate < fx.ONE)) h += `<span class="warn">🐌 Slowed</span>`;
+    if (tw.curseT > 0 || (tw.xDmg && tw.xDmg < fx.ONE)) h += `<span class="warn">🧪 Weakened</span>`;
+    if (tw.confused) h += `<span class="warn">🌀 Confused</span>`;
+    if (tw.dmgDone) h += `<span>⚔ ${Math.round(tw.dmgDone / 65536)} dmg</span>`;
     return h + `</div>`;
   }
   function statRow(label, val, next) { return `<div class="stat-row"><span>${label}</span><span>${val}${(next != null && String(next) !== String(val)) ? ` <em>→ ${next}</em>` : ""}</span></div>`; }
@@ -347,12 +370,41 @@ export function createUI(opts) {
       <div class="ep-head">${e.boss ? "☠ " : ""}${name}${e.end ? " (END BOSS)" : ""}${e.sent ? " · SENT" : ""}${affix ? ` · ${affix.icon} ${affix.name.toUpperCase()}` : ""}</div>
       <div class="exp-bar big"><div style="width:${Math.min(1, Math.max(0, e.hp) / e.maxHp) * 100}%;background:#ff4d6d"></div></div>
       <div class="exp-label">${Math.max(0, toI(e.hp))} / ${toI(e.maxHp)} HP</div></div></div>
-      <div class="tp-stats">${statRow("Origin", sigil(oid, "xs") + " " + oel.name)}${statRow("Loops", e.loopCount)}${statRow("Armor", toI(e.armor))}${statRow("Reward", e.reward)}</div>
+      <div class="tp-stats">${statRow("Origin", sigil(oid, "xs") + " " + oel.name)}${statRow("Loops", e.loopCount)}${statRow("Armor", toI(e.armor) + (e.auraArmor ? " +" + toI(e.auraArmor) : ""))}${statRow("Reward", e.reward)}${e.shieldHp > 0 ? statRow("Shield", toI(e.shieldHp)) : ""}${e.sentBy != null && v.versus ? statRow("Sent by", e.sentBy === v.me ? "You" : (v.anonymous ? "Rival " + e.sentBy : "NPC " + e.sentBy)) : ""}</div>
+      ${mobTraitsHtml(e.type, e)}
       <div class="ep-status">${stk.length ? stk.map((s) => `<span class="stag" style="--sc:${s.color}">${s.icon} ${s.name}</span>`).join("") : "<span class='dim'>No status</span>"}</div>
       ${adapts.length ? `<div class="ep-adapt-head">↻ Loop adaptations</div><div class="ep-status">${adapts.join("")}</div>` : ""}`;
     p.classList.add("show");
     $("ep-close").onclick = closeAllPanels;
     if (opts.onPanels) opts.onPanels();
+  }
+
+  function mobTraitsHtml(type, e) {
+    const m = MOB_BY_ID[type]; if (!m) return "";
+    const ac = ARMOR_CLASSES[m.armorClass];
+    const tr = traitList(m.traits);
+    let live = "";
+    if (e) {
+      if (e.hidden) live += `<span class="tr-tag" style="color:#9fd8ff">👁 Hidden from your towers</span>`;
+      if (e.invulnT > 0) live += `<span class="tr-tag" style="color:#ffe066">✨ Invulnerable</span>`;
+    }
+    return `<div class="tr-list">${ac ? `<span class="ac-tag" style="color:${ac.color}">${ac.name}</span>` : ""}${live}${tr.map(([i, n, d]) => `<span class="tr-tag" title="${d}">${i} ${n}</span>`).join("")}</div><p class="dim ep-desc">${m.desc}</p>`;
+  }
+
+  // ---- bestiary -------------------------------------------------------------------
+  let _bstFilter = "all";
+  function openBestiary() {
+    const mo = $("bestiary-modal"); if (!mo) return;
+    const fams = [["all", "All"], ["swarm", "Swarms"], ["runner", "Runners"], ["brute", "Brutes"], ["flyer", "Flyers"], ["stealth", "Stealth"], ["disruptor", "Disruptors"], ["support", "Support"], ["death", "Death"], ["resistant", "Resistant"], ["summoner", "Summoners"], ["trickster", "Tricksters"], ["el", "Elemental"], ["elite", "Elites"]];
+    const ELS = ["fire", "ice", "nature", "storm", "light", "darkness", "mech", "abnormal"];
+    const list = (DB.MOBS_EXPANDED || []).map((id) => MOB_BY_ID[id]).filter((m) => _bstFilter === "all" || m.family === _bstFilter || (_bstFilter === "el" && ELS.includes(m.family)));
+    mo.innerHTML = `<div class="modal wide glass"><button class="panel-close" id="bst-close">${icon("close")}</button><h2>Bestiary</h2>
+      <p class="dim">The ${DB.MOBS_EXPANDED.length} creeps of the Expanded rules. They join regular waves from the wave shown, and all but the Treasure Goblin can be sent in Vs matches. Armour classes will matter once damage types arrive.</p>
+      <div class="bst-filter">${fams.map(([k, n]) => `<button class="seg ${k === _bstFilter ? "sel" : ""}" data-bf="${k}">${n}</button>`).join("")}</div>
+      <div class="bst-grid">${list.map((m) => { const ac = ARMOR_CLASSES[m.armorClass]; return `<div class="bst-card"><img src="${ethumb(m.id)}" alt=""><b>${m.name}${m.pack > 1 ? " ×" + m.pack : ""}</b><div class="meta"><span style="color:${ac.color}">${ac.name}</span><span>♥ ${m.hp} · W${m.minWave}${m.tier ? " · T" + SEND_TIERS[m.tier].name : ""}</span></div><div class="tr-list" style="justify-content:flex-start;margin:0">${traitList(m.traits).slice(0, 4).map(([i, n, d]) => `<span class="tr-tag" title="${d}">${i} ${n}</span>`).join("")}</div><span class="dim">${m.desc}</span></div>`; }).join("")}</div></div>`;
+    mo.classList.add("show");
+    $("bst-close").onclick = () => mo.classList.remove("show");
+    mo.querySelectorAll("[data-bf]").forEach((b) => b.onclick = () => { _bstFilter = b.dataset.bf; openBestiary(); });
   }
 
   // ---- send panel (competitive + versus): flat costs, 5 upgrade levels ------
@@ -364,8 +416,14 @@ export function createUI(opts) {
     renderSendPanel(true);
     if (opts.onPanels) opts.onPanels();
   }
+  let _sendTier = 1;
   function sendPanelSig(pl) {
     let sig = "";
+    const st = getView().state;
+    if (st.x) {
+      for (const t in DB.SENDS_EXPANDED) { const lvl = (pl.sendLevels && pl.sendLevels[t]) || 1; const sk = pl.sendStock && pl.sendStock[t]; sig += t + lvl + (pl.gold >= DB.sendCostX(t, lvl) ? "y" : "n") + (sk ? sk.n + ":" + Math.floor(sk.t / 15) : "-"); }
+      return sig + "|" + _sendTier + "|" + Math.floor(st.tick / 30) + "|" + (pl.income || 0);
+    }
     for (const t in DB.SENDS) {
       const lvl = (pl.sendLevels && pl.sendLevels[t]) || 1;
       sig += t + lvl + (pl.gold >= DB.sendCost(t, lvl) ? "y" : "n") + (lvl < DB.SEND_MAX_LEVEL && pl.gold >= DB.sendUpgradeCost(t, lvl) ? "Y" : "N");
@@ -378,6 +436,7 @@ export function createUI(opts) {
     const sig = sendPanelSig(pl);
     if (!force && sig === _sendSig) return;
     _sendSig = sig;
+    if (v.state.x) { renderSendPanelX(p, v, pl); return; }
     let html = `<button class="panel-close" id="sp-close">${icon("close")}</button>
       <div class="panel-head">${icon("swords")} Send Mobs <span class="cur">${icon("coins", "gold xs")} Income +${pl.income || 0}/5s</span></div>
       <p class="sp-note">${v.versus ? "Sends march into the NEXT corridor. Leaked mobs cost a life and travel on." : "Sends spawn on your opponent's field."} Flat cost per level — upgrade a type to make it stronger (and pricier).</p>
@@ -407,6 +466,64 @@ export function createUI(opts) {
     p.querySelectorAll("[data-up]").forEach((b) => b.onclick = () => cmd.upgradeSend(b.dataset.up));
   }
 
+  function renderSendPanelX(p, v, pl) {
+    const st = v.state, bal = opts.bal, mods = st.x;
+    const tiers = bal.sendTiers || {};
+    const now = st.tick;
+    const fmt = (ticks) => { const s = Math.ceil(ticks / 30); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+    const allowed = (t) => {
+      const x = bal.enemies[t] && bal.enemies[t].x; const tt = x ? x.t : {};
+      if (mods.noFlyers && tt.fly) return false;
+      if (mods.noStealth && (tt.invisible || tt.cloakCycle || tt.cloakAura)) return false;
+      if (mods.noDisruptors && (tt.jamPass || tt.corrodeAura || tt.chillAura || tt.chillFly || tt.confuseAura || tt.boulder || tt.rootTower || tt.curseTower || tt.deathTowerSlow || tt.deathStun || tt.shredObstacle)) return false;
+      return true;
+    };
+    let html = `<button class="panel-close" id="sp-close">${icon("close")}</button>
+      <div class="panel-head">${icon("swords")} Send Mobs <span class="cur">${icon("coins", "gold xs")} Income +${pl.income || 0}/${mods.turbo ? "2.5" : "5"}s</span></div>
+      <p class="sp-note">Sends march into the NEXT corridor.${mods.lifeSteal ? " Every life they take is yours." : ""} Each send raises your income. Stronger tiers unlock over time${mods.sendStock ? " and recharge from a limited stock" : ""}.</p>
+      <div class="sp-tiers">${[1, 2, 3, 4].map((k) => { const T = tiers[k]; const lock = mods.sendStock && T && now < T.unlockTicks; return `<button class="sp-tier ${k === _sendTier ? "sel" : ""} ${lock ? "locked" : ""}" data-tier="${k}">Tier ${SEND_TIERS[k].name}<small>${lock ? "🔒 " + fmt(T.unlockTicks - now) : (mods.sendStock ? "stock " + SEND_TIERS[k].stock : "open")}</small></button>`; }).join("")}</div>
+      <div class="sp-rows scroll">`;
+    const T = tiers[_sendTier];
+    const tierLocked = mods.sendStock && T && now < T.unlockTicks;
+    for (const t in DB.SENDS_EXPANDED) {
+      const s = DB.SENDS_EXPANDED[t];
+      if (s.tier !== _sendTier || !allowed(t)) continue;
+      const en = DB.ENEMIES[t] || { name: t }, m = MOB_BY_ID[t];
+      const lvl = (pl.sendLevels && pl.sendLevels[t]) || 1;
+      const cost = DB.sendCostX(t, lvl);
+      const hp = Math.round(en.hp * DB.sendHpMultX(t, lvl));
+      const maxed = lvl >= DB.SEND_MAX_LEVEL;
+      const upCost = maxed ? 0 : DB.sendUpgradeCostX(t, lvl);
+      const sk = pl.sendStock && pl.sendStock[t];
+      const stockMax = SEND_TIERS[_sendTier].stock, stockN = sk ? sk.n : stockMax;
+      const rech = sk && sk.n < sk.max ? 1 - sk.t / sk.re : 0;
+      const empty = mods.sendStock && stockN <= 0;
+      const tr = m ? traitList(m.traits).slice(0, 3).map(([i, n]) => i + " " + n).join(" · ") : "";
+      const ac = m ? ARMOR_CLASSES[m.armorClass] : null;
+      html += `<div class="sp-row">
+        <img class="sp-thumb" src="${ethumb(t)}" alt="">
+        <div class="sp-info">
+          <div class="sp-name">${en.name}${s.count > 1 ? ` <span class="sp-count">×${s.count}</span>` : ""}
+            <span class="sp-pips">${[1, 2, 3, 4, 5].map((i) => `<b class="${i <= lvl ? "on" : ""}"></b>`).join("")}</span>
+            ${mods.sendStock ? `<span class="sp-stock">${Array.from({ length: stockMax }, (_, i) => `<b class="${i < stockN ? "on" : ""}"></b>`).join("")}</span>` : ""}</div>
+          <div class="sp-desc">♥ ${hp}${en.armor ? " · 🛡 " + en.armor : ""}${ac ? ` · <span style="color:${ac.color}">${ac.name}</span>` : ""}</div>
+          ${tr ? `<div class="sp-traits">${tr}</div>` : ""}
+          ${mods.sendStock && rech > 0 ? `<div class="sp-rech"><div style="width:${Math.round(rech * 100)}%"></div></div>` : ""}
+        </div>
+        <button class="sp-send ${pl.gold < cost || tierLocked || empty ? "cant" : ""}" data-send="${t}">${tierLocked ? "🔒" : empty ? "⏳" : "Send · " + cost}</button>
+        <button class="sp-up ${maxed ? "maxed" : (pl.gold < upCost ? "cant" : "")}" data-up="${t}">${maxed ? "MAX" : "⬆ Lv" + (lvl + 1) + " · " + upCost}</button>
+      </div>`;
+    }
+    html += `</div>`;
+    const sc = p.querySelector(".sp-rows"); const keep = sc ? sc.scrollTop : 0;
+    p.innerHTML = html;
+    const sc2 = p.querySelector(".sp-rows"); if (sc2) sc2.scrollTop = keep;
+    $("sp-close").onclick = closeAllPanels;
+    p.querySelectorAll("[data-tier]").forEach((b) => b.onclick = () => { _sendTier = +b.dataset.tier; renderSendPanel(true); });
+    p.querySelectorAll("[data-send]").forEach((b) => b.onclick = () => cmd.sendAuto(b.dataset.send));
+    p.querySelectorAll("[data-up]").forEach((b) => b.onclick = () => cmd.upgradeSend(b.dataset.up));
+  }
+
   // ---- live panel refresh ------------------------------------------------------
   function refreshPanels() {
     const v = getView(); if (!v.state) return;
@@ -418,7 +535,7 @@ export function createUI(opts) {
       if (!found) { closeAllPanels(); _twSig = null; return; }
       const tp = $("tower-panel");
       if (!tp || !tp.classList.contains("show")) return;
-      const sig = found.level + "/" + found.expert + "/" + found.kills + "/" + found.mutations.length + "/" + (found.targetMode || "first");
+      const sig = twSig(found);
       if (sig !== _twSig) openTowerPanel(fcorr, found);
     } else if (v.selectedEnemyId) {
       const e = v.state.enemies.find((e) => e.id === v.selectedEnemyId);
@@ -467,6 +584,16 @@ export function createUI(opts) {
       standard: "Enemies carry one status effect at a time — a new one replaces the old.",
       advanced: "Status effects from different towers stack and combine; enemies lock their statuses after each full loop.",
     },
+    ruleset: {
+      expanded: "Skyhold's rules: 72 new creeps with traits join the waves (flyers, stealth, healers, summoners, tower-jammers…), towers are raised by a builder, and Vs matches get send tiers, stock and life steal.",
+      classic: "Circle Tower Wars, exactly: the original five creeps, instant towers and Circle's send economy.",
+    },
+    difficulty: {
+      easy: "Easy NPCs: slower, smaller mazes, −25% income, only tier I–II sends.",
+      normal: "Normal NPCs: Circle's bots with every send up to tier III.",
+      hard: "Hard NPCs: +25% income, quicker builds, and sends picked to exploit your defence.",
+      insane: "Insane NPCs: +50% income and a head start in gold. They read your maze and punish it.",
+    },
     pacing: {
       manual: "Take your time between waves. You can still toggle ⟳ Auto in-game, and calling a wave early while enemies remain pays a gold bonus.",
       auto: "The next wave starts automatically 5 seconds after the last one is cleared. The final End Boss always waits for you.",
@@ -481,6 +608,9 @@ export function createUI(opts) {
     else if (t === "econ") txt = SETUP_DESCS.econ[setup.economy];
     else if (t === "status") txt = SETUP_DESCS.status[setup.status];
     else if (t === "pacing") txt = SETUP_DESCS.pacing[setup.pacing];
+    else if (t === "ruleset") txt = SETUP_DESCS.ruleset[setup.ruleset];
+    else if (t === "difficulty") txt = SETUP_DESCS.difficulty[setup.difficulty];
+    else if (t.indexOf("mod:") === 0) txt = MOD_DESCS[t.slice(4)] || "";
     else if (t.indexOf("element:") === 0) {
       const i = +t.split(":")[1];
       const el = DB.ELEMENTS[setup.elements[i]];
@@ -492,6 +622,20 @@ export function createUI(opts) {
     }
     h.textContent = txt || "";
   }
+  const MOD_DESCS = {
+    builders: "A builder per corridor walks to each new tower and raises it over a few seconds, Warcraft-style. Upgrades take a moment too. Off: towers appear instantly.",
+    lifeSteal: "Vs: every life your sends take from a rival is added to yours.",
+    sendStock: "Vs: tier II–IV sends unlock at 2:30, 6:00 and 11:00, and each send type recharges from a small stock.",
+    turbo: "Vs: income pays out every 2.5 seconds instead of 5.",
+    noFlyers: "No flying creeps in waves or sends.",
+    noStealth: "No invisible or cloaking creeps.",
+    noDisruptors: "No creeps that stun, slow, curse or confuse towers.",
+    randomLanes: "Vs: everyone, including you, gets a random element.",
+    doppel: "Vs: every NPC plays your element.",
+    anonymous: "Vs: rivals are hidden behind anonymous names.",
+    goldMult: "Starting gold multiplier.",
+    livesMult: "Starting lives multiplier.",
+  };
   let _pvSel = null;
   function selectSetupNode(i, setup, avail) {
     const vs = setup.gameMode === "versus";
@@ -517,6 +661,26 @@ export function createUI(opts) {
     const pvh = $("pv-hint"); if (pvh) pvh.textContent = vs ? "Tap your island to pick its element — NPCs roll theirs" : "Tap an island in the world to change its element";
     document.querySelectorAll("[data-econ]").forEach((b) => { b.classList.toggle("sel", vs ? b.dataset.econ === "shared" : b.dataset.econ === setup.economy); b.classList.toggle("disabled", vs); });
     document.querySelectorAll("[data-status]").forEach((b) => b.classList.toggle("sel", b.dataset.status === setup.status));
+    // match rules
+    const X = setup.ruleset !== "classic";
+    document.querySelectorAll("[data-ruleset]").forEach((b) => b.classList.toggle("sel", b.dataset.ruleset === setup.ruleset));
+    const rd = $("row-diff"); if (rd) rd.style.display = vs && X ? "" : "none";
+    document.querySelectorAll("[data-diff]").forEach((b) => b.classList.toggle("sel", b.dataset.diff === setup.difficulty));
+    document.querySelectorAll("[data-mod]").forEach((b) => {
+      const k = b.dataset.mod, vsOnly = b.classList.contains("vs");
+      b.style.display = vsOnly && !vs ? "none" : "";
+      b.classList.toggle("off-rule", !X);
+      if (k === "goldMult") b.textContent = "💰 Gold ×" + setup.mods.goldMult;
+      else if (k === "livesMult") b.textContent = "❤ Lives ×" + setup.mods.livesMult;
+      b.classList.toggle("on", k === "goldMult" || k === "livesMult" ? setup.mods[k] !== 1 : !!setup.mods[k]);
+    });
+    const skp = $("skin-picker");
+    if (skp && opts.getSkins) {
+      const cur = opts.getSkin();
+      skp.innerHTML = `<span class="sk-lbl">🔨 Builder</span>` + opts.getSkins().map((k) => `<button class="skin-btn ${k.id === cur ? "sel" : ""} ${k.unlocked ? "" : "locked"}" data-skin="${k.id}" title="${k.desc}">${k.unlocked ? "" : "🔒 "}${k.name}</button>`).join("");
+      skp.style.display = X ? "" : "none";
+      skp.querySelectorAll("[data-skin]").forEach((b) => b.onclick = () => { const k = opts.getSkins().find((x) => x.id === b.dataset.skin); if (!k.unlocked) { toast("🔒 " + k.desc); return; } opts.setSkin(k.id); renderSetup(setup, availElements); });
+    }
     // element picker: pills for the corridor node selected in the 3D preview
     const picker = $("element-picker");
     const n = vs ? 1 : (setup.mode === "single" ? 1 : setup.corridors);
@@ -590,7 +754,7 @@ export function createUI(opts) {
     return "";
   }
 
-  return { toast, setText, closeAllPanels, closeRing, updateTopBar, updateEnemyOverview, updateWavePanel, updateWavePreview, updateBossBar, toggleSendPanel, openBuildRing, openTowerRing, openTowerPanel, openEnemyPanel, renderSetup, updateSetupDescs, selectSetupNode, openMastery, refreshPanels, get ringOpen() { return !!_ring; } };
+  return { openBestiary, toast, setText, closeAllPanels, closeRing, updateTopBar, updateEnemyOverview, updateWavePanel, updateWavePreview, updateBossBar, toggleSendPanel, openBuildRing, openTowerRing, openTowerPanel, openEnemyPanel, renderSetup, updateSetupDescs, selectSetupNode, openMastery, refreshPanels, get ringOpen() { return !!_ring; } };
 }
 
 export default { createUI };

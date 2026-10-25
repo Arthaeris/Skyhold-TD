@@ -24,7 +24,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&family=Nunito:wght@600;700;800;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=1">
+  <link rel="stylesheet" href="style.css?v=2">
   <script type="importmap">
     { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.min.js" } }
   </script>
@@ -59,6 +59,11 @@
       <div class="menu-row">
         <button id="btn-mastery" class="btn"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4.5h8v5a4 4 0 0 1-8 0zM8 6.5H5a3 3 0 0 0 3 4M16 6.5h3a3 3 0 0 1-3 4M12 13.5V17M8.5 19.5h7"/></svg>Mastery</button>
         <button id="btn-menu-save" class="btn"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5h11l3 3v12H5z"/><path d="M8 4.5v5h7v-5M8 19.5v-5h8v5"/></svg>Save · Import</button>
+      </div>
+      <div class="menu-row three">
+        <button id="btn-challenges" class="btn">☠ Challenges</button>
+        <button id="btn-replays" class="btn">▶ Replays <i class="pill">0</i></button>
+        <button id="btn-bestiary" class="btn">📖 Bestiary</button>
       </div>
       <button id="btn-multiplayer" class="btn ghost soon">Multiplayer <span class="pill">Soon</span></button>
     </div>
@@ -119,6 +124,40 @@
           </span>
         </div>
       </div>
+      <button class="opt-row opt-more" id="setup-rules"><span class="opt-lbl">Match rules — creeps, NPCs &amp; modifiers</span><span id="rules-chev">▾</span></button>
+      <div id="rules-body" class="more-body">
+        <div class="opt-row">
+          <span class="opt-lbl">Rules</span>
+          <span class="opt-seg">
+            <button class="seg" data-ruleset="expanded">Expanded</button>
+            <button class="seg" data-ruleset="classic">Classic</button>
+          </span>
+        </div>
+        <div class="opt-row" id="row-diff">
+          <span class="opt-lbl">NPCs</span>
+          <span class="opt-seg">
+            <button class="seg" data-diff="easy">Easy</button>
+            <button class="seg" data-diff="normal">Normal</button>
+            <button class="seg" data-diff="hard">Hard</button>
+            <button class="seg" data-diff="insane">Insane</button>
+          </span>
+        </div>
+        <div class="mod-chips" id="mod-chips">
+          <button class="mod-chip" data-mod="builders">🔨 Builders</button>
+          <button class="mod-chip vs" data-mod="lifeSteal">❤ Life steal</button>
+          <button class="mod-chip vs" data-mod="sendStock">⏳ Send stock</button>
+          <button class="mod-chip vs" data-mod="turbo">⚡ Turbo income</button>
+          <button class="mod-chip" data-mod="noFlyers">🪽 No flyers</button>
+          <button class="mod-chip" data-mod="noStealth">👁 No stealth</button>
+          <button class="mod-chip" data-mod="noDisruptors">🪨 No disruptors</button>
+          <button class="mod-chip vs" data-mod="randomLanes">🎲 Random lanes</button>
+          <button class="mod-chip vs" data-mod="doppel">👥 Doppelgängers</button>
+          <button class="mod-chip vs" data-mod="anonymous">🎭 Anonymous</button>
+          <button class="mod-chip" data-mod="goldMult">💰 Gold ×1</button>
+          <button class="mod-chip" data-mod="livesMult">❤ Lives ×1</button>
+        </div>
+        <div id="skin-picker"></div>
+      </div>
       <div id="element-picker"></div>
       <p class="setup-desc" id="setup-hint"></p>
       <button id="btn-start-run" class="btn big primary start-btn">Begin Run</button>
@@ -149,6 +188,7 @@
       <div id="toast"></div>
       <div id="radial-menu"></div>
       <button id="wave-fab" class="btn primary" style="display:none" aria-label="Start next wave">▶</button>
+      <div id="replay-bar" class="glass"></div>
     </div>
     <div id="quick-wave-controls" class="glass">
       <button id="dock-handle" aria-label="Collapse controls">▾</button>
@@ -167,6 +207,7 @@
           <button id="pause-resume" class="btn primary">Resume</button>
           <button id="pause-restart" class="btn">Restart</button>
           <button id="pause-save" class="btn">Save</button>
+          <button id="pause-stats" class="btn">Match Stats</button>
           <button id="pause-exit" class="btn ghost">Exit to Menu</button>
         </div>
         <div class="set-row"><span class="dim">Graphics</span>
@@ -185,6 +226,8 @@
         <div id="end-body" class="end-body"></div>
         <div class="modal-buttons">
           <button id="end-endless" class="btn primary">Continue into Endless</button>
+          <button id="end-spectate" class="btn" style="display:none">Spectate the rest</button>
+          <button id="end-replay" class="btn">Watch Replay</button>
           <button id="end-again" class="btn">Play Again</button>
           <button id="end-menu" class="btn ghost">Main Menu</button>
         </div>
@@ -193,6 +236,10 @@
   </section>
 
   <div id="mastery-screen" class="modal-overlay"></div>
+  <div id="stats-modal" class="modal-overlay"></div>
+  <div id="replays-modal" class="modal-overlay"></div>
+  <div id="challenges-modal" class="modal-overlay"></div>
+  <div id="bestiary-modal" class="modal-overlay"></div>
 
   <div id="save-modal" class="modal-overlay">
     <div class="modal wide glass">

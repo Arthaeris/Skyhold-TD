@@ -368,3 +368,78 @@ body[data-view="field"] #boss-bar { top: calc(var(--pad-t) + 104px); }
   .bottom-panel { max-height: 44vh; }
   .menu-top { top: var(--pad-t); }
 }
+
+/* ---- Skyhold expanded: match rules, sends by tier, stats, replays, challenges, bestiary ---- */
+.menu-row.three { grid-template-columns: repeat(3, 1fr); }
+.menu-row.three .btn { font-size: 12.5px; padding-left: 6px; padding-right: 6px; }
+#btn-replays .pill { font-style: normal; font-size: 10px; padding: 0 6px; margin-left: 2px; }
+#btn-challenges.locked { opacity: 0.5; }
+.mod-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 2px 4px; }
+.mod-chip { padding: 5px 9px; border-radius: 99px; font-size: 12px; font-weight: 800; background: var(--g-card); border: 1px solid var(--g-line); color: var(--dim); }
+.mod-chip.on { color: var(--ink); background: rgba(95, 224, 122, 0.16); border-color: rgba(95, 224, 122, 0.6); }
+.mod-chip.off-rule { opacity: 0.35; pointer-events: none; }
+#skin-picker { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+#skin-picker .sk-lbl { font-weight: 800; font-size: 12px; color: var(--dim); margin-right: 4px; }
+.skin-btn { padding: 4px 9px; border-radius: 10px; font-size: 12px; font-weight: 800; background: var(--g-card); border: 1px solid var(--g-line); }
+.skin-btn.sel { background: rgba(255, 210, 61, 0.16); border-color: rgba(255, 210, 61, 0.75); color: #ffe68a; }
+.skin-btn.locked { opacity: 0.4; }
+.sp-tiers { display: flex; gap: 6px; margin: 6px 0 8px; }
+.sp-tier { flex: 1; padding: 6px 4px; border-radius: 10px; font-weight: 900; font-size: 12px; background: var(--g-card); border: 1px solid var(--g-line); text-align: center; }
+.sp-tier.sel { background: rgba(255, 95, 162, 0.2); border-color: rgba(255, 95, 162, 0.6); }
+.sp-tier.locked { opacity: 0.5; }
+.sp-tier small { display: block; font-size: 10px; color: var(--dim); font-weight: 700; }
+.sp-stock { display: inline-flex; gap: 2px; margin-left: 6px; vertical-align: middle; }
+.sp-stock b { width: 7px; height: 7px; border-radius: 2px; background: rgba(255, 255, 255, 0.15); }
+.sp-stock b.on { background: #5fe07a; }
+.sp-rech { height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.08); margin-top: 3px; overflow: hidden; }
+.sp-rech > div { height: 100%; background: #5bd6ff; }
+.sp-traits { font-size: 11px; color: var(--dim); }
+.sp-rows.scroll { max-height: 46vh; overflow-y: auto; }
+.tr-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; justify-content: center; }
+.tr-tag { padding: 3px 8px; border-radius: 99px; font-size: 11px; font-weight: 800; background: rgba(255, 255, 255, 0.06); border: 1px solid var(--g-line); }
+.ac-tag { padding: 2px 7px; border-radius: 99px; font-size: 10.5px; font-weight: 900; border: 1px solid currentColor; }
+.tw-badges { display: flex; flex-wrap: wrap; gap: 5px; margin: 6px 0; }
+.tw-badges span { padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 800; background: rgba(255, 255, 255, 0.06); border: 1px solid var(--g-line); }
+.tw-badges span.no { opacity: 0.45; text-decoration: line-through; }
+.tw-badges span.warn { color: #ffd23d; border-color: rgba(255, 210, 61, 0.5); }
+.end-stats-wrap { margin-top: 10px; text-align: left; }
+.st-tabs { display: flex; gap: 6px; margin: 8px 0; }
+.st-tabs .seg { flex: 1; }
+.st-pane { display: none; }
+.st-pane.show { display: block; }
+.st-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.st-grid div { padding: 7px 8px; border-radius: 10px; background: rgba(255, 255, 255, 0.05); display: flex; flex-direction: column; }
+.st-grid span { font-size: 11px; color: var(--dim); font-weight: 800; }
+.st-grid b { font-size: 16px; }
+.st-sub { margin: 10px 0 5px; font-weight: 900; font-size: 12px; letter-spacing: 0.04em; color: var(--dim); text-transform: uppercase; }
+.st-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.st-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px 3px 3px; border-radius: 99px; background: rgba(255, 255, 255, 0.06); font-size: 12px; font-weight: 800; }
+.st-chip img { width: 22px; height: 22px; border-radius: 50%; background: rgba(0, 0, 0, 0.25); }
+.st-chip em, .st-table em { font-style: normal; color: var(--dim); font-weight: 700; }
+.st-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.st-table th { text-align: left; color: var(--dim); font-weight: 800; padding: 4px 6px; border-bottom: 1px solid var(--g-line); }
+.st-table td { padding: 4px 6px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+.st-table tr.dead td { opacity: 0.5; }
+#replay-bar { position: absolute; left: 50%; bottom: calc(var(--pad-b) + 8px); transform: translateX(-50%); display: none; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px; padding: 6px 8px; border-radius: 16px; z-index: 9; white-space: nowrap; max-width: calc(100vw - 16px); }
+#replay-bar .btn.small { padding: 6px 9px; font-size: 12px; }
+#replay-bar.show { display: flex; }
+#replay-bar .rb-time { font-weight: 800; font-size: 12.5px; padding: 0 4px; }
+body[data-spectate="replay"] #quick-wave-controls, body[data-spectate="live"] #quick-wave-controls { display: none; }
+.rp-list { display: grid; gap: 6px; margin: 8px 0; }
+.rp-row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 6px; align-items: center; padding: 8px; border-radius: 12px; background: rgba(255, 255, 255, 0.05); }
+.rp-info { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.rp-info b { font-size: 13.5px; }
+.rp-info .warn { color: #ffd23d; font-size: 11px; }
+.ch-els { margin: 6px 0 10px; }
+.ch-list { display: grid; gap: 8px; }
+.ch-card { display: grid; grid-template-columns: 56px 1fr auto; gap: 10px; align-items: center; padding: 8px; border-radius: 14px; background: rgba(255, 255, 255, 0.05); }
+.ch-card img { width: 56px; height: 56px; border-radius: 12px; background: rgba(0, 0, 0, 0.3); }
+.ch-info { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.ch-info b { font-size: 14px; }
+.ch-btns { display: grid; gap: 5px; }
+.bst-filter { display: flex; flex-wrap: wrap; gap: 5px; margin: 6px 0 10px; }
+.bst-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.bst-card { padding: 8px; border-radius: 14px; background: rgba(255, 255, 255, 0.05); display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; }
+.bst-card img { width: 100%; aspect-ratio: 1; border-radius: 10px; background: rgba(0, 0, 0, 0.25); object-fit: contain; }
+.bst-card b { font-size: 13px; }
+.bst-card .meta { display: flex; justify-content: space-between; color: var(--dim); font-weight: 800; }

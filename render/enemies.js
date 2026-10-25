@@ -7,6 +7,7 @@
    Per-instance colour carries the hit flash and status tints (frozen = icy, burning = ember...). */
 import * as THREE from "three";
 import { Part, TAU, col } from "./kit.js";
+import { MOB_MODELS } from "./mobmodels.js";
 
 // ---------------------------------------------------------------------------
 // MODELS — parts drawn at 1 unit ≈ 1 tile, facing +z. anim: what the part does while walking.
@@ -169,6 +170,7 @@ const STATUS_TINT = {
   magnetized: "#d0dcea", tagged: "#e0e8f0", shredded: "#d8e0e8",
   corrupted: "#ffb0d8", fracture: "#ffc0e0", entropy: "#ffd0e8",
 };
+Object.assign(MODELS, MOB_MODELS); // the expanded bestiary (render/mobmodels.js)
 export const enemyModels = MODELS;
 
 // ---------------------------------------------------------------------------
@@ -188,6 +190,8 @@ function animRot(kind, w, t, out) {
     case "skitA": E.set(0, Math.sin(w * 1.5) * 0.4, 0); break;
     case "skitB": E.set(0, -Math.sin(w * 1.5) * 0.4, 0); break;
     case "orbit": E.set(0.25, t * 0.8, 0.1); break;
+    case "wobble": E.set(Math.sin(t * 5) * 0.06, 0, Math.sin(t * 4.2 + 1) * 0.08); break;
+    case "hammer": E.set(-0.6 + Math.sin(t * 11) * 0.9, 0, 0); break;
     default: E.set(0, 0, 0);
   }
   return out.setFromEuler(E);
@@ -198,12 +202,18 @@ function animRot(kind, w, t, out) {
 // ---------------------------------------------------------------------------
 const litMat = new THREE.MeshLambertMaterial({ vertexColors: true });
 const glowMat = new THREE.MeshBasicMaterial({ vertexColors: true });
+// stealthed creeps (hidden from your towers) render as a faint shimmer
+const ghostMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.22, depthWrite: false, blending: THREE.AdditiveBlending });
 
 export function createEnemyRenderer(scene) {
   const root = new THREE.Group();
   scene.add(root);
   const types = {};
-  for (const [id, M] of Object.entries(MODELS)) {
+  // types are built lazily, the first time one is drawn (the bestiary is large)
+  function getType(id) {
+    let T = types[id];
+    if (T) return T;
+    const M = MODELS[id] || MODELS.grunt;
     const parts = [];
     for (const [name, fn] of Object.entries(M.parts)) {
       const P = new Part(id.length * 7 + name.length);
@@ -214,7 +224,9 @@ export function createEnemyRenderer(scene) {
       if (!P.glow.empty) entry.meshes.push({ geo: P.glow.geometry(), lit: false });
       parts.push(entry);
     }
-    types[id] = { M, parts, cap: 0, count: 0 };
+    T = types[id] = { M, parts, cap: 0, count: 0, gcap: 0, gcount: 0 };
+    alloc(T, 16);
+    return T;
   }
   function alloc(T, cap) {
     for (const p of T.parts) for (const m of p.meshes) {
@@ -230,66 +242,106 @@ export function createEnemyRenderer(scene) {
     }
     T.cap = cap;
   }
-  for (const T of Object.values(types)) alloc(T, 16);
+  function allocGhost(T, cap) {
+    for (const p of T.parts) for (const m of p.meshes) {
+      if (m.ghost) { root.remove(m.ghost); m.ghost.dispose(); }
+      const g = new THREE.InstancedMesh(m.geo, ghostMat, cap);
+      g.instanceMatrix.setUsage(THREE.DynamicDrawUsage); g.frustumCulled = false; g.count = 0; g.renderOrder = 6;
+      root.add(g); m.ghost = g;
+    }
+    T.gcap = cap;
+  }
+  for (const id of ["grunt", "runner", "swarm", "brute", "tank"]) getType(id);
 
   // ice blocks around frozen enemies
   const iceGeo = new THREE.BoxGeometry(1, 1, 1);
   const iceMat = new THREE.MeshLambertMaterial({ color: "#bfefff", transparent: true, opacity: 0.45, emissive: new THREE.Color("#3a8aff"), emissiveIntensity: 0.4, depthWrite: false });
   let iceCap = 32;
   let ice = new THREE.InstancedMesh(iceGeo, iceMat, iceCap); ice.frustumCulled = false; ice.count = 0; root.add(ice);
+  // shield bubbles (barriers, aegis shields, divine shields) and flyer shadows
+  const bubGeo = new THREE.IcosahedronGeometry(1, 1);
+  const bubMat = new THREE.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: 0.22, depthWrite: false, blending: THREE.AdditiveBlending });
+  let bubCap = 32, nBub = 0;
+  let bub = new THREE.InstancedMesh(bubGeo, bubMat, bubCap); bub.frustumCulled = false; bub.count = 0; bub.renderOrder = 7; bub.setColorAt(0, new THREE.Color(1, 1, 1)); root.add(bub);
+  const shGeo = new THREE.CircleGeometry(0.5, 16); shGeo.rotateX(-Math.PI / 2);
+  const shMat = new THREE.MeshBasicMaterial({ color: "#06040f", transparent: true, opacity: 0.32, depthWrite: false });
+  let shCap = 32, nSh = 0;
+  let sh = new THREE.InstancedMesh(shGeo, shMat, shCap); sh.frustumCulled = false; sh.count = 0; sh.renderOrder = 1; root.add(sh);
 
   const Mbase = new THREE.Matrix4(), Mpart = new THREE.Matrix4(), Mtmp = new THREE.Matrix4();
   const Q = new THREE.Quaternion(), Qp = new THREE.Quaternion(), S = new THREE.Vector3(), V = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
-  const C = new THREE.Color(), white = new THREE.Color(2.2, 2.2, 2.2);
+  const C = new THREE.Color(), white = new THREE.Color(2.2, 2.2, 2.2), ghostC = new THREE.Color(0.55, 0.7, 1.0);
   let nIce = 0;
+  const grow = (inst, cap, geo, mat, order) => { root.remove(inst); inst.dispose(); const n = new THREE.InstancedMesh(geo, mat, cap); n.frustumCulled = false; n.count = 0; if (order) n.renderOrder = order; root.add(n); return n; };
 
   return {
     root, types, MODELS,
-    begin() { for (const T of Object.values(types)) T.count = 0; nIce = 0; },
+    begin() { for (const T of Object.values(types)) { T.count = 0; T.gcount = 0; } nIce = 0; nBub = 0; nSh = 0; },
     // pos: world feet position; yaw: facing; w: walk phase; t: time; s: scale; tint: status id or null; flash 0..1; frozen bool
-    add(type, pos, yaw, w, t, s, status, flash, frozen) {
-      const T = types[type] || types.grunt;
-      if (T.count >= T.cap) {
-        const old = T.count;
-        alloc(T, T.cap * 2);
-        T.count = 0; // the frame's earlier instances of this type are lost for one frame — acceptable
-        void old;
+    // ex (optional): { ghost: hidden from towers, shield: 0..1 bubble strength, shieldColor, fly: draw a ground shadow }
+    add(type, pos, yaw, w, t, s, status, flash, frozen, ex) {
+      const T = getType(type);
+      const ghost = !!(ex && ex.ghost);
+      let i;
+      if (ghost) {
+        if (T.gcount >= T.gcap) allocGhost(T, Math.max(8, T.gcap * 2));
+        i = T.gcount++;
+      } else {
+        if (T.count >= T.cap) { alloc(T, T.cap * 2); T.count = 0; }
+        i = T.count++;
       }
-      const i = T.count++;
       const hover = (T.M.hover || 0) + (T.M.hover ? Math.sin(t * 4 + w) * 0.08 : 0);
-      const bob = Math.abs(Math.sin(w)) * 0.06;
-      Mbase.compose(V.set(pos.x, pos.y + (hover + bob) * s, pos.z), Q.setFromAxisAngle(up, yaw), S.set(s, s, s));
+      const bob = T.M.fly ? 0 : Math.abs(Math.sin(w)) * 0.06;
+      const yLift = (hover + bob) * s;
+      Mbase.compose(V.set(pos.x, pos.y + yLift, pos.z), Q.setFromAxisAngle(up, yaw), S.set(s, s, s));
       if (status && STATUS_TINT[status]) C.set(STATUS_TINT[status]); else C.setRGB(1, 1, 1);
       if (flash > 0) C.lerp(white, flash);
       const frozenStill = frozen ? 0 : 1;
       for (const p of T.parts) {
         if (p.anim) {
-          animRot(p.anim, w * frozenStill, t * frozenStill + (frozen ? 0 : 0), Qp);
+          animRot(p.anim, w * frozenStill, t * frozenStill, Qp);
           Mpart.makeTranslation(p.piv.x, p.piv.y, p.piv.z).multiply(Mtmp.makeRotationFromQuaternion(Qp));
           Mpart.premultiply(Mbase);
         } else if (p.piv.lengthSq() > 0) Mpart.makeTranslation(p.piv.x, p.piv.y, p.piv.z).premultiply(Mbase);
         else Mpart.copy(Mbase);
         for (const m of p.meshes) {
+          if (ghost) { m.ghost.setMatrixAt(i, Mpart); continue; }
           m.inst.setMatrixAt(i, Mpart);
           if (m.lit) m.inst.setColorAt(i, C);
         }
       }
+      const h = T.M.height * s, wd = T.M.size * s;
       if (frozen) {
-        if (nIce >= iceCap) { root.remove(ice); iceCap *= 2; ice = new THREE.InstancedMesh(iceGeo, iceMat, iceCap); ice.frustumCulled = false; root.add(ice); }
-        const h = T.M.height * s, wd = T.M.size * s;
+        if (nIce >= iceCap) { iceCap *= 2; ice = grow(ice, iceCap, iceGeo, iceMat); }
         Mpart.compose(V.set(pos.x, pos.y + h * 0.5, pos.z), Q, S.set(wd * 1.1, h * 1.05, wd * 1.1));
         ice.setMatrixAt(nIce++, Mpart);
+      }
+      if (ex && ex.shield > 0) {
+        if (nBub >= bubCap) { bubCap *= 2; bub = grow(bub, bubCap, bubGeo, bubMat, 7); bub.setColorAt(0, C); }
+        const r = Math.max(h, wd) * 0.62;
+        Mpart.compose(V.set(pos.x, pos.y + yLift + h * 0.5, pos.z), Q, S.set(r, r, r));
+        bub.setMatrixAt(nBub, Mpart);
+        bub.setColorAt(nBub, C.set(ex.shieldColor || "#7fe8ff").multiplyScalar(0.6 + 0.6 * Math.min(1, ex.shield)));
+        nBub++;
+      }
+      if (ex && ex.fly) {
+        if (nSh >= shCap) { shCap *= 2; sh = grow(sh, shCap, shGeo, shMat, 1); }
+        Mpart.compose(V.set(pos.x, pos.y + 0.03, pos.z), Q.identity(), S.set(wd * 1.2, 1, wd * 1.2));
+        sh.setMatrixAt(nSh++, Mpart);
       }
     },
     end() {
       for (const T of Object.values(types)) for (const p of T.parts) for (const m of p.meshes) {
-        m.inst.count = T.count;
+        m.inst.count = T.count; m.inst.visible = T.count > 0;
         m.inst.instanceMatrix.needsUpdate = true;
         if (m.lit && m.inst.instanceColor) m.inst.instanceColor.needsUpdate = true;
+        if (m.ghost) { m.ghost.count = T.gcount; m.ghost.visible = T.gcount > 0; m.ghost.instanceMatrix.needsUpdate = true; }
       }
       ice.count = nIce; ice.instanceMatrix.needsUpdate = true;
+      bub.count = nBub; bub.visible = nBub > 0; bub.instanceMatrix.needsUpdate = true; if (bub.instanceColor) bub.instanceColor.needsUpdate = true;
+      sh.count = nSh; sh.visible = nSh > 0; sh.instanceMatrix.needsUpdate = true;
     },
-    heightOf(type) { return (MODELS[type] || MODELS.grunt).height; },
+    heightOf(type) { const M = MODELS[type] || MODELS.grunt; return M.height + (M.hover || 0); },
   };
 }
 
@@ -312,4 +364,4 @@ export function buildEnemyPreview(DB, id) {
 // model scale per type: the models are already sized relative to each other to match Circle's enemy
 // radii (Circle draws an enemy 4.4 × radius tiles across: imp ≈ 1.4, behemoth ≈ 2.2, warlord ≈ 3.1)
 const SCALE = { grunt: 0.9, runner: 0.85, swarm: 0.8, brute: 0.9, tank: 0.95, boss: 1.0, endboss: 1.0 };
-export function enemyScale(DB, type) { return SCALE[type] || 0.9; }
+export function enemyScale(DB, type) { return SCALE[type] || (MOB_MODELS[type] ? 1 : 0.9); }

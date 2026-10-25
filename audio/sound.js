@@ -80,6 +80,9 @@ export function createSound() {
     clear() { [659, 784, 988, 1318].forEach((f, i) => tone("triangle", f, 0, 0.22, 0.09, i * 0.07)); },
     synergy() { if (throttle("syn", 300)) { tone("sine", 1046, 0, 0.3, 0.09); tone("sine", 1568, 0, 0.35, 0.07, 0.06); } },
     whoosh() { noise(0.45, 0.12, 900, 0.7); },
+    hammer() { if (throttle("hammer", 120)) { tone("square", 1400 + Math.random() * 300, 600, 0.05, 0.05); noise(0.05, 0.08, 2600, 4); } },
+    steal() { [784, 988, 1175].forEach((f, i) => tone("triangle", f, 0, 0.14, 0.08, i * 0.05)); },
+    blink() { if (throttle("blink", 160)) tone("sine", 1800, 600, 0.12, 0.05); },
     victory() { [523, 659, 784, 1046, 1318].forEach((f, i) => tone("triangle", f, 0, 0.5, 0.11, i * 0.12)); },
     defeat() { [392, 330, 262, 196].forEach((f, i) => tone("sawtooth", f, f * 0.95, 0.45, 0.08, i * 0.18)); },
   };

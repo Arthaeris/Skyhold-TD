@@ -36,6 +36,12 @@ Open <http://localhost:8000>. three.js r186 and the fonts come from CDNs, so the
   - 40 unique tower models that grow at levels 4, 7 and 10 and show their mutations.
   - 7 instanced enemy models with status tints and freeze blocks, plus projectiles, beams, chain lightning, impact rings and route chevrons.
   - PixelPups-style voxel thumbnails in the menus.
+- **Expanded rules (default; Classic = Circle exactly):**
+  - 72 new creeps with traits: flyers, stealth, healers, summoners, splitters, tower-jammers, tricksters, elites.
+  - Warcraft-3-style builders.
+  - Line-Tower-Wars-style Vs: send tiers with stock and timers, life steal, NPCs from Easy to Insane, match modifiers.
+  - Match stats and a leak report, replays (export/import) and spectating.
+  - Post-victory challenges that unlock builder skins, and a Bestiary.
 - **Audio:** Circle's music track plus synthesized sound effects.
 
 ## Layout
@@ -43,13 +49,14 @@ Open <http://localhost:8000>. three.js r186 and the fonts come from CDNs, so the
 | Path | What it is |
 |---|---|
 | `circle/` | Circle's content database (unchanged) |
+| `content/mobs.js` | Skyhold's bestiary, send tiers, challenges and builder skins (Expanded rules) |
 | `sim/` | Circle's deterministic sim (`core.js` + render-only events) |
 | `net/commands.js`, `app/loop.js`, `save.js` | Circle's command schema, fixed-step loop and save layer (Skyhold storage keys) |
 | `app/main.js` | Shell orchestrator, ported from Circle: commands, screens, autosave, bots, input |
 | `ui/shell.js`, `ui/icons.js` | Circle's UI panels and rings, elemental sigils and SVG icons |
 | `render/` | `renderer.js` (camera, sync, picking), `world.js` (ring, islands, gates, vortex, sea), `towers.js`, `enemies.js`, `effects.js`, `post.js`, `kit.js`, `theme.js`, `thumbs.js` |
 | `audio/sound.js` | Music and synthesized SFX |
-| `tools/` | `parity-test.mjs`, plus `preview.html` and `gallery.html` for eyeballing the world and models |
+| `tools/` | `parity-test.mjs`, `expanded-soak.mjs`, plus `preview.html` and `gallery.html` for eyeballing the world and models |
 | `docs/PORT_NOTES.md` | Decisions, known gaps and the backlog |
 
 Circle-TD remains a separate project; this port only changes Skyhold-TD.
