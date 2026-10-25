@@ -394,7 +394,7 @@ function ensureSession() {
 }
 async function openOnline(prefill) {
   ensureSession();
-  try { await session.connect(); } catch (e) { ui.toast("Couldn't reach the online service: " + (e.message || e), "warn"); return; }
+  try { await session.connect(); } catch (e) { onlineUI.showError("Couldn't reach the online service: " + (e.message || e)); return; }
   onlineUI.open(prefill);
 }
 function beginOnline(rejoin) {

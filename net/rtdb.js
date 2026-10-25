@@ -34,9 +34,10 @@ export function backendName() {
 
 export async function connect() {
   if (impl) return impl.info;
-  impl = backendName() === "mock" ? await mockBackend() : await firebaseBackend();
+  impl = await withTimeout(backendName() === "mock" ? mockBackend() : firebaseBackend(), 15000, "Timed out connecting to the online service (network).");
   return impl.info;
 }
+function withTimeout(p, ms, msg) { return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(msg)), ms))]); }
 const need = () => { if (!impl) throw new Error("not connected"); return impl; };
 export const get = (p) => need().get(p);
 export const set = (p, v) => need().set(p, v);

@@ -23,6 +23,16 @@ export function cleanText(t) { return String(t || "").replace(/[<>]/g, "").repla
 export function activeRoom() { try { return JSON.parse(localStorage.getItem(ACTIVE_KEY)) || null; } catch (e) { return null; } }
 export function setActiveRoom(v) { try { if (v) localStorage.setItem(ACTIVE_KEY, JSON.stringify(v)); else localStorage.removeItem(ACTIVE_KEY); } catch (e) { /* fine */ } }
 
+// turn Firebase errors into something a player (and a developer) can act on
+export function explain(e) {
+  const msg = String((e && (e.code || e.message)) || e);
+  if (/permission/i.test(msg)) return new Error("The online service refused the request (permission denied). Check that the database rules from database.rules.json are published in Firebase → Realtime Database → Regeln. [" + msg + "]");
+  if (/operation-not-allowed|admin-restricted/i.test(msg)) return new Error("Anonymous sign-in is turned off in Firebase → Authentication → Anmeldemethode. [" + msg + "]");
+  if (/unauthorized-domain/i.test(msg)) return new Error("This website isn't an authorised domain in Firebase → Authentication → Einstellungen → Autorisierte Domains. [" + msg + "]");
+  if (/network|offline|failed to fetch/i.test(msg)) return new Error("No connection to the online service. [" + msg + "]");
+  return e instanceof Error ? e : new Error(msg);
+}
+
 export function createSession(opts) {
   const version = opts.version;            // content hash: everyone in a room must match
   let uid = null, code = null, seat = -1, unsubs = [];
@@ -31,7 +41,7 @@ export function createSession(opts) {
   const fire = (k, ...a) => listeners[k].forEach((f) => { try { f(...a); } catch (e) { console.warn(e); } });
   const P = (x) => "rooms/" + code + (x ? "/" + x : "");
 
-  async function connect() { const info = await rt.connect(); uid = info.uid; return info; }
+  async function connect() { try { const info = await rt.connect(); uid = info.uid; return info; } catch (e) { throw explain(e); } }
   function stopListening() { unsubs.forEach((u) => u()); unsubs = []; }
   function listen() {
     stopListening();
@@ -53,6 +63,7 @@ export function createSession(opts) {
       let c = ""; for (let i = 0; i < 5; i++) c += CODE_ABC[Math.floor(Math.random() * CODE_ABC.length)];
       if (await rt.get("rooms/" + c + "/meta")) continue;
       code = c;
+      try {
       const seats = { 0: { kind: "human", uid, name: cleanName(name), el: opts.defaultElement || "fire", ready: false, online: true } };
       for (let i = 1; i < 4; i++) seats[i] = { kind: "open" };
       await rt.set(P("meta"), { host: uid, status: "lobby", created: rt.TS, version });
@@ -64,11 +75,15 @@ export function createSession(opts) {
       listen();
       setActiveRoom({ code, uid });
       return code;
+      } catch (e) { code = null; seat = -1; stopListening(); throw explain(e); }
     }
     throw new Error("Couldn't find a free room code — try again.");
   }
 
   async function join(c, name) {
+    try { return await joinInner(c, name); } catch (e) { code = null; seat = -1; stopListening(); throw explain(e); }
+  }
+  async function joinInner(c, name) {
     await connect();
     c = String(c || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
     const meta = await rt.get("rooms/" + c + "/meta");

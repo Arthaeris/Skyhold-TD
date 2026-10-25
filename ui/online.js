@@ -15,7 +15,7 @@ export function createOnlineUI(o) {
   const { DB, session, toast, sfx } = o;
   const $ = (id) => document.getElementById(id);
   const root = $("online-modal");
-  let view = "home", busy = false;
+  let view = "home", busy = false, lastError = "";
   const muted = new Set();
   const chatLog = [];
 
@@ -32,6 +32,7 @@ export function createOnlineUI(o) {
     root.innerHTML = `<div class="modal wide glass ol-modal"><button class="panel-close" id="ol-close">${icon("close")}</button>
       <h2>Play Online</h2>
       <p class="dim">Vs matches for 2–8 players: everyone owns a corridor, sends creeps around the ring and steals lives. Rooms are joined by code; the host can fill free seats with NPCs.${o.backend === "mock" ? " <b class='warn'>Local test server (?mocknet) — only tabs of this browser can join.</b>" : ""}</p>
+      ${lastError ? `<div class="ol-error">⚠ ${esc(lastError)}</div>` : ""}
       <label class="ol-lbl">Your name</label>
       <input id="ol-name" class="ol-input" maxlength="16" placeholder="Nickname" value="${esc(savedName())}">
       ${ar ? `<button class="btn big primary" id="ol-rejoin">↻ Rejoin room ${esc(ar.code)}</button>` : ""}
@@ -42,7 +43,13 @@ export function createOnlineUI(o) {
       <p class="dim ol-note">Online play uses the Expanded rules at 1× speed. Waves start on a shared timer. If someone drops out, the game waits up to 30 seconds, then an NPC plays their corridor until they return.</p></div>`;
     $("ol-close").onclick = close;
     const name = () => { const n = cleanName($("ol-name").value); saveName(n); return n; };
-    const run = async (fn) => { if (busy) return; busy = true; try { await fn(); } catch (e) { toast(e.message || String(e), "warn"); console.warn(e); } busy = false; };
+    const run = async (fn) => {
+      if (busy) return; busy = true; lastError = "";
+      root.querySelectorAll(".ol-card .btn, #ol-rejoin").forEach((b) => b.classList.add("disabled"));
+      try { await Promise.race([fn(), new Promise((_, rej) => setTimeout(() => rej(new Error("The online service didn't answer within 20 seconds. Check the connection, then try again.")), 20000))]); } catch (e) { lastError = e.message || String(e); console.warn("[skyhold online]", e); view = "home"; render(); }
+      busy = false;
+      root.querySelectorAll(".ol-card .btn, #ol-rejoin").forEach((b) => b.classList.remove("disabled"));
+    };
     $("ol-create").onclick = () => run(async () => { await session.create(name()); view = "room"; render(); });
     $("ol-join").onclick = () => run(async () => { await session.join($("ol-code").value, name()); view = "room"; render(); });
     const rj = $("ol-rejoin"); if (rj) rj.onclick = () => run(async () => { await session.join(ar.code, name()); view = "room"; render(); });
@@ -52,7 +59,11 @@ export function createOnlineUI(o) {
   // ---- room --------------------------------------------------------------------------------
   function renderRoom() {
     const R = session.room, host = session.isHost, n = session.seatCount;
-    if (!R.meta) { root.innerHTML = `<div class="modal glass"><p class="dim">Connecting…</p></div>`; return; }
+    if (!R.meta) {
+      root.innerHTML = `<div class="modal glass"><p class="dim">Connecting to room ${esc(session.code || "")}…</p><button class="btn ghost" id="ol-cancel">Cancel</button></div>`;
+      $("ol-cancel").onclick = async () => { await session.leave(); view = "home"; render(); };
+      return;
+    }
     if (R.meta.status === "closed") { toast("The host closed the room.", "warn"); session.leave(); view = "home"; render(); return; }
     const mods = (R.cfg && R.cfg.mods) || {};
     const avail = o.availableElements();
@@ -178,5 +189,6 @@ export function createOnlineUI(o) {
   }
   bindGame();
 
-  return { open, close, render, pushChat, toggleChatInput, toggleEmotes, get isOpen() { return root.classList.contains("show"); } };
+  function showError(msg) { lastError = msg; view = "home"; root.classList.add("show"); render(); }
+  return { showError, open, close, render, pushChat, toggleChatInput, toggleEmotes, get isOpen() { return root.classList.contains("show"); } };
 }
