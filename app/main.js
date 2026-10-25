@@ -93,7 +93,7 @@ const view = {
   get field() { return game.state.players[fieldId()]; },
   get screen() { return game.screen; }, get view() { return game.view; },
   get activeCorridor() { return game.activeCorridor; },
-  get time() { return game.online && game.state ? game.state.tick / SIM_HZ : game.clock; }, get speed() { return game.speed; },
+  get time() { return game.state ? game.state.tick / SIM_HZ : game.clock; }, get speed() { return game.speed; },
   get selectedTowerId() { return game.selectedTowerId; }, set selectedTowerId(x) { game.selectedTowerId = x; },
   get selectedEnemyId() { return game.selectedEnemyId; }, set selectedEnemyId(x) { game.selectedEnemyId = x; },
   get buildTile() { return game.buildTile; }, set buildTile(x) { game.buildTile = x; },
@@ -127,6 +127,7 @@ const cmd = {
   send: (target, enemyType) => emit(C.sendEnemy(game.me, target, enemyType)),
   setTarget: (corridorId, towerId, mode) => emit(C.setTargetMode(game.me, corridorId, towerId, mode)),
   upgradeSend: (enemyType) => emit(C.upgradeSend(game.me, enemyType)),
+  inspire: (corridorId, towerId) => emit(C.builderInspire(game.me, corridorId, towerId)),
   sendAuto: (enemyType) => {
     if (isVersus()) { emit(C.sendEnemy(game.me, 0, enemyType)); return; }
     const n = game.state.players.length;
@@ -575,7 +576,7 @@ function restoreRun(d) {
 function setView(v, instant) {
   game.view = v; ui.closeAllPanels();
   const nav = $("field-nav"); if (nav) nav.classList.toggle("show", v === "field");
-  const ov = $("enemy-overview"); if (ov) ov.classList.toggle("show", v === "world");
+  const ov = $("enemy-overview"); if (ov) { ov.classList.toggle("show", v === "world"); if (v === "world" && !ov._touched) ov.classList.toggle("collapsed", window.innerWidth < 600); }
   document.body.dataset.view = v;
   if (v === "field") { updateCorridorName(); renderer.enterField(game.activeCorridor, instant); }
   else renderer.setMode("world", instant);
@@ -587,6 +588,11 @@ function enterCorridor(i) {
   if (game.view === "field") { ui.closeAllPanels(); updateCorridorName(); renderer.enterField(i); sound.play("whoosh"); }
   else setView("field");
   ui.updateTopBar();
+}
+function refreshCamBtn() { const l = $("camview-lbl"); if (l) l.textContent = renderer.closeView ? "Close" : "Top"; const b = $("btn-camview"); if (b) b.classList.toggle("on", renderer.closeView); }
+function followInto(ri) {
+  if (game.view !== "field" || ri === game.activeCorridor || ri < 0 || ri >= corridorNavCount()) return;
+  game.activeCorridor = ri; ui.closeRing(); updateCorridorName(); renderer.enterField(ri, false, true); ui.updateTopBar();
 }
 function updateCorridorName() {
   const nm = $("corridor-name"); if (!nm) return;
@@ -626,21 +632,45 @@ function onTap(px, py) {
     return;
   }
   const h = renderer.pick(px, py, view);
-  if (!h) { ui.closeAllPanels(); return; }
   const corr = pl.corridors[isVersus() ? 0 : game.activeCorridor];
   const ownField = !isVersus() || game.activeCorridor === game.me;
+  if (ui.picking) {   // "tap a tower" (Inspire)
+    const tw = h && h.kind === "cell" && ownField && h.c >= 0 && h.r >= 0 && h.c < game.state.grid.cols && h.r < game.state.grid.rows ? towerAt(corr, h.c, h.r) : null;
+    ui.pickTower(tw); if (!tw) ui.toast("Inspire cancelled"); return;
+  }
+  if (!h) { ui.closeAllPanels(); return; }
   if (h.enemyId != null) { const e = game.state.enemies.find((x) => x.id === h.enemyId); if (e) { ui.openEnemyPanel(e); sound.play("click"); return; } }
   const c = h.c, r = h.r, G = game.state.grid;
+  const onTower = c >= 0 && r >= 0 && c < G.cols && r < G.rows && corr.grid[r * G.cols + c] === 2;
+  if (h.builder && !onTower && ownField && corr.builder) { ui.openBuilderPanel(corr); sound.play("click"); return; }
   if (c < 0 || r < 0 || c >= G.cols || r >= G.rows) { ui.closeAllPanels(); return; }
   if (!ownField) { ui.closeAllPanels(); return; }
   const cell = corr.grid[r * G.cols + c];
-  if (cell === 2) { const tw = towerAt(corr, c, r); if (tw) { ui.openTowerRing(corr, tw, px, py); sound.play("click"); return; } }
+  if (cell === 2) { const tw = towerAt(corr, c, r); if (tw) { ui.openTowerRing(corr, tw, px, py); keepClear(tw.c + DB.CONFIG.towerSize / 2, tw.r + DB.CONFIG.towerSize / 2); sound.play("click"); return; } }
   if (cell === 0) {
     game.buildSpot = findBuildSpot(game.state, fieldId(), corr.index, c, r);
     if (game.buildSpot) { ui.openBuildRing(corr, { c, r }, px, py); sound.play("click"); return; }
     ui.toast("No room — towers need 3×3 space and can’t fully block the path.", "warn"); sound.play("reject");
   }
   ui.closeAllPanels();
+}
+// a selected tower glides clear of the card (never zooms); the ring follows it on screen
+function keepClear(u, v) {
+  requestAnimationFrame(() => {
+    const tp = $("tower-panel"); if (!tp || !tp.classList.contains("show")) return;
+    const r = tp.getBoundingClientRect(), ins = insets();
+    if (r.left > window.innerWidth * 0.45) return; // side panel: nothing covered
+    renderer.ensureVisible(u, v, ins.top + 90, r.top - 10);
+  });
+}
+function trackUI() {
+  if (game.screen !== "game" || game.view !== "field" || !ui) return;
+  const a = ui.ringAnchor;
+  if (a) {
+    const sp = renderer.cellScreen(a.u, a.v, 1);
+    const tp = $("tower-panel"); const r = tp && tp.classList.contains("show") ? tp.getBoundingClientRect() : null;
+    ui.trackRing(sp.x, sp.y, r && r.left < window.innerWidth * 0.45 ? r.top : null);
+  }
 }
 function bindPointer() {
   const cv = $("world-canvas");
@@ -726,9 +756,10 @@ function endScreen(win) {
   const eb = sc.querySelector("#end-endless"); if (eb) eb.style.display = (win && game.mode !== "endless" && !ch) ? "" : "none";
   const spb = $("end-spectate"); if (spb) spb.style.display = (!win && isVersus() && game.state.x && !game.state.finished) ? "" : "none";
   const eag = $("end-again"); if (eag) eag.textContent = game.online ? "Back to Online" : "Play Again";
-  let html = `<div class="end-stat"><span>${icon("wave", "xs")} Waves</span><b>${pl.wave}</b></div><div class="end-stat"><span>${icon("skull", "xs")} Kills</span><b>${pl.stats.kills}</b></div><div class="end-stat"><span>${icon("trophy", "xs")} Bosses</span><b>${pl.stats.bossesKilled}</b></div><div class="end-stat"><span>${icon("star", "xs")} Score</span><b>${pl.stats.score}</b></div>`;
+  let html = `<div class="end-tiles"><div><span>${icon("wave", "xs")} Waves</span><b>${pl.wave}</b></div><div><span>${icon("skull", "xs")} Kills</span><b>${pl.stats.kills}</b></div><div><span>${icon("trophy", "xs")} Bosses</span><b>${pl.stats.bossesKilled}</b></div><div><span>${icon("star", "xs")} Score</span><b>${pl.stats.score}</b></div></div>`;
   if (win && !ch) {
     const seen = new Set();
+    let rows = "";
     for (const eid of pl.elements) {
       if (seen.has(eid)) continue; seen.add(eid);
       const el = DB.ELEMENTS[eid]; if (!el) continue;
@@ -736,12 +767,13 @@ function endScreen(win) {
       const wins = (meta.elementWins && meta.elementWins[eid]) || 0;
       let prog;
       if (lvl >= 5) prog = "Mastery MAX";
-      else if (lvl === 4) prog = "Reach Wave 100 → Mastery 5";
-      else prog = wins + "/" + DB.MASTERY.winsRequired[lvl + 1] + " wins → Mastery " + (lvl + 1);
-      html += `<div class="end-stat"><span>${sigil(eid, "xs")} ${el.name} +1 win</span><b>${prog}</b></div>`;
+      else if (lvl === 4) prog = "Wave 100 → M5";
+      else prog = wins + "/" + DB.MASTERY.winsRequired[lvl + 1] + " → M" + (lvl + 1);
+      rows += `<span class="end-m" style="--ec:${el.color}">${sigil(eid, "xs")} ${el.name} <em>${prog}</em></span>`;
     }
+    if (rows) html += `<div class="end-mastery">${rows}</div>`;
   }
-  if (unlockMsgs.length) html += `<div class="end-unlocks">${unlockMsgs.map((m) => `<span class="unlock">🎉 ${m}</span>`).join("")}</div>`;
+  if (unlockMsgs.length) html += `<details class="end-unl"><summary>🎉 ${unlockMsgs.length} new unlock${unlockMsgs.length > 1 ? "s" : ""}</summary><div class="end-unlocks">${unlockMsgs.map((m) => `<span class="unlock">${m}</span>`).join("")}</div></details>`;
   if (game.state.x) html += `<div class="end-stats-wrap">${statsHTML(game.state)}</div>`;
   const body = sc.querySelector("#end-body");
   body.innerHTML = html;
@@ -753,6 +785,7 @@ function endScreen(win) {
 // ---- match stats: summary, leak report, towers, sends ---------------------------------
 function fmtT(ticks) { const s = Math.floor(ticks / SIM_HZ); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }
 function mobName(t) { return (DB.ENEMIES[t] && DB.ENEMIES[t].name) || t; }
+function corrName(p, i) { const c = p.corridors[i]; const el = c && DB.ELEMENTS[c.element]; return el ? sigil(c.element, "xs") + " " + el.name : "#" + (i + 1); }
 function statsHTML(st) {
   const me = st.players[game.me], L = me.log;
   if (!L) return "";
@@ -776,7 +809,7 @@ function statsHTML(st) {
   for (const l of L.leaks) { const a = agg[l.type] || (agg[l.type] = { n: 0, hp: 0 }); a.n++; a.hp += l.hp; }
   const aggTop = Object.entries(agg).sort((a, b) => b[1].n - a[1].n).slice(0, 8);
   h += `<div class="st-pane" data-pane="leaks">${L.leaks.length ? `<div class="st-sub">What got through</div><div class="st-list">${aggTop.map(([t, a]) => `<span class="st-chip"><img src="${enemyThumb(DB, t)}" alt="">${mobName(t)} ×${a.n} <em>avg ${Math.round(a.hp / a.n)}% HP</em></span>`).join("")}</div>
-    <div class="st-sub">Every leak</div><table class="st-table"><tr><th>Time</th><th>Mob</th><th>HP left</th><th>Wave</th>${isVersus() ? "<th>Sent by</th>" : "<th>Corridor</th>"}</tr>${L.leaks.slice(-80).reverse().map((l) => `<tr><td>${fmtT(l.t)}</td><td>${mobName(l.type)}</td><td>${l.hp}%</td><td>${l.wave}</td><td>${isVersus() ? (l.from != null ? seatName(l.from) : "wave") : (l.corridor + 1)}</td></tr>`).join("")}</table>` : "<p class='dim'>Nothing leaked. Flawless.</p>"}</div>`;
+    <div class="st-sub">Every leak</div><table class="st-table"><tr><th>Time</th><th>Mob</th><th>HP left</th><th>Wave</th>${isVersus() ? "<th>Sent by</th>" : "<th>Corridor</th>"}</tr>${L.leaks.slice(-80).reverse().map((l) => `<tr><td>${fmtT(l.t)}</td><td>${mobName(l.type)}</td><td>${l.hp}%</td><td>${l.wave}</td><td>${isVersus() ? (l.from != null ? seatName(l.from) : "wave") : corrName(me, l.corridor)}</td></tr>`).join("")}</table>` : "<p class='dim'>Nothing leaked. Flawless.</p>"}</div>`;
   // towers
   const towers = [];
   for (const corr of me.corridors) for (const tw of corr.towers) towers.push(tw);
@@ -916,20 +949,17 @@ function insets() {
   const tb = r("topbar"); if (tb) top = tb.bottom + 4;
   if (game.view === "field") { const nav = r("field-nav"); if (nav) top = Math.max(top, nav.bottom + 4); }
   const dock = r("quick-wave-controls"); if (dock) bottom = vh - dock.top + 4;
-  let right = 0;
-  for (const id of ["tower-panel", "enemy-panel", "send-panel"]) {
-    const p = $(id); if (!p || !p.classList.contains("show")) continue;
-    const pr = p.getBoundingClientRect();
-    if (pr.left > vw * 0.45) right = Math.max(right, vw - pr.left + 6);   // a side sheet (wide screens)
-    else bottom = Math.max(bottom, vh - pr.top + 6);                      // a bottom sheet (phones)
-  }
-  return { top, bottom, right };
+  // cards (tower / enemy / builder / sends) overlay the battlefield: they never move or zoom the camera
+  const right = 0;
+  return { top, bottom, right, baseBottom: bottom, baseRight: right };
 }
 
 function boot() {
   const canvas = $("world-canvas");
   try {
-    renderer = createRenderer({ canvas, DB, labelLayer: $("world-labels"), getInsets: insets, onSfx: (n, a) => sound.play(n, a) });
+    renderer = createRenderer({ canvas, DB, labelLayer: $("world-labels"), getInsets: insets, onSfx: (n, a) => sound.play(n, a),
+      onFollowEnd: () => { if (ui) ui.refreshPanels(); },
+      onFollowCorridor: (ri) => followInto(ri) });
   } catch (err) {
     const box = $("startup-error");
     if (box) { box.hidden = false; box.textContent = "Skyhold needs WebGL 2 to draw its world. (" + (err && err.message) + ")"; }
@@ -944,6 +974,9 @@ function boot() {
     bal,
     getSkins: () => BUILDER_SKINS.map((k) => ({ ...k, unlocked: skinUnlocked(k) })),
     getSkin: () => xmeta.skin || "element",
+    onEnemySelect: (id) => { renderer.setFollow(id); renderer.setPortrait(id != null ? $("enemy-portrait") : null, id); },
+    isFollowing: (id) => renderer.following === id,
+    toggleFollow: (id) => renderer.setFollow(renderer.following === id ? null : id),
     setSkin: (id) => { xmeta.skin = id; game.skin = id; saveXMeta(); },
   });
   loadDockPref();
@@ -988,7 +1021,7 @@ function boot() {
     },
     getSpeed: () => game.speed,
     maxTicksPerFrame: 10,
-    onRender: (alpha) => renderer.render(game.screen === "game" ? view : null, alpha),
+    onRender: (alpha) => { renderer.render(game.screen === "game" ? view : null, alpha); trackUI(); },
     isRunning: () => {
       if (game.screen !== "game" || game.paused || !game.state) return false;
       return phaseRunning();
@@ -1015,7 +1048,7 @@ function phaseRunning() {
 
 function bindUI() {
   const ovp = $("enemy-overview");
-  if (ovp) ovp.addEventListener("click", (e) => { if (e.target.closest(".ov-head")) ovp.classList.toggle("collapsed"); });
+  if (ovp) ovp.addEventListener("click", (e) => { if (e.target.closest(".ov-head")) { ovp._touched = true; ovp.classList.toggle("collapsed"); } });
   bind("btn-new-run", openSetup);
   bind("btn-continue", () => { if (hasRun()) continueRun(); });
   bind("btn-mastery", () => ui.openMastery());
@@ -1089,6 +1122,12 @@ function bindUI() {
   bind("btn-next-corridor", () => enterCorridor((game.activeCorridor + 1) % corridorNavCount()));
   bind("quick-start-wave", () => { game.autoT = null; cmd.startWave(); });
   bind("wave-fab", () => { game.autoT = null; cmd.startWave(); });
+  bind("btn-wave-info", () => ui.toggleWavePanel());
+  { const wp = $("wave-preview"); if (wp) wp.addEventListener("click", () => ui.toggleWavePanel()); }
+  bind("btn-camview", () => { renderer.setCloseView(!renderer.closeView); refreshCamBtn(); });
+  refreshCamBtn();
+  ui.bindSheets();
+  { const dk = $("quick-wave-controls"); if (dk && window.ResizeObserver) new ResizeObserver(() => document.documentElement.style.setProperty("--dock-h", dk.offsetHeight + "px")).observe(dk); }
   bind("wave-display", () => { if (game.view === "field") setView("world"); else enterCorridor(game.activeCorridor); });
   bind("dock-handle", () => { dockCollapsed = !dockCollapsed; try { localStorage.setItem(DOCK_KEY, dockCollapsed ? "1" : "0"); } catch (e) { /* fine */ } applyDock(); });
   bind("quick-auto-wave", () => {

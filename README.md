@@ -26,7 +26,8 @@ Open <http://localhost:8000>. three.js r186 and the fonts come from CDNs, so the
   - **Play Online:** Vs for 2–8 players over Firebase, with room codes, NPC seats, chat and emotes, and rejoin after a disconnect. Add `?mocknet` to test with two local tabs. Co-op and Compete are still *Soon*.
 - **Circle's shell:**
   - Menu, setup, HUD, survivors-by-origin panel, corridor nav and the wave dock with its next-wave preview.
-  - Radial build and tower rings with tap-again-to-confirm, the tower sheet with stats, targeting, synergies and mutations, the enemy sheet, boss bar and toasts.
+  - Radial build and tower rings with tap-again-to-confirm, and compact cards that expand: tower (level, expert progress, stats with upgrade delta, targeting, synergies, mutations), enemy (live portrait, follow cam, traits), builder (queue, Inspire, sends) and the ⓘ wave guide for the next three waves. Boss bar and toasts.
+  - Two field cameras: top-down and a close perspective view. Creeps enter at the top and walk towards you.
   - Pause, end screen with mastery progress, the Mastery and Synergy Codex screen, and Save / Import / Export. Circle's export files import here too.
   - Autosave after every wave, and Continue.
 - **The voxel world:**

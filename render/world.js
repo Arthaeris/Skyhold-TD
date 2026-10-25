@@ -481,6 +481,9 @@ export function buildCorridorIsland(DB, element, grid, seed = 1) {
       const base = 0.5 + smooth(clamp((dg - 1) / 4, 0, 1)) * (0.8 + 3.2 * hill + 2.2 * Math.pow(ridge, 3) * smooth(clamp((dg - 3) / 4, 0, 1)));
       const lip = smooth(clamp(-d / 1.8, 0, 1));
       h = Math.max(0.25, Math.round((0.3 + (base + lobeAt(cx, cz).lift - 0.3) * lip) * 2) / 2);
+      // keep the ground low around both portals (consistent clear sight of the portal effects)
+      const pd = Math.min(Math.hypot(cx, cz - (ROWS / 2 + 3)), Math.hypot(cx, cz + (ROWS / 2 + 3)));
+      if (pd < 12) h = Math.min(h, 0.25 + Math.max(0, pd - 8) * 0.4);
     }
     tops.set(tk(x, z), { x, z, cx, cz, d, h, kind, dg });
   }
@@ -491,7 +494,8 @@ export function buildCorridorIsland(DB, element, grid, seed = 1) {
     const sk = (n[0] >= h ? 1 : 0) | (n[1] >= h ? 2 : 0) | (n[2] >= h ? 16 : 0) | (n[3] >= h ? 32 : 0);
     if (kind === "plaza") {
       const ring = Math.max(Math.abs(cx) - 5.5, Math.abs(cz - (cz < 0 ? oz - 3 : -oz + 3)) - 2.2);
-      terr.box(0.98, 1.1, 0.98, pick(T.rim, r), cx, -0.35 + (ring > 0 ? 0.12 : 0), cz, { top: shade(T.rimTop, 0.85 + r() * 0.2), skip: 8, jitter: 0.06 });
+      // the portal pads sit just below the swirl discs, so nothing ever covers the portal effects
+      terr.box(0.98, 1.1, 0.98, pick(T.rim, r), cx, (ring > 0 ? -0.43 : -0.6), cz, { top: shade(T.rimTop, 0.85 + r() * 0.2), skip: 8, jitter: 0.06 });
       continue;
     }
     if (kind === "curb") {
@@ -505,13 +509,14 @@ export function buildCorridorIsland(DB, element, grid, seed = 1) {
     terr.box(1.0, h + 1.2, 1.0, edge ? shade(T.soil, 1.05) : T.soil, cx, (h - 1.2) / 2, cz, { top: shade(g, 0.94 + r() * 0.12), skip: 8 | sk, jitter: 0.07, ao: 0.8 });
     // grass/frost tufts on the lip, props and bigger landmarks further in
     if (edge && r() < 0.35) terr.box(0.35, 0.3, 0.35, shade(g, 1.15), cx + (r() - 0.5) * 0.6, h + 0.15, cz + (r() - 0.5) * 0.6);
-    if (!edge && t.dg > 3 && r() < 0.03) {
+    const nearPortal = Math.min(Math.hypot(cx, cz - (ROWS / 2 + 3)), Math.hypot(cx, cz + (ROWS / 2 + 3))) < 10;
+    if (!edge && !nearPortal && t.dg > 3 && r() < 0.03) {
       // rock outcrop
       const w0 = 1.2 + r() * 1.4;
       for (let q = 0; q < 3; q++) terr.box(w0 * (1 - q * 0.28), 0.9 + r() * 0.9, w0 * (0.9 - q * 0.25), shade(q ? T.rock : T.rim[1], 1.05 + q * 0.06), cx + (r() - 0.5) * 0.6, h + 0.45 + q * 0.85, cz + (r() - 0.5) * 0.6, { rotY: r() * TAU, top: q === 2 ? shade(g, 1.05) : undefined, skip: 8, jitter: 0.06 });
       continue;
     }
-    if (!edge && t.dg > 1.6) {
+    if (!edge && !nearPortal && t.dg > 1.6) {
       const k = r();
       if (k < 0.2) RIM[element](props, glow, cx, h, cz, r);
       else if (k < 0.25 && t.dg > 2.5) decorate(FLOAT_KIND[element], props, glow, cx, h, cz, 0.5 + r() * 0.3, r, T);
@@ -644,7 +649,7 @@ export function buildCorridorIsland(DB, element, grid, seed = 1) {
   group.add(floorMesh, terrMesh, propMesh, glowMesh);
 
   const inDisc = new THREE.Mesh(new THREE.CircleGeometry(2.05, 40), portalSwirl());
-  inDisc.rotation.x = -Math.PI / 2; inDisc.position.set(0, 0.05, entZ); inDisc.renderOrder = 3;
+  inDisc.rotation.x = -Math.PI / 2; inDisc.position.set(0, 0.1, entZ); inDisc.renderOrder = 3;
   const outDisc = new THREE.Mesh(new THREE.CircleGeometry(2.3, 40), portalSwirl());
   outDisc.position.set(0, 2.35, extZ - 0.05); outDisc.renderOrder = 3;
   group.add(inDisc, outDisc);

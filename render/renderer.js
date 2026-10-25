@@ -18,6 +18,7 @@ import { builderModel, mobColor } from "./mobmodels.js";
 
 const TILE = (v) => fx.toFloat(v);
 const EL_FIELD = 55 * Math.PI / 180, EL_WORLD = 62 * Math.PI / 180, EL_MENU = 38 * Math.PI / 180;
+const EL_CLOSE = 36 * Math.PI / 180, FOV_CLOSE = 34; // the "Close" corridor view: a lower perspective camera (Riftfall-style)
 const PREFS_KEY = "skyhold_prefs_v1";
 
 export function createRenderer(opts) {
@@ -33,7 +34,10 @@ export function createRenderer(opts) {
   renderer.shadowMap.type = THREE.PCFShadowMap;
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(WORLD.bg);
-  const camera = new THREE.OrthographicCamera(-10, 10, 10, -10, 1, 1600);
+  const ocam = new THREE.OrthographicCamera(-10, 10, 10, -10, 1, 1600);
+  const pcam = new THREE.PerspectiveCamera(FOV_CLOSE, 1, 1, 3000);
+  const portraitCam = new THREE.PerspectiveCamera(30, 1, 0.3, 200);
+  let camera = ocam;
   const hemi = new THREE.HemisphereLight(WORLD.hemiSky, WORLD.hemiGround, 1.55);
   scene.add(hemi);
   const sun = new THREE.DirectionalLight(WORLD.key, 2.4);
@@ -94,15 +98,19 @@ export function createRenderer(opts) {
 
   // ---- camera rig ------------------------------------------------------------
   // a camera "shot": target point, horizontal look direction (az), elevation, pixels per world unit
-  const cam = { tx: 0, ty: 0, tz: 0, az: 0, el: EL_WORLD, ppu: 4 };
+  const cam = { tx: 0, ty: 0, tz: 0, az: 0, el: EL_WORLD, ppu: 4, fov: 0 };
+  let closeView = false; try { closeView = localStorage.getItem("skyhold_closeview_v1") === "1"; } catch (e) { /* fine */ }
+  let follow = null, nudge = null, frameDt = 1 / 60;
   let fly = null;            // { from, to, t, dur }
   let mode = "menu";         // menu | setup | world | field
   let fieldIdx = 0;
   const pan = { x: 0, z: 0, zoom: 1 };
   const azOf = (d) => Math.atan2(d.x, -d.z);   // az 0 = looking toward -z (Circle's "up")
 
-  function contentRect() {
-    const ins = getInsets();
+  // `stable` ignores sheets/panels: the zoom never changes because a card opened, only the centring does
+  function contentRect(stable) {
+    const ins0 = getInsets();
+    const ins = stable ? { ...ins0, bottom: ins0.baseBottom != null ? ins0.baseBottom : ins0.bottom, right: ins0.baseRight != null ? ins0.baseRight : ins0.right } : ins0;
     const l = ins.left || 0, r = ins.right || 0;
     return { top: ins.top || 0, bottom: ins.bottom || 0, left: l, right: r, h: Math.max(80, H - (ins.top || 0) - (ins.bottom || 0)), w: Math.max(120, W - l - r) };
   }
@@ -125,23 +133,40 @@ export function createRenderer(opts) {
   function fieldPPU() {
     // portrait phones fit the corridor's width (like Circle, scrolling along its length);
     // landscape screens fit the whole corridor
-    const cr = contentRect();
+    const cr = contentRect(true);
     const byW = (cr.w - 12) / (COLS + 1.5);
     const byH = cr.h / ((ROWS + 6) * Math.sin(EL_FIELD) + 3);
-    return (cr.w / cr.h < 0.85 ? byW : Math.min(byW, byH)) * pan.zoom;
+    return (cr.w / cr.h < 0.85 ? byW : Math.min(byW, byH)) * pan.zoom * (closeView ? 1.2 : 1);
   }
   function clampPan() {
     pan.zoom = clamp(pan.zoom, 1, 4);
-    const ppu = fieldPPU(), cr = contentRect();
-    const halfX = (cr.w / 2) / ppu, halfZ = (cr.h / 2) / ppu / Math.sin(EL_FIELD);
+    const ppu = fieldPPU(), cr = contentRect(true);
+    const halfX = (cr.w / 2) / ppu, halfZ = (cr.h / 2) / ppu / Math.sin(closeView ? EL_CLOSE : EL_FIELD) * (closeView ? 0.6 : 1);
     const mx = Math.max(0, (COLS + 2) / 2 - halfX), mz = Math.max(0, (ROWS + 8) / 2 - halfZ);
     pan.x = clamp(pan.x, -mx, mx); pan.z = clamp(pan.z, -mz, mz);
   }
   function shotField(i) {
+    // following a selected enemy: glide the view onto it (any manual pan ends the follow)
+    if (follow != null) {
+      const r = erec.get(follow);
+      if (!r || !r.alive || !r.e || !r.e.alive) { follow = null; if (opts.onFollowEnd) opts.onFollowEnd(); }
+      else if (r.ri >= 0 && r.ri !== i) { if (opts.onFollowCorridor) opts.onFollowCorridor(r.ri); }
+      else if (r.u != null) {
+        const k = Math.min(1, frameDt * 6);
+        pan.x += ((r.u - COLS / 2) - pan.x) * k;
+        pan.z += ((r.v - ROWS / 2) - pan.z) * k;
+      }
+    } else if (nudge) {
+      // a one-off glide that keeps a selected tower clear of the card covering the bottom of the screen
+      const k = Math.min(1, frameDt * 7);
+      pan.x += (nudge.x - pan.x) * k; pan.z += (nudge.z - pan.z) * k;
+      if (Math.abs(nudge.x - pan.x) + Math.abs(nudge.z - pan.z) < 0.05) nudge = null;
+    }
     clampPan();
     const c = L.corridors[i] || L.corridors[0];
     const p = corridorToWorld(L, i, COLS / 2 + pan.x, ROWS / 2 + pan.z, 0, new THREE.Vector3());
-    return { tx: p.x, ty: 0, tz: p.z, az: azOf(c.t), el: EL_FIELD, ppu: fieldPPU() };
+    // the camera looks back up the corridor, so creeps enter at the top and walk towards you
+    return { tx: p.x, ty: 0, tz: p.z, az: azOf({ x: -c.t.x, z: -c.t.z }), el: closeView ? EL_CLOSE : EL_FIELD, ppu: fieldPPU(), fov: closeView ? FOV_CLOSE : 0 };
   }
   function goal() {
     if (mode === "field") return shotField(fieldIdx);
@@ -157,9 +182,9 @@ export function createRenderer(opts) {
     mode = m;
     if (instant) { Object.assign(cam, goal()); fly = null; } else startFly(m === "menu" ? 1.4 : 0.85);
   }
-  function enterField(i, instant) {
+  function enterField(i, instant, keepZoom) {
     const changing = mode !== "field" || i !== fieldIdx;
-    fieldIdx = i; pan.x = 0; pan.z = 0; pan.zoom = 1;
+    fieldIdx = i; pan.x = 0; pan.z = 0; nudge = null; if (!keepZoom) pan.zoom = 1;
     mode = "field";
     if (instant) { Object.assign(cam, goal()); fly = null; } else if (changing) startFly(0.85);
   }
@@ -175,6 +200,7 @@ export function createRenderer(opts) {
       cam.az = fly.from.az + da * k;
       cam.el = lerp(fly.from.el, g.el, k) + arc * 0.25;
       cam.ppu = Math.exp(lerp(Math.log(fly.from.ppu), Math.log(g.ppu), k)) * (1 - arc * 0.5);
+      cam.fov = lerp(fly.from.fov || 0, g.fov || 0, k);
       if (fly.t >= fly.dur) fly = null;
     } else Object.assign(cam, g);
     applyCamera();
@@ -182,16 +208,25 @@ export function createRenderer(opts) {
   const camDir = new THREE.Vector3();
   function applyCamera() {
     const cr = contentRect();
-    const D = 600;
+    const persp = cam.fov >= 1;
+    camera = persp ? pcam : ocam;
+    const hw = (W / 2) / cam.ppu, hh = (H / 2) / cam.ppu;
+    const tanH = Math.tan((cam.fov * Math.PI) / 360);
+    const D = persp ? hh / tanH : 600;
     const dx = Math.sin(cam.az), dz = -Math.cos(cam.az);
     camera.position.set(cam.tx - dx * Math.cos(cam.el) * D, cam.ty + Math.sin(cam.el) * D, cam.tz - dz * Math.cos(cam.el) * D);
     camera.up.set(0, 1, 0);
     camera.lookAt(cam.tx, cam.ty, cam.tz);
-    const hw = (W / 2) / cam.ppu, hh = (H / 2) / cam.ppu;
-    const off = ((cr.top - cr.bottom) / 2) / cam.ppu;   // centre the target in the space between the HUD bars
-    const offX = ((cr.right - cr.left) / 2) / cam.ppu;  // ...and beside side sheets on wide screens
-    camera.left = -hw + offX; camera.right = hw + offX; camera.top = hh + off; camera.bottom = -hh + off;
-    camera.near = 1; camera.far = 1600;
+    if (persp) {
+      pcam.fov = cam.fov; pcam.aspect = W / H; pcam.near = Math.max(0.5, D * 0.04); pcam.far = D + 1800;
+      // centre the target between the HUD bars (and beside side sheets), like the orthographic offset
+      pcam.setViewOffset(W, H, (cr.right - cr.left) / 2, -(cr.top - cr.bottom) / 2, W, H);
+    } else {
+      const off = ((cr.top - cr.bottom) / 2) / cam.ppu;   // centre the target in the space between the HUD bars
+      const offX = ((cr.right - cr.left) / 2) / cam.ppu;  // ...and beside side sheets on wide screens
+      ocam.left = -hw + offX; ocam.right = hw + offX; ocam.top = hh + off; ocam.bottom = -hh + off;
+      ocam.near = 1; ocam.far = 1600;
+    }
     camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
     camera.getWorldDirection(camDir);
@@ -201,7 +236,8 @@ export function createRenderer(opts) {
     sun.target.position.set(cam.tx, 0, cam.tz);
     const sc = sun.shadow.camera;
     if (sc.right !== half) { sc.left = -half; sc.right = half; sc.top = half; sc.bottom = -half; sc.near = 10; sc.far = 400; sc.updateProjectionMatrix(); }
-    sparks.mat.uniforms.uScale.value = cam.ppu * renderer.getPixelRatio();
+    sparks.mat.uniforms.uScale.value = (persp ? (H / 2) / tanH : cam.ppu) * renderer.getPixelRatio();
+    sparks.mat.uniforms.uPersp.value = persp ? 1 : 0;
   }
 
   // ---- input helpers -------------------------------------------------------
@@ -233,21 +269,28 @@ export function createRenderer(opts) {
     const p = groundAt(px, py);
     if (!p) return null;
     const uv = worldToCorridor(L, fieldIdx, p.x, p.z);
+    const sp = { x: 0, y: 0 };
+    // the builder (hovering above the field) is a generous screen-space target
+    const br = brec.get(fieldIdx);
+    let onBuilder = false;
+    if (br && br.group.visible) { toScreen(br.group.position, sp); onBuilder = (px - sp.x) ** 2 + (py - sp.y) ** 2 < Math.max(30, 1.3 * cam.ppu) ** 2; }
     // enemies: compare on screen against their interpolated positions (they stand above the floor)
     let near = null, nd = Math.max(18, 0.8 * cam.ppu) ** 2;
-    const sp = { x: 0, y: 0 };
     for (const [id, r] of erec) {
       if (r.ri !== fieldIdx || !r.alive) continue;
       toScreen(r.world.clone().setY(r.world.y + r.h * 0.45), sp);
       const d = (px - sp.x) ** 2 + (py - sp.y) ** 2;
       if (d < nd) { nd = d; near = id; }
     }
-    return { kind: "cell", corridor: fieldIdx, u: uv.u, v: uv.v, c: Math.floor(uv.u), r: Math.floor(uv.v), enemyId: near };
+    return { kind: "cell", corridor: fieldIdx, u: uv.u, v: uv.v, c: Math.floor(uv.u), r: Math.floor(uv.v), enemyId: near, builder: onBuilder };
   }
   function panBy(dxPx, dyPx) {
     if (mode !== "field") return;
-    pan.x -= dxPx / cam.ppu;
-    pan.z -= dyPx / cam.ppu / Math.sin(EL_FIELD);
+    if (follow != null) { follow = null; if (opts.onFollowEnd) opts.onFollowEnd(); }
+    nudge = null;
+    // the view is turned around (looking back up the corridor), so screen right = -u and screen down = +v
+    pan.x += dxPx / cam.ppu;
+    pan.z += dyPx / cam.ppu / Math.sin(closeView ? EL_CLOSE : EL_FIELD) * (closeView ? 1.6 : 1);
     clampPan();
   }
   function zoomAt(px, py, factor) {
@@ -429,7 +472,11 @@ export function createRenderer(opts) {
     let prev = from;
     ev.targets.forEach((id, i) => {
       const r = erec.get(id); if (!r) return;
-      const to = r.world.clone(); to.y += r.h * 0.55;
+      let to;
+      if (r.ri === tr.ri) to = r.world.clone();
+      else if (r.pri === tr.ri && L.corridors[r.pri]) to = corridorToWorld(L, r.pri, r.pu, r.pv, 0.02, new THREE.Vector3()); // hit on its way out
+      else return;
+      to.y += r.h * 0.55;
       if (ev.style === "beam" && i === 0) streaks.add(prev, to, c, 0.16, 0.09, 2.4);
       else streaks.bolt(prev, to, c, 0.12, 0.16, 4);
       if (i === 0) tr.target = id;
@@ -771,18 +818,54 @@ export function createRenderer(opts) {
       toScreen(new THREE.Vector3(L.vortex.x, 0, L.vortex.z), sp);
       vd.style.transform = `translate(${sp.x.toFixed(1)}px, ${sp.y.toFixed(1)}px) translate(-50%, -50%)`;
       const fld = view.versus ? st.players[view.me] : view.field;
-      const html = fld.phase === "prep" ? `<b>SUMMON</b><span>End Boss</span>` : `<span>Wave</span><b>${st.mode === "endless" ? fld.wave : fld.wave + "/" + fld.totalWaves}</b>`;
+      // the vortex stays visible: only a small chip on its rim while the End Boss can be summoned
+      const prep = fld.phase === "prep";
+      const html = prep ? `☠ Summon` : "";
       if (vd._h !== html) { vd.innerHTML = html; vd._h = html; }
-      vd.classList.toggle("summon", fld.phase === "prep");
+      vd.classList.toggle("summon", prep);
+      vd.style.display = prep ? "" : "none";
+      toScreen(new THREE.Vector3(L.vortex.x, 0, L.vortex.z + L.vortex.r * 0.9), sp);
+      vd.style.transform = `translate(${sp.x.toFixed(1)}px, ${sp.y.toFixed(1)}px) translate(-50%, 0)`;
     }
   }
 
   // ---- main draw -----------------------------------------------------------
+  // ---- live portrait: a little camera that watches the selected enemy, drawn straight into a hole in
+  // the UI (the element is transparent; we render into its rectangle on the main canvas)
+  let portrait = null; // { el, id }
+  const pTmp = new THREE.Vector3(), pClear = new THREE.Color("#0b0c26");
+  function drawPortrait() {
+    if (!portrait || !portrait.el || !portrait.el.isConnected) return;
+    const r = erec.get(portrait.id);
+    if (!r || !r.alive || r.ri < 0 || !L.corridors[r.ri]) return;
+    const rect = portrait.el.getBoundingClientRect(), cv = canvas.getBoundingClientRect();
+    const x = rect.left - cv.left, y = rect.top - cv.top, w = rect.width, h = rect.height;
+    if (w < 8 || h < 8 || x + w < 0 || y + h < 0 || x > W || y > H) return;
+    const s = enemyScale(DB, r.type), hgt = Math.max(0.8, r.h);
+    const look = pTmp.copy(r.world); look.y += hgt * 0.5;
+    const dist = 2.2 + hgt * 1.9;
+    // from the front-left, a little above, so you see its face
+    const a = r.yaw + 0.55;
+    portraitCam.position.set(look.x + Math.sin(a) * dist, look.y + dist * 0.42, look.z + Math.cos(a) * dist);
+    portraitCam.lookAt(look);
+    portraitCam.aspect = w / h; portraitCam.updateProjectionMatrix();
+    void s;
+    const prevClear = renderer.getClearColor(new THREE.Color()), prevAlpha = renderer.getClearAlpha();
+    renderer.setRenderTarget(null);
+    renderer.setScissorTest(true);
+    renderer.setViewport(x, H - y - h, w, h); renderer.setScissor(x, H - y - h, w, h);
+    renderer.setClearColor(pClear, 1); renderer.clear(true, true, false);
+    const bg = scene.background; scene.background = null;
+    renderer.render(scene, portraitCam);
+    scene.background = bg;
+    renderer.setScissorTest(false); renderer.setViewport(0, 0, W, H);
+    renderer.setClearColor(prevClear, prevAlpha);
+  }
   function render(view, alpha = 1) {
     const now = performance.now();
     const rawDt = Math.min(0.25, (now - last) / 1000); last = now;
     const dt = Math.min(0.05, rawDt);
-    clock += dt;
+    clock += dt; frameDt = dt;
     watchFrames(dt);
     V = view && view.state ? view : null;
     if (V) {
@@ -800,6 +883,7 @@ export function createRenderer(opts) {
     lifeFlash = Math.max(0, lifeFlash - dt * 2.5);
     post.final.uniforms.flash.value = lifeFlash * 0.22;
     post.render(scene, camera, QUALITY[look.level]);
+    drawPortrait();
   }
 
   // a demo ring for the title screen / setup preview
@@ -812,6 +896,26 @@ export function createRenderer(opts) {
 
   return {
     render, resize, snapshotPositions, onEvents, previewRing, pick, panBy, zoomAt, setMode, enterField, emote,
+    setFollow(id) { follow = id; if (id != null) nudge = null; },
+    // screen position of a corridor cell of the field being viewed
+    cellScreen(u, v, y = 1) { return toScreen(corridorToWorld(L, fieldIdx, u, v, y, new THREE.Vector3())); },
+    // glide (never zoom) so that cell (u,v) sits inside the visible band [topPx, bottomPx]
+    ensureVisible(u, v, topPx, bottomPx) {
+      if (mode !== "field" || follow != null) return;
+      const a = toScreen(corridorToWorld(L, fieldIdx, u, v, 1, new THREE.Vector3()));
+      if (a.y > topPx + 40 && a.y < bottomPx - 70) return;
+      const b = toScreen(corridorToWorld(L, fieldIdx, u, v + 1, 1, new THREE.Vector3()));
+      const pxPerV = b.y - a.y; if (Math.abs(pxPerV) < 0.5) return;
+      const want = (topPx + bottomPx) / 2;
+      const save = pan.z;
+      pan.z += (a.y - want) / pxPerV; clampPan();
+      nudge = { x: pan.x, z: pan.z }; pan.z = save;
+    },
+    get following() { return follow; },
+    setPortrait(el, id) { portrait = el ? { el, id } : null; },
+    setCloseView(on) { closeView = !!on; try { localStorage.setItem("skyhold_closeview_v1", closeView ? "1" : "0"); } catch (e) { /* fine */ } if (mode === "field") startFly(0.6); },
+    get closeView() { return closeView; },
+    builderWorld(ri) { const b = brec.get(ri); return b ? b.group.position.clone() : null; },
     debug: () => ({ builders: [...brec.values()].map((b) => ({ vis: b.group.visible, pos: b.group.position.toArray().map((x) => +x.toFixed(1)), parent: !!b.group.parent, kids: b.group.children.length })) }),
     groundAt, toScreen,
     get mode() { return mode; }, get fieldIndex() { return fieldIdx; }, get flying() { return !!fly; },

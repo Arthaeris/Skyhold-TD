@@ -20,8 +20,8 @@ export function createSparks(scene, max = 900) {
   g.setAttribute("size", new THREE.BufferAttribute(size, 1));
   g.setAttribute("alpha", new THREE.BufferAttribute(alpha, 1));
   const mat = new THREE.ShaderMaterial({
-    uniforms: { uTex: { value: dotTexture() }, uScale: { value: 20 } },
-    vertexShader: "attribute float size; attribute float alpha; attribute vec3 color; varying vec3 vC; varying float vA; uniform float uScale; void main() { vC = color; vA = alpha; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = size * uScale; gl_Position = projectionMatrix * mv; }",
+    uniforms: { uTex: { value: dotTexture() }, uScale: { value: 20 }, uPersp: { value: 0 } },
+    vertexShader: "attribute float size; attribute float alpha; attribute vec3 color; varying vec3 vC; varying float vA; uniform float uScale; uniform float uPersp; void main() { vC = color; vA = alpha; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = size * uScale / mix(1.0, max(0.5, -mv.z), uPersp); gl_Position = projectionMatrix * mv; }",
     fragmentShader: "uniform sampler2D uTex; varying vec3 vC; varying float vA; void main() { float a = texture2D(uTex, gl_PointCoord).a * vA; if (a < 0.01) discard; gl_FragColor = vec4(vC * a, a); }",
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   });

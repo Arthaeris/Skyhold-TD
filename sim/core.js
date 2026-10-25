@@ -85,6 +85,10 @@ export function createState(bal, cfg) {
   };
   // [X] expanded ruleset
   state.ruleset = cfg.ruleset === "expanded" ? "expanded" : "classic";
+  // [Skyhold fix, all rulesets] a shot in flight loses its target when the target leaves the corridor
+  // (Circle lets it home into the next corridor). cfg.circleShots restores Circle's behaviour — the
+  // parity test uses it to keep comparing everything else against Circle.
+  state.fixShots = !cfg.circleShots;
   state.x = state.ruleset === "expanded" ? xMods(cfg.mods || {}) : null;
   state.challenge = null;
   if (state.x) {
@@ -225,6 +229,7 @@ function applyCommand(state, cmd) {
     case "SendEnemy":    cmdSendEnemy(state, pl, cmd); break;
     case "SetTargetMode": cmdSetTargetMode(state, pl, cmd); break;
     case "UpgradeSend":  cmdUpgradeSend(state, pl, cmd); break;
+    case "BuilderInspire": if (state.x) xInspire(state, pl, cmd); break; // [X]
     case "SetSpeed":     if (cmd.player === 0) { const sp = cmd.speed | 0; state.netSpeed = sp < 1 ? 1 : (sp > 3 ? 3 : sp); } break;
     case "Ack":          break; // heartbeat, no state change
   }
@@ -920,7 +925,7 @@ function collectMods(d, tw) {
 
 function updateTowers(state, pl, corr, dt) {
   for (const tw of corr.towers) { tw.ampBuff = fx.ONE; tw.hasteBuff = fx.ONE; }
-  if (state.x) for (const tw of corr.towers) { tw.ampBuff = fx.mul(tw.xDmg || fx.ONE, tw.curseMult || fx.ONE); tw.hasteBuff = fx.mul(tw.xRate || fx.ONE, tw.jamMult || fx.ONE); } // [X] creep debuffs
+  if (state.x) for (const tw of corr.towers) { tw.ampBuff = fx.mul(tw.xDmg || fx.ONE, tw.curseMult || fx.ONE); tw.hasteBuff = fx.mul(fx.mul(tw.xRate || fx.ONE, tw.jamMult || fx.ONE), corr.builder && corr.builder.at === tw.id ? INSPIRE : fx.ONE); } // [X] creep debuffs, builder Inspire
   // auras
   for (const tw of corr.towers) {
     if (state.x && (tw.bState || tw.stunT > 0)) continue; // [X]
@@ -1074,7 +1079,8 @@ function findEnemyById(state, id) {
 function updateProjectiles(state, dt) {
   for (let i = state.projectiles.length - 1; i >= 0; i--) {
     const p = state.projectiles[i];
-    const tgt = p.targetId ? findEnemyById(state, p.targetId) : null;
+    let tgt = p.targetId ? findEnemyById(state, p.targetId) : null;
+    if (tgt && state.fixShots && tgt.corr !== p.corr) { p.targetId = 0; tgt = null; } // [Skyhold fix] it left this corridor: fly on to where it was
     if (tgt && tgt.alive) { p.tx = tgt.fx; p.ty = tgt.fy; }
     const dx = p.tx - p.x, dy = p.ty - p.y;
     let d = fx.len(dx, dy); if (d <= 0) d = 1;
@@ -1237,7 +1243,7 @@ function xInitPlayer(state, pl, pc) {
   }
 }
 function xInitCorridor(state, corr) {
-  corr.builder = { x: F(1.5), y: fx.fromInt(state.grid.rows >> 1), queue: [], cur: 0, moving: 0 };
+  corr.builder = { x: fx.fromInt(state.grid.cols >> 1), y: fx.fromInt(state.grid.rows >> 1), queue: [], cur: 0, moving: 0, insp: 0, at: 0 };
   corr.obsRev = 0;
 }
 
@@ -1255,18 +1261,39 @@ function xCancelBuild(corr, tw) {
   const i = b.queue.indexOf(tw.id); if (i >= 0) b.queue.splice(i, 1);
   if (b.cur === tw.id) b.cur = 0;
 }
+const INSPIRE = F(1.1);
+function xInspire(state, pl, cmd) {
+  const corr = pl.corridors[cmd.corridorId]; if (!corr || !corr.builder) return;
+  const tw = cmd.towerId ? corr.towers.find((t) => t.id === cmd.towerId) : null;
+  corr.builder.insp = tw ? tw.id : 0;
+  state.events.push({ kind: "inspire", player: pl.id, corridor: corr.index, tower: corr.builder.insp });
+}
+// the spot beside a tower where the builder stands to inspire it (left side, else right)
+function besideTower(state, tw) {
+  const G = state.grid, S = state.bal.towerSize;
+  const x = tw.c >= 1 ? fx.fromInt(tw.c) - F(0.6) : fx.fromInt(tw.c + S) + F(0.6);
+  return { x: fx.clamp(x, F(0.5), fx.fromInt(G.cols) - F(0.5)), y: tw.cy };
+}
 function xBuilder(state, pl, corr, dt) {
   const b = corr.builder; if (!b) return;
   if (!b.cur && b.queue.length) b.cur = b.queue.shift();
   let tw = null;
   if (b.cur) { tw = corr.towers.find((t) => t.id === b.cur) || null; if (!tw || !tw.bState) { b.cur = 0; tw = null; } }
-  const tx = tw ? tw.cx : F(1.5), ty = tw ? tw.cy : fx.fromInt(state.grid.rows >> 1);
+  let tx, ty, insp = null;
+  if (tw) { tx = tw.cx; ty = tw.cy; }
+  else if (b.insp) {
+    insp = corr.towers.find((t) => t.id === b.insp) || null;
+    if (!insp) b.insp = 0;
+    else { const p = besideTower(state, insp); tx = p.x; ty = p.y; }
+  }
+  b.at = 0;
+  if (tx == null) { b.moving = 0; return; } // idle: wait right where the last job ended
   const dx = tx - b.x, dy = ty - b.y;
   let d = fx.len(dx, dy);
-  const stepFx = fx.mul(tw ? BUILDER_SPEED : (BUILDER_SPEED >> 1), dt);
+  const stepFx = fx.mul(BUILDER_SPEED, dt);
   if (d > stepFx) { if (d <= 0) d = 1; b.x += fx.div(fx.mul(dx, stepFx), d); b.y += fx.div(fx.mul(dy, stepFx), d); b.moving = 1; return; }
   b.x = tx; b.y = ty; b.moving = 0;
-  if (!tw) return;
+  if (insp) { b.at = insp.id; return; }
   if (tw.bState === 1) { tw.bState = 2; state.events.push({ kind: "buildStart", player: pl.id, corridor: corr.index, tower: tw.id }); }
   tw.bT -= dt;
   if (tw.bT <= 0) { tw.bT = 0; tw.bState = 0; tw.cd = 0; b.cur = 0; state.events.push({ kind: "built", player: pl.id, corridor: corr.index, tower: tw.id }); }

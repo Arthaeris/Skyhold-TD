@@ -38,10 +38,13 @@ export function createUI(opts) {
   function setHTML(id, h) { const e = $(id); if (e && e._h !== h) { e.innerHTML = h; e._h = h; } }
 
   function closeAllPanels() {
-    ["build-menu", "tower-panel", "enemy-panel", "send-panel"].forEach((id) => { const e = $(id); if (e) e.classList.remove("show"); });
+    const wasEnemy = getView().selectedEnemyId != null;
+    ["build-menu", "tower-panel", "enemy-panel", "builder-panel", "send-panel", "wave-panel"].forEach((id) => { const e = $(id); if (e) e.classList.remove("show", "full"); });
     closeRing();
     const v = getView(); v.selectedTowerId = null; v.selectedEnemyId = null; v.buildTile = null; v.buildMenuOpen = false; v.buildPreview = null;
-    _sendSig = null;
+    _sendSig = null; _twRef = null; _bdCorr = null; _wvSig = null;
+    if (wasEnemy && opts.onEnemySelect) opts.onEnemySelect(null);
+    positionPortrait();
     if (opts.onPanels) opts.onPanels();
   }
 
@@ -63,7 +66,8 @@ export function createUI(opts) {
     label.style.left = cx + "px"; label.style.top = (cy - R - 40) + "px";
     label.innerHTML = o.title || "";
     m.appendChild(label);
-    _ring = { items: {}, focus: null, label, defTitle: o.title || "" };
+    _ring = { items: {}, focus: null, label, defTitle: o.title || "", cx, cy, R, anchor: o.anchor || null };
+    m.style.transform = "";
     const n = items.length;
     items.forEach((it, i) => {
       const a = -Math.PI / 2 + (i * 2 * Math.PI) / n;
@@ -95,6 +99,14 @@ export function createUI(opts) {
     m.classList.add("show");
   }
   function refreshRing() { if (!_ring) return; for (const k in _ring.items) _ring.items[k].render(); }
+  // keep the ring on its tower/tile while the camera glides (clamped above the open card)
+  function trackRing(sx, sy, maxY) {
+    if (!_ring) return;
+    const stage = $("game-stage"); const W = stage.clientWidth, H = stage.clientHeight, R = _ring.R;
+    const cx = Math.max(R + 40, Math.min(W - R - 40, sx));
+    const cy = Math.max(R + 86, Math.min(Math.min(H - R - 44, (maxY || H) - R - 30), sy));
+    $("radial-menu").style.transform = `translate(${Math.round(cx - _ring.cx)}px, ${Math.round(cy - _ring.cy)}px)`;
+  }
 
   const curOf = (v, el) => v.state.economy === "shared" ? v.player.gold : v.player.essence[el];
   const curIcon = (v, el) => v.state.economy === "shared" ? icon("coins", "gold") : sigil(el, "sm");
@@ -120,7 +132,7 @@ export function createUI(opts) {
     }));
     const locked = DB.TOWERS.filter((t) => t.element === corr.element && t.slot >= slots).length;
     items.push({ key: "x", cls: "rad-cancel", confirm: false, html: icon("close"), exec: closeAllPanels });
-    showRing(sx, sy, items, { title: `${sigil(corr.element, "sm")} Build — ${curIcon(v, corr.element)} ${Math.floor(curOf(v, corr.element))}${locked ? `<br><span class="rl-dim">${icon("lock", "xs")} ${locked} more with ${el.name} Mastery</span>` : ""}` });
+    showRing(sx, sy, items, { anchor: { u: tile.c + 0.5, v: tile.r + 0.5 }, title: `${sigil(corr.element, "sm")} Build — ${curIcon(v, corr.element)} ${Math.floor(curOf(v, corr.element))}${locked ? `<br><span class="rl-dim">${icon("lock", "xs")} ${locked} more with ${el.name} Mastery</span>` : ""}` });
     if (opts.onPanels) opts.onPanels();
   }
 
@@ -141,15 +153,15 @@ export function createUI(opts) {
       { key: "tgt", confirm: false,
         html: () => `${icon("target")}<span class="ri-cost">${tw.targetMode || "first"}</span>`,
         exec: () => { const m = TM[(TM.indexOf(tw.targetMode || "first") + 1) % TM.length]; cmd.setTarget(corr.index, tw.id, m); } },
-      { key: "info", confirm: false, html: `${icon("info")}<span class="ri-cost">info</span>`, exec: () => openTowerPanel(corr, tw) },
       { key: "sell", cls: "rad-sell", confirm: true,
         html: `${icon("coins")}<span class="ri-cost">+${sellRefund(def, tw.level)}</span>`,
         focusHtml: () => `<b>Sell for +${sellRefund(def, tw.level)}</b><br><span class="rl-dim">tap again to confirm</span>`,
         exec: () => { cmd.sell(corr.index, tw.id); closeAllPanels(); } },
       { key: "x", cls: "rad-cancel", confirm: false, html: icon("close"), exec: closeAllPanels },
     ];
-    showRing(sx, sy, items, { title: `${sigil(def.element, "sm")} ${def.name} · Lv${tw.level}${maxed() ? " · mutations in ⓘ" : ""}` });
-    if (opts.onPanels) opts.onPanels();
+    const S = DB.CONFIG.towerSize;
+    showRing(sx, sy, items, { anchor: { u: tw.c + S / 2, v: tw.r + S / 2 }, title: `${sigil(def.element, "sm")} ${def.name} · Lv${tw.level}` });
+    renderTowerCard(corr, tw, false);
   }
 
   // ---- synergy helpers (display-only views over DB.SYNERGIES) ---------------
@@ -194,7 +206,7 @@ export function createUI(opts) {
     const v = getView();
     let html;
     if (v.versus) {
-      html = `<div class="ov-head">Corridors · sends travel →</div>`;
+      html = `<div class="ov-head">Corridors · sends travel → <i class="ov-car">▾</i></div>`;
       v.state.players.forEach((p, i) => {
         const el = DB.ELEMENTS[p.elements[0]];
         let inside = 0; for (const e of v.state.enemies) if (e.owner === i) inside++;
@@ -207,7 +219,7 @@ export function createUI(opts) {
       });
     } else {
       const fld = v.field;
-      html = `<div class="ov-head">Survivors by Origin</div>`;
+      html = `<div class="ov-head">Survivors by Origin <i class="ov-car">▾</i></div>`;
       for (let i = 0; i < fld.corridorCount; i++) {
         const el = DB.ELEMENTS[fld.elements[i]];
         let alive = 0; for (const e of v.state.enemies) if (e.owner === v.fieldId && e.originIndex === i) alive++;
@@ -263,54 +275,307 @@ export function createUI(opts) {
     wp.classList.toggle("show", !!html);
   }
 
-  // ---- tower panel ---------------------------------------------------------
-  function openTowerPanel(corr, tw) {
-    closeAllPanels();
-    const v = getView(); v.selectedTowerId = tw.id;
+  // ---------------------------------------------------------------------------
+  // CARDS — one sheet system for towers, enemies, the builder, sends and the wave guide.
+  // Phones: a compact card above the dock that expands (grip / "More"). Wide screens: a side panel.
+  // Cards never move or zoom the camera.
+  // ---------------------------------------------------------------------------
+  const SHEETS = ["tower-panel", "enemy-panel", "builder-panel", "send-panel", "wave-panel"];
+  function bindSheets() {
+    for (const id of SHEETS) {
+      const p = $(id); if (!p || p._bound) continue; p._bound = true;
+      p.addEventListener("click", (e) => {
+        if (e.target.closest("[data-close]")) { e.stopPropagation(); closeAllPanels(); return; }
+        if (e.target.closest("[data-more]")) { p.classList.toggle("full"); sfx("click"); positionPortrait(); return; }
+        const g = e.target.closest("[data-grip]");
+        if (g && !g._dragged) { p.classList.toggle("full"); positionPortrait(); }
+      });
+      let y0 = null;
+      p.addEventListener("pointerdown", (e) => { const g = e.target.closest("[data-grip]"); if (g) { y0 = e.clientY; g._dragged = false; } });
+      p.addEventListener("pointerup", (e) => {
+        if (y0 == null) return; const dy = e.clientY - y0; y0 = null;
+        const g = e.target.closest("[data-grip]") || p.querySelector("[data-grip]");
+        if (Math.abs(dy) < 24) return;
+        if (g) { g._dragged = true; setTimeout(() => { g._dragged = false; }, 0); }
+        if (dy < 0) p.classList.add("full");
+        else if (p.classList.contains("full")) p.classList.remove("full");
+        else closeAllPanels();
+        positionPortrait();
+      });
+    }
+  }
+  function fillSheet(p, html) {
+    const sc = p.querySelector(".sh-scroll"); const k = sc ? sc.scrollTop : 0;
+    p.innerHTML = html;
+    const s2 = p.querySelector(".sh-scroll"); if (s2) s2.scrollTop = k;
+  }
+  function sheetHTML(head, peek, more) {
+    return `<div class="sh-grip" data-grip><span></span></div><div class="sh-scroll">${head}${peek}${more ? `<div class="sh-more">${more}</div>` : ""}</div>${more ? `<button class="sh-toggle" data-more><span class="m1">More ▾</span><span class="m2">Less ▴</span></button>` : ""}`;
+  }
+  function sheetHead(o) {
+    return `<div class="sh-head"${o.color ? ` style="--ec:${o.color}"` : ""}>${o.thumb || ""}<div class="sh-title"><div class="sh-name">${o.title}</div>${o.sub ? `<div class="sh-sub">${o.sub}</div>` : ""}</div>${o.right || ""}<button class="sh-x" data-close aria-label="Close">${icon("close")}</button></div>`;
+  }
+  function openSheet(id, full) {
+    for (const s of SHEETS) if (s !== id) { const e = $(s); if (e) e.classList.remove("show"); }
+    const p = $(id); p.classList.add("show");
+    if (full != null) p.classList.toggle("full", !!full);
+    return p;
+  }
+  const chip = (html, cls, attrs) => `<span class="chip${cls ? " " + cls : ""}"${attrs || ""}>${html}</span>`;
+
+  // ---- tower card (opened together with the tower ring) -------------------------
+  let _twRef = null;
+  function towerCardHTML(corr, tw) {
+    const v = getView();
     const el = DB.ELEMENTS[tw.def.element], def = DB.TOWER_BY_ID[tw.def.id];
     const maxed = tw.level >= DB.CONFIG.maxLevel;
-    const cost = Math.round(def.cost * DB.SCALING.upgradeCostBase * Math.pow(DB.SCALING.costGrowth, tw.level - 1));
     const slots = DB.mutationSlotsAvailable(masteryLevel(tw.def.element));
     const expNeed = tw.expert < 5 ? DB.CONFIG.expertThresholds[tw.expert] : tw.kills;
     const expPct = tw.expert < 5 ? Math.min(1, tw.kills / expNeed) : 1;
     const cur = towerView(def, tw.level, tw.expert);
     const nxt = maxed ? null : towerView(def, tw.level + 1, tw.expert);
-    const refund = sellRefund(def, tw.level);
-    let html = `<button class="panel-close" id="tp-close">${icon("close")}</button>
-      <div class="tp-head" style="--ec:${el.color}"><img class="tp-thumb" src="${thumb(def.id, Math.min(3, tw.level >= 10 ? 3 : tw.level >= 7 ? 2 : tw.level >= 4 ? 1 : 0))}" alt=""><div><div class="tp-name">${def.name}</div><div class="tp-sub">${sigil(def.element, "xs")} ${el.name} · ${def.archetype}</div><div class="tp-desc">${def.desc || ""}</div></div></div>
-      <div class="tp-levels"><span class="badge">Lv ${tw.level}/10</span><span class="badge gold">${icon("star", "xs")} Expert ${tw.expert}/5</span></div>
-      ${v.state.x ? towerBadges(tw, def) : ""}
-      <div class="exp-bar"><div style="width:${expPct * 100}%"></div></div>
-      <div class="exp-label">${tw.expert < 5 ? tw.kills + " / " + expNeed + " kills" : "MAX EXPERTISE"} · ${tw.kills} total kills</div>
-      <div class="tp-stats">
-        ${statRow("Damage", cur.dmg.toFixed(0), nxt && nxt.dmg.toFixed(0))}
-        ${statRow("Range", cur.range.toFixed(1), nxt && nxt.range.toFixed(1))}
-        ${statRow("Atk Speed", cur.rate.toFixed(2), nxt && nxt.rate.toFixed(2))}
-        ${def.archetype !== "support" ? statRow("DPS", Math.round(cur.dmg * cur.rate), nxt && Math.round(nxt.dmg * nxt.rate)) : ""}
-        ${def.status ? `<div class="tp-eff">${DB.STATUSES[def.status].icon} Applies ${DB.STATUSES[def.status].name}</div>` : ""}
-      </div>
-      <div class="tp-target"><span class="tt-lbl">Target</span>${["first", "last", "strong", "weak"].map((m) =>
-        `<button class="tm-btn ${(tw.targetMode || "first") === m ? "sel" : ""}" data-tm="${m}">${m[0].toUpperCase() + m.slice(1)}</button>`).join("")}</div>
-      ${towerSynergyHtml(def)}
-      <div class="tp-actions">
-        <button id="tp-upgrade" class="${maxed ? "disabled" : ""}">${maxed ? "MAX LEVEL" : icon("up", "xs") + " Upgrade · " + cost}</button>
-        <button id="tp-sell" class="sell">${icon("coins", "xs")} Sell · +${refund}</button>
-      </div>`;
+    const stage = tw.level >= 10 ? 3 : tw.level >= 7 ? 2 : tw.level >= 4 ? 1 : 0;
+    let arche = def.archetype;
+    for (const mid of tw.mutations) { const m = def.mutations.find((x) => x.id === mid); if (m && m.mods.archetype) arche = m.mods.archetype; }
+    const air = arche !== "splash" && arche !== "melee";
+    const det = def.element === "light" || tw.level >= 7 || arche === "support";
+    const stars = [0, 1, 2, 3, 4].map((i) => `<i class="${i < tw.expert ? "on" : ""}">★</i>`).join("");
+    const head = sheetHead({
+      color: el.color,
+      thumb: `<img class="sh-thumb" src="${thumb(def.id, stage)}" alt="">`,
+      title: `${def.name} <span class="lv">Lv ${tw.level}${maxed ? " · MAX" : "/10"}</span>`,
+      sub: `${sigil(def.element, "xs")} ${el.name} · ${arche} · targets ${tw.targetMode || "first"}`,
+    });
+    const delta = (a, b, f) => (b != null && f(b) !== f(a)) ? `<em>→${f(b)}</em>` : "";
+    const r0 = (x) => Math.round(x), r1 = (x) => x.toFixed(1), r2 = (x) => x.toFixed(2);
+    let chips = "";
+    if (def.archetype !== "support") chips += chip(`⚔ <b>${r0(cur.dmg * cur.rate)}</b> DPS${delta(cur.dmg * cur.rate, nxt && nxt.dmg * nxt.rate, r0)}`);
+    chips += chip(`◎ <b>${r1(cur.range)}</b>${delta(cur.range, nxt && nxt.range, r1)}`, "", ` title="Range"`);
+    chips += chip(`⏱ <b>${r2(cur.rate)}</b>/s`, "", ` title="Attacks per second"`);
+    if (def.status) chips += chip(`${DB.STATUSES[def.status].icon} ${DB.STATUSES[def.status].name}`);
+    if (v.state.x) {
+      chips += chip(`🪽 ${air ? "Air" : "No air"}`, air ? "" : "no");
+      chips += chip(`👁 ${det ? "Stealth" : "Lv 7"}`, det ? "" : "no", ` title="${det ? "Detects stealth" : "Detects stealth from level 7"}"`);
+      if (tw.bState) chips += chip(`🔨 ${tw.bState === 1 ? "Waiting for builder" : "Building " + Math.round((1 - tw.bT / (tw.bMax || 1)) * 100) + "%"}`, "warn");
+      if (tw.upT > 0) chips += chip("⬆ Upgrading…", "warn");
+      if (tw.stunT > 0) chips += chip("💫 Stunned", "warn");
+      if (tw.jamT > 0 || (tw.xRate && tw.xRate < fx.ONE)) chips += chip("🐌 Slowed", "warn");
+      if (tw.curseT > 0 || (tw.xDmg && tw.xDmg < fx.ONE)) chips += chip("🧪 Weakened", "warn");
+      if (tw.confused) chips += chip("🌀 Confused", "warn");
+      if (corr.builder && corr.builder.at === tw.id) chips += chip("✨ Inspired +10%", "good");
+    }
+    if (maxed && slots > tw.mutations.length) chips += chip(`🧬 ${slots - tw.mutations.length} mutation${slots - tw.mutations.length > 1 ? "s" : ""} — More`, "gold", ` data-more`);
+    const peek = `<div class="xp-row"><span class="stars" title="Expertise">${stars}</span><div class="exp-bar"><div style="width:${expPct * 100}%"></div></div><span class="xp-n">${tw.expert < 5 ? tw.kills + "/" + expNeed : "MAX"}</span></div><div class="chips">${chips}</div>`;
+    let more = `${def.desc ? `<p class="sh-desc">${def.desc}</p>` : ""}
+      <div class="tp-target"><span class="tt-lbl">Target</span>${["first", "last", "strong", "weak"].map((m) => `<button class="tm-btn ${(tw.targetMode || "first") === m ? "sel" : ""}" data-tm="${m}">${m[0].toUpperCase() + m.slice(1)}</button>`).join("")}</div>
+      <div class="tp-stats">${statRow("Damage", r0(cur.dmg), nxt && r0(nxt.dmg))}${statRow("Range", r1(cur.range), nxt && r1(nxt.range))}${statRow("Attack speed", r2(cur.rate), nxt && r2(nxt.rate))}${statRow("Kills", tw.kills)}${tw.dmgDone ? statRow("Damage dealt", Math.round(tw.dmgDone / 65536)) : ""}${statRow("Sell refund", "+" + sellRefund(def, tw.level))}</div>
+      ${towerSynergyHtml(def)}`;
     if (maxed) {
-      html += `<div class="tp-mut-head">Mutations ${slots ? `(${tw.mutations.length}/${slots} slots)` : "(locked — raise Mastery)"}</div><div class="tp-muts">`;
-      def.mutations.forEach((m) => { const have = tw.mutations.includes(m.id); html += `<button class="mut-card ${have ? "have" : ""}" data-mut="${m.id}"><div class="mut-name">${m.name}</div><div class="mut-desc">${m.desc}</div></button>`; });
-      html += `</div>`;
-    } else html += `<div class="tp-mut-head dim">Mutations unlock at max level</div>`;
-    const p = $("tower-panel"); p.innerHTML = html; p.classList.add("show");
-    $("tp-close").onclick = closeAllPanels;
-    $("tp-upgrade").onclick = () => { if (!maxed) cmd.upgrade(corr.index, tw.id); };
-    $("tp-sell").onclick = () => { cmd.sell(corr.index, tw.id); closeAllPanels(); };
+      more += `<div class="tp-mut-head">Mutations ${slots ? `(${tw.mutations.length}/${slots})` : "(locked — raise Mastery)"}</div><div class="tp-muts">`;
+      def.mutations.forEach((m) => { const have = tw.mutations.includes(m.id); more += `<button class="mut-card ${have ? "have" : ""}" data-mut="${m.id}"><div class="mut-name">${m.name}</div><div class="mut-desc">${m.desc}</div></button>`; });
+      more += `</div>`;
+    } else more += `<div class="tp-mut-head dim">Mutations unlock at level 10</div>`;
+    return sheetHTML(head, peek, more);
+  }
+  function renderTowerCard(corr, tw, full) {
+    const p = openSheet("tower-panel", full);
+    fillSheet(p, towerCardHTML(corr, tw));
     p.querySelectorAll("[data-mut]").forEach((b) => b.onclick = () => cmd.mutate(corr.index, tw.id, b.dataset.mut));
     p.querySelectorAll("[data-tm]").forEach((b) => b.onclick = () => cmd.setTarget(corr.index, tw.id, b.dataset.tm));
-    _twSig = twSig(tw);
+    _twRef = { corr, tw }; _twSig = twSig(tw) + (corr.builder ? corr.builder.at : "");
     if (opts.onPanels) opts.onPanels();
   }
-  function twSig(t) { return t.level + "/" + t.expert + "/" + t.kills + "/" + t.mutations.length + "/" + (t.targetMode || "first") + "/" + (t.bState || 0) + (t.upT > 0 ? "u" : "") + (t.stunT > 0 ? "s" : "") + (t.jamT > 0 ? "j" : "") + (t.curseT > 0 ? "c" : "") + (t.confused ? "f" : ""); }
+  function openTowerPanel(corr, tw) {
+    const keepRing = _ring && getView().selectedTowerId === tw.id;
+    if (!keepRing) { closeAllPanels(); getView().selectedTowerId = tw.id; }
+    renderTowerCard(corr, tw, true);
+  }
+
+  // ---- enemy card (+ the live portrait bubble beside it) --------------------------
+  let _epTip = null;
+  function enemyCardHTML(e) {
+    const v = getView();
+    const oid = v.versus ? v.state.players[e.owner].elements[0] : v.field.elements[e.originIndex];
+    const oel = DB.ELEMENTS[oid];
+    const m = MOB_BY_ID[e.type];
+    const stk = (e.statusKeys || []).map((k) => DB.STATUSES[k]).filter(Boolean);
+    const affix = e.affix && AFFIXES[e.affix];
+    const name = (DB.ENEMIES[e.type] || {}).name || e.type;
+    const following = opts.isFollowing ? opts.isFollowing(e.id) : false;
+    const tags = [];
+    if (e.end) tags.push(`<span class="tag-b boss">END BOSS</span>`); else if (e.boss) tags.push(`<span class="tag-b boss">BOSS</span>`);
+    if (e.sent) tags.push(`<span class="tag-b">SENT</span>`);
+    if (affix) tags.push(`<span class="tag-b gold" data-tip="affix">${affix.icon} ${affix.name}</span>`);
+    const sub = `${sigil(oid, "xs")} ${oel.name}${e.loopCount ? " · loop " + (e.loopCount + 1) : ""}${e.sentBy != null && v.versus ? " · from " + (v.seatName ? v.seatName(e.sentBy) : "NPC " + e.sentBy) : ""}`;
+    const head = sheetHead({ title: `${name} ${tags.join("")}`, sub, color: oel.color,
+      right: `<button class="sh-btn ${following ? "on" : ""}" data-follow>${following ? "📍 Following" : "📍 Follow"}</button>` });
+    const hp = Math.max(0, toI(e.hp)), mhp = Math.max(1, toI(e.maxHp));
+    let bars = `<div class="hp-bar"><div style="width:${Math.min(100, (hp / mhp) * 100)}%"></div><span>${hp} / ${mhp}</span></div>`;
+    if (e.shieldHp > 0) bars += `<div class="sh-bar"><div style="width:${Math.min(100, (toI(e.shieldHp) / Math.max(1, toI(e.maxHp) / 2)) * 100)}%"></div><span>🛡 ${toI(e.shieldHp)}</span></div>`;
+    const tips = {};
+    let chips = "";
+    for (const s of stk) chips += chip(`${s.icon} ${s.name}`, "st", ` style="--sc:${s.color}"`);
+    if (e.hidden) { chips += chip("👁 Hidden", "warn", ` data-tip="hidden"`); tips.hidden = "Your towers can't see it — build Light towers or reach level 7 to detect stealth."; }
+    if (e.invulnT > 0) chips += chip("✨ Invulnerable", "warn");
+    if (m) {
+      const ac = ARMOR_CLASSES[m.armorClass];
+      if (ac) { chips += chip(ac.name, "ac", ` style="color:${ac.color}" data-tip="ac"`); tips.ac = `<b>${ac.name} armour</b> — its armour class (damage types will care about it).`; }
+      traitList(m.traits).forEach(([i, n, d], k) => { chips += chip(`${i} ${n}`, "", ` data-tip="t${k}"`); tips["t" + k] = `<b>${n}</b> — ${d}`; });
+    }
+    if (affix) tips.affix = `<b>${affix.name}</b> — ${affix.desc}`;
+    const tip = _epTip && tips[_epTip] ? `<div class="tip-line">${tips[_epTip]}</div>` : "";
+    const peek = `${bars}<div class="chips">${chips || "<span class='chip no'>No special traits</span>"}</div>${tip}`;
+    const adapts = Object.keys(e.adapt || {}).map((k) => { const a = ADAPT_INFO[k] || { icon: "↻", name: k }; const n = e.adapt[k]; return chip(`${a.icon} ${a.name}${n > 1 ? " ×" + n : ""}`, "gold"); });
+    const more = `${m ? `<p class="sh-desc">${m.desc}</p>` : ""}<div class="tp-stats">${statRow("Armor", toI(e.armor) + (e.auraArmor ? " +" + toI(e.auraArmor) : ""))}${statRow("Reward", e.reward)}${statRow("Loops", e.loopCount)}</div>${adapts.length ? `<div class="tp-mut-head">↻ Loop adaptations</div><div class="chips">${adapts.join("")}</div>` : ""}`;
+    return sheetHTML(head, peek, more);
+  }
+  function openEnemyPanel(e) {
+    const v = getView();
+    if (v.selectedEnemyId !== e.id) { closeAllPanels(); v.selectedEnemyId = e.id; _epTip = null; if (opts.onEnemySelect) opts.onEnemySelect(e.id); }
+    const p = openSheet("enemy-panel");
+    fillSheet(p, enemyCardHTML(e));
+    p.querySelectorAll("[data-tip]").forEach((b) => b.onclick = (ev) => { ev.stopPropagation(); _epTip = _epTip === b.dataset.tip ? null : b.dataset.tip; openEnemyPanel(e); });
+    const fb = p.querySelector("[data-follow]"); if (fb) fb.onclick = (ev) => { ev.stopPropagation(); if (opts.toggleFollow) opts.toggleFollow(e.id); openEnemyPanel(e); };
+    positionPortrait();
+    if (opts.onPanels) opts.onPanels();
+  }
+  function positionPortrait() {
+    const pe = $("enemy-portrait"), p = $("enemy-panel"); if (!pe) return;
+    const v = getView();
+    if (!p || !p.classList.contains("show") || !v.selectedEnemyId) { pe.classList.remove("show"); return; }
+    const r = p.getBoundingClientRect(), vw = window.innerWidth;
+    const S = pe.offsetWidth || 92;
+    if (r.left > vw * 0.45) { pe.style.left = (r.left + 8) + "px"; pe.style.top = (r.bottom + 12) + "px"; }
+    else { pe.style.left = (r.left + 6) + "px"; pe.style.top = (r.top - S - 8) + "px"; }
+    pe.classList.add("show");
+  }
+
+  // ---- builder card --------------------------------------------------------------
+  let _bdSig = null, _bdCorr = null;
+  function builderSig(corr) { const b = corr.builder; const tw = b.cur && corr.towers.find((t) => t.id === b.cur); return [b.cur, b.queue.join(","), b.insp, b.at, b.moving, tw ? Math.floor((tw.bT || 0) / 16384) : 0, Math.floor(getView().player.gold)].join("|"); }
+  function builderCardHTML(corr) {
+    const v = getView(), b = corr.builder, el = DB.ELEMENTS[corr.element];
+    const tname = (t) => (DB.TOWER_BY_ID[t.def.id] || {}).name || t.def.id;
+    const cur = b.cur ? corr.towers.find((t) => t.id === b.cur) : null;
+    const insp = b.insp ? corr.towers.find((t) => t.id === b.insp) : null;
+    let status;
+    if (cur) status = cur.bState === 2 ? `🔨 Building <b>${tname(cur)}</b>` : `🚶 Walking to build <b>${tname(cur)}</b>`;
+    else if (insp) status = b.at === insp.id ? `✨ Inspiring <b>${tname(insp)}</b> · +10% attack speed` : `🚶 Walking to inspire <b>${tname(insp)}</b>`;
+    else status = "💤 Idle — waiting where the last job ended";
+    const head = sheetHead({ color: el.color, thumb: `<div class="sh-ico" style="--ec:${el.color}">🔨</div>`, title: "Builder", sub: `${sigil(corr.element, "xs")} ${el.name} corridor` });
+    const jobs = [cur, ...b.queue.map((id) => corr.towers.find((t) => t.id === id))].filter(Boolean);
+    let peek = `<div class="bd-status">${status}</div>`;
+    if (jobs.length) {
+      peek += `<div class="bd-jobs">${jobs.map((t, i) => {
+        const pct = t.bState === 2 ? Math.round((1 - t.bT / (t.bMax || 1)) * 100) : 0;
+        return `<div class="bd-job"><img src="${thumb(t.def.id, 0)}" alt=""><div class="bd-jinfo"><b>${tname(t)}</b><div class="exp-bar"><div style="width:${pct}%"></div></div></div><span class="dim">${i === 0 && t.bState === 2 ? pct + "%" : "queued"}</span><button class="sh-btn" data-cancel="${t.id}">✕ +${t.def.cost}</button></div>`;
+      }).join("")}</div>`;
+    }
+    const own = !v.versus || v.activeCorridor === v.me;
+    let acts = "";
+    if (own) {
+      acts += insp ? `<button class="sh-act" data-stopinsp>✕ Stop inspiring</button>` : `<button class="sh-act" data-inspire>✨ Inspire a tower</button>`;
+      if (v.versus) acts += `<button class="sh-act pink" data-sends>${icon("swords", "xs")} Sends</button>`;
+    }
+    if (acts) peek += `<div class="sh-acts">${acts}</div>`;
+    peek += `<p class="sh-hint">${jobs.length ? "Cancelling a construction refunds it in full." : "Inspire: the builder stands beside a tower and speeds up its attacks by 10% while no construction is waiting."}</p>`;
+    return sheetHTML(head, peek, "");
+  }
+  function openBuilderPanel(corr) {
+    if (!corr || !corr.builder) return;
+    if (_bdCorr !== corr || !$("builder-panel").classList.contains("show")) closeAllPanels();
+    _bdCorr = corr;
+    const p = openSheet("builder-panel", false);
+    fillSheet(p, builderCardHTML(corr));
+    _bdSig = builderSig(corr);
+    p.querySelectorAll("[data-cancel]").forEach((bt) => bt.onclick = (ev) => { ev.stopPropagation(); cmd.sell(corr.index, +bt.dataset.cancel); });
+    const ib = p.querySelector("[data-inspire]"); if (ib) ib.onclick = (ev) => { ev.stopPropagation(); startPick("inspire", corr); };
+    const sb = p.querySelector("[data-stopinsp]"); if (sb) sb.onclick = (ev) => { ev.stopPropagation(); cmd.inspire(corr.index, 0); };
+    const se = p.querySelector("[data-sends]"); if (se) se.onclick = (ev) => { ev.stopPropagation(); toggleSendPanel(); };
+    if (opts.onPanels) opts.onPanels();
+  }
+  // a "pick a tower" mode (Inspire): the next tower tap is the answer
+  let _pick = null;
+  function startPick(kind, corr) {
+    closeAllPanels();
+    _pick = { kind, corr };
+    const h = $("pick-hint"); if (h) { h.innerHTML = `✨ Tap a tower to inspire <button class="sh-btn" id="pick-cancel">Cancel</button>`; h.classList.add("show"); $("pick-cancel").onclick = (e) => { e.stopPropagation(); endPick(); }; }
+  }
+  function endPick() { _pick = null; const h = $("pick-hint"); if (h) h.classList.remove("show"); }
+  function pickTower(tw) {
+    if (!_pick) return false;
+    const p = _pick; endPick();
+    if (tw && p.kind === "inspire") { cmd.inspire(p.corr.index, tw.id); toast("✨ The builder heads over to inspire it"); sfx("click"); }
+    return true;
+  }
+
+  // ---- wave guide (ⓘ next to Start Wave) ---------------------------------------------
+  let _wvTip = null;
+  function waveGroups(v, pl, n) {
+    const groups = (v.state.x && opts.previewWave) ? opts.previewWave(v.state, pl, n) : generateWave(n, pl.corridorCount, DB.CONFIG.bossEvery);
+    const affix = waveAffix(v.state.seedBase, n, DB.CONFIG.bossEvery);
+    const agg = {};
+    for (const g of groups) agg[g.type] = (agg[g.type] || 0) + g.count;
+    for (const t in agg) if (affix && affix.countMult) agg[t] = Math.max(1, Math.round(agg[t] * affix.countMult));
+    return { agg, affix, boss: n % DB.CONFIG.bossEvery === 0 };
+  }
+  const mobIcons = (t) => { const m = MOB_BY_ID[t], tr = m ? m.traits : {}; return (tr.fly ? "🪽" : "") + (tr.invisible || tr.cloakCycle ? "👁" : ""); };
+  function mobChip(t, n, key) {
+    const d = DB.ENEMIES[t] || { name: t }, m = MOB_BY_ID[t];
+    return `<button class="mob-chip${d.boss || (m && m.elite) ? " boss" : ""}${_wvTip === key ? " sel" : ""}" data-wtip="${key}"><img src="${ethumb(t)}" alt=""><b>${n}×</b> ${d.name} ${mobIcons(t)}</button>`;
+  }
+  function mobTip(t) {
+    const d = DB.ENEMIES[t] || { name: t }, m = MOB_BY_ID[t];
+    if (!m) return `<b>${d.name}</b> — ♥ ${d.hp}${d.armor ? " · 🛡 " + d.armor : ""}${d.speed ? " · speed " + d.speed : ""}`;
+    const ac = ARMOR_CLASSES[m.armorClass];
+    return `<b>${m.name}</b> — ♥ ${m.hp}${ac ? ` · <span style="color:${ac.color}">${ac.name}</span>` : ""}<br>${traitList(m.traits).map(([i, nm, ds]) => `${i} <b>${nm}</b>: ${ds}`).join("<br>")}${traitList(m.traits).length ? "<br>" : ""}<span class="dim">${m.desc}</span>`;
+  }
+  function waveCardHTML() {
+    const v = getView(), pl = v.field;
+    const total = v.state.mode === "endless" ? "∞" : pl.totalWaves;
+    let alive = 0; const onField = {};
+    for (const e of v.state.enemies) if (e.alive && e.owner === v.fieldId) { alive++; onField[e.type] = (onField[e.type] || 0) + 1; }
+    const head = sheetHead({ title: "Wave guide", sub: `Wave ${pl.wave}/${total} · ${alive} on the field` , thumb: `<div class="sh-ico">${icon("wave")}</div>` });
+    let body = "";
+    const tipFor = {};
+    if (alive) {
+      body += `<div class="wv-sec"><div class="wv-h">On the field now</div><div class="chips">${Object.keys(onField).map((t) => { tipFor["f" + t] = t; return mobChip(t, onField[t], "f" + t); }).join("")}</div></div>`;
+    }
+    if (pl.phase === "prep" || (v.state.mode !== "endless" && pl.wave >= pl.totalWaves)) {
+      const bossT = v.state.challenge ? v.state.challenge.def.boss : "endboss";
+      tipFor.boss = bossT;
+      body += `<div class="wv-sec boss"><div class="wv-h">⚠ Final — summon at the Vortex</div><div class="chips">${mobChip(bossT, 1, "boss")}</div></div>`;
+    } else {
+      const last = v.state.mode === "endless" ? pl.wave + 3 : Math.min(pl.totalWaves, pl.wave + 3);
+      for (let n = pl.wave + 1; n <= last; n++) {
+        const w = waveGroups(v, pl, n);
+        body += `<div class="wv-sec${w.boss ? " boss" : ""}"><div class="wv-h">${n === pl.wave + 1 ? "Next · " : ""}Wave ${n}${w.boss ? " · ⚠ Boss" : ""}${w.affix ? ` <span class="tag-b gold" title="${w.affix.desc}">${w.affix.icon} ${w.affix.name}</span>` : ""}</div>${w.affix ? `<div class="sh-hint">${w.affix.desc}</div>` : ""}<div class="chips">${Object.keys(w.agg).map((t) => { tipFor[n + t] = t; return mobChip(t, w.agg[t], n + t); }).join("")}</div></div>`;
+      }
+    }
+    const tip = _wvTip && tipFor[_wvTip] ? `<div class="tip-line">${mobTip(tipFor[_wvTip])}</div>` : "";
+    return sheetHTML(head, body + tip + `<p class="sh-hint">Tap a creep for its traits. 🪽 flies · 👁 stealth</p>`, "");
+  }
+  let _wvSig = null;
+  function renderWavePanel(force) {
+    const p = $("wave-panel"); if (!p || !p.classList.contains("show")) return;
+    const v = getView(), pl = v.field;
+    let alive = 0; for (const e of v.state.enemies) if (e.alive && e.owner === v.fieldId) alive++;
+    const sig = pl.wave + "|" + pl.phase + "|" + alive + "|" + _wvTip + "|" + v.fieldId;
+    if (!force && sig === _wvSig) return;
+    _wvSig = sig;
+    fillSheet(p, waveCardHTML());
+    p.querySelectorAll("[data-wtip]").forEach((b) => b.onclick = (ev) => { ev.stopPropagation(); _wvTip = _wvTip === b.dataset.wtip ? null : b.dataset.wtip; renderWavePanel(true); });
+  }
+  function toggleWavePanel() {
+    const p = $("wave-panel"); if (!p) return;
+    if (p.classList.contains("show")) { closeAllPanels(); return; }
+    closeAllPanels(); _wvTip = null;
+    openSheet("wave-panel", false);
+    renderWavePanel(true);
+    if (opts.onPanels) opts.onPanels();
+  }
+
+  function twSig(t) { return (t.bState ? Math.floor((t.bT || 0) / 32768) : 0) + "/" + t.level + "/" + t.expert + "/" + t.kills + "/" + t.mutations.length + "/" + (t.targetMode || "first") + "/" + (t.bState || 0) + (t.upT > 0 ? "u" : "") + (t.stunT > 0 ? "s" : "") + (t.jamT > 0 ? "j" : "") + (t.curseT > 0 ? "c" : "") + (t.confused ? "f" : ""); }
   function towerSynergyHtml(def) {
     const { setsUp, triggers } = synergiesForTower(def);
     if (!setsUp.length && !triggers.length) return "";
@@ -354,33 +619,6 @@ export function createUI(opts) {
     speed: { icon: "💨", name: "Swift" }, health: { icon: "🩸", name: "Vital" }, armor: { icon: "🛡️", name: "Armored" },
     resist: { icon: "🔰", name: "Resistant" }, momentum: { icon: "🌀", name: "Momentum" }, hardened: { icon: "🪨", name: "Hardened" },
   };
-  function openEnemyPanel(e) {
-    closeAllPanels();
-    const v = getView(); v.selectedEnemyId = e.id;
-    const oid = v.versus ? v.state.players[e.owner].elements[0] : v.field.elements[e.originIndex];
-    const oel = DB.ELEMENTS[oid];
-    const stk = (e.statusKeys || []).map((k) => DB.STATUSES[k]).filter(Boolean);
-    const affix = e.affix && AFFIXES[e.affix];
-    const adapts = Object.keys(e.adapt || {}).map((k) => {
-      const a = ADAPT_INFO[k] || { icon: "↻", name: k }; const n = e.adapt[k];
-      return `<span class="stag" style="--sc:#ffd23d">${a.icon} ${a.name}${n > 1 ? " ×" + n : ""}</span>`;
-    });
-    const name = (DB.ENEMIES[e.type] || {}).name || e.type;
-    const p = $("enemy-panel");
-    p.innerHTML = `<button class="panel-close" id="ep-close">${icon("close")}</button>
-      <div class="ep-top"><img class="ep-thumb" src="${ethumb(e.type)}" alt=""><div>
-      <div class="ep-head">${e.boss ? "☠ " : ""}${name}${e.end ? " (END BOSS)" : ""}${e.sent ? " · SENT" : ""}${affix ? ` · ${affix.icon} ${affix.name.toUpperCase()}` : ""}</div>
-      <div class="exp-bar big"><div style="width:${Math.min(1, Math.max(0, e.hp) / e.maxHp) * 100}%;background:#ff4d6d"></div></div>
-      <div class="exp-label">${Math.max(0, toI(e.hp))} / ${toI(e.maxHp)} HP</div></div></div>
-      <div class="tp-stats">${statRow("Origin", sigil(oid, "xs") + " " + oel.name)}${statRow("Loops", e.loopCount)}${statRow("Armor", toI(e.armor) + (e.auraArmor ? " +" + toI(e.auraArmor) : ""))}${statRow("Reward", e.reward)}${e.shieldHp > 0 ? statRow("Shield", toI(e.shieldHp)) : ""}${e.sentBy != null && v.versus ? statRow("Sent by", v.seatName ? v.seatName(e.sentBy) : "NPC " + e.sentBy) : ""}</div>
-      ${mobTraitsHtml(e.type, e)}
-      <div class="ep-status">${stk.length ? stk.map((s) => `<span class="stag" style="--sc:${s.color}">${s.icon} ${s.name}</span>`).join("") : "<span class='dim'>No status</span>"}</div>
-      ${adapts.length ? `<div class="ep-adapt-head">↻ Loop adaptations</div><div class="ep-status">${adapts.join("")}</div>` : ""}`;
-    p.classList.add("show");
-    $("ep-close").onclick = closeAllPanels;
-    if (opts.onPanels) opts.onPanels();
-  }
-
   function mobTraitsHtml(type, e) {
     const m = MOB_BY_ID[type]; if (!m) return "";
     const ac = ARMOR_CLASSES[m.armorClass];
@@ -414,7 +652,7 @@ export function createUI(opts) {
     const p = $("send-panel"); if (!p) return;
     if (p.classList.contains("show")) { closeAllPanels(); return; }
     closeAllPanels();
-    p.classList.add("show");
+    openSheet("send-panel", true);
     renderSendPanel(true);
     if (opts.onPanels) opts.onPanels();
   }
@@ -536,14 +774,15 @@ export function createUI(opts) {
       for (const c of corrs) { const t = c.towers.find((t) => t.id === v.selectedTowerId); if (t) { found = t; fcorr = c; break; } }
       if (!found) { closeAllPanels(); _twSig = null; return; }
       const tp = $("tower-panel");
-      if (!tp || !tp.classList.contains("show")) return;
-      const sig = twSig(found);
-      if (sig !== _twSig) openTowerPanel(fcorr, found);
+      if (tp && tp.classList.contains("show") && twSig(found) + (fcorr.builder ? fcorr.builder.at : "") !== _twSig) renderTowerCard(fcorr, found);
     } else if (v.selectedEnemyId) {
       const e = v.state.enemies.find((e) => e.id === v.selectedEnemyId);
       if (e && e.alive) openEnemyPanel(e); else closeAllPanels();
+    } else if (_bdCorr && $("builder-panel").classList.contains("show")) {
+      if (builderSig(_bdCorr) !== _bdSig) openBuilderPanel(_bdCorr);
     }
     renderSendPanel(false);
+    renderWavePanel(false);
     updateBossBar();
   }
 
@@ -756,7 +995,7 @@ export function createUI(opts) {
     return "";
   }
 
-  return { openBestiary, toast, setText, closeAllPanels, closeRing, updateTopBar, updateEnemyOverview, updateWavePanel, updateWavePreview, updateBossBar, toggleSendPanel, openBuildRing, openTowerRing, openTowerPanel, openEnemyPanel, renderSetup, updateSetupDescs, selectSetupNode, openMastery, refreshPanels, get ringOpen() { return !!_ring; } };
+  return { openBestiary, toast, setText, closeAllPanels, closeRing, updateTopBar, updateEnemyOverview, updateWavePanel, updateWavePreview, updateBossBar, toggleSendPanel, openBuildRing, openTowerRing, openTowerPanel, openEnemyPanel, openBuilderPanel, toggleWavePanel, trackRing, positionPortrait, pickTower, endPick, get picking() { return _pick ? _pick.kind : null; }, get ringAnchor() { return _ring ? _ring.anchor : null; }, bindSheets, renderSetup, updateSetupDescs, selectSetupNode, openMastery, refreshPanels, get ringOpen() { return !!_ring; } };
 }
 
 export default { createUI };

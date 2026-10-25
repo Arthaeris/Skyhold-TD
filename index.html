@@ -34,6 +34,7 @@
   <canvas id="world-canvas" aria-label="The Skyhold world"></canvas>
   <div id="world-labels"></div>
   <div id="screen-flash"></div>
+  <div id="toast"></div>
 
   <!-- LOADING -->
   <section id="screen-loading" class="screen active">
@@ -179,13 +180,17 @@
         <button id="btn-prev-corridor" class="nav-btn arrow" aria-label="Previous corridor">‹</button>
         <span id="corridor-name">Corridor</span>
         <button id="btn-next-corridor" class="nav-btn arrow" aria-label="Next corridor">›</button>
+        <button id="btn-camview" class="nav-btn" aria-label="Switch camera angle" title="Camera: top-down / close"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="13" height="10" rx="2.5"/><path d="m16 11 5-3v8l-5-3"/></svg><span id="camview-lbl">Top</span></button>
       </div>
       <div id="boss-bar" class="glass"><span id="boss-name"></span><div class="bb-track"><div id="boss-fill"></div></div></div>
       <div id="enemy-overview" class="overlay-panel glass"></div>
       <div id="tower-panel" class="bottom-panel glass"></div>
       <div id="enemy-panel" class="bottom-panel glass"></div>
+      <div id="builder-panel" class="bottom-panel glass"></div>
       <div id="send-panel" class="bottom-panel glass"></div>
-      <div id="toast"></div>
+      <div id="wave-panel" class="bottom-panel glass"></div>
+      <div id="enemy-portrait" aria-hidden="true"></div>
+      <div id="pick-hint" class="glass"></div>
       <div id="radial-menu"></div>
       <button id="wave-fab" class="btn primary" style="display:none" aria-label="Start next wave">▶</button>
       <div id="replay-bar" class="glass"></div>
@@ -200,6 +205,7 @@
       <div class="dock-row">
         <button id="quick-auto-wave" class="btn ghost dock-btn" aria-label="Toggle automatic wave start">Auto</button>
         <button id="quick-start-wave" class="btn primary">Start Wave</button>
+        <button id="btn-wave-info" class="btn ghost dock-btn" aria-label="Wave guide">ⓘ</button>
         <button id="btn-send-panel" class="btn ghost dock-btn" style="display:none" aria-label="Open send menu"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M5 19l9.5-9.5M14.5 5H19v4.5L9.5 19M4 15l5 5"/><path d="M19 19 14 14M15 20l5-5"/></svg><span>Sends</span></button>
         <button id="btn-chat" class="btn ghost dock-btn online-only" aria-label="Chat">💬</button>
         <button id="btn-emote" class="btn ghost dock-btn online-only" aria-label="Emote">😀</button>

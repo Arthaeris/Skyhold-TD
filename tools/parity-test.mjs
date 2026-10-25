@@ -65,7 +65,7 @@ const scenarios = [
 const TICKS = 6000;
 let fails = 0;
 for (const cfg of scenarios) {
-  const a = S.core.createState(S.bal, structuredClone(cfg));
+  const a = S.core.createState(S.bal, structuredClone({ ...cfg, circleShots: true })); // Skyhold's one deliberate fix, off for the comparison
   const b = C ? C.core.createState(C.bal, structuredClone(cfg)) : null;
   const dt = S.fx.fromFloat(1 / 30);
   let zaps = 0, kills = 0, first = -1;

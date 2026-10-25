@@ -81,7 +81,7 @@ export function hashState(state) {
     for (const pl of state.players) {
       for (const corr of pl.corridors) {
         const b = corr.builder;
-        if (b) { h = mixInt(h, b.x); h = mixInt(h, b.y); h = mixInt(h, b.cur | 0); }
+        if (b) { h = mixInt(h, b.x); h = mixInt(h, b.y); h = mixInt(h, b.cur | 0); h = mixInt(h, b.insp | 0); }
         for (const t of corr.towers) { h = mixInt(h, t.bState | 0); h = mixInt(h, t.bT | 0); h = mixInt(h, t.stunT | 0); h = mixInt(h, t.upT | 0); }
       }
       for (const k in pl.sendStock) h = mixInt(h, pl.sendStock[k].n);
