@@ -1,0 +1,39 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Skyhold tower gallery</title>
+<style>html,body{margin:0;height:100%;background:#141834;overflow:hidden}canvas{display:block;width:100%;height:100%}</style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.min.js" } }</script>
+<script src="../circle/database.js"></script><script src="../circle/database-ext.js"></script>
+</head><body><canvas id="c"></canvas>
+<script type="module">
+// Dev-only: every tower (or enemy) in a grid. ?stage=0..3 &mut=0..2 &what=towers|enemies &el=fire (one element, all stages)
+import * as THREE from "three";
+import { createTowerModel } from "../render/towers.js";
+import { createPost, QUALITY } from "../render/post.js";
+const P = new URLSearchParams(location.search);
+const stage = +(P.get("stage") || 0), mut = +(P.get("mut") || 0), what = P.get("what") || "towers", one = P.get("el");
+const canvas = document.getElementById("c");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
+renderer.toneMapping = THREE.NeutralToneMapping; renderer.shadowMap.enabled = true;
+renderer.setSize(innerWidth, innerHeight, false);
+const scene = new THREE.Scene(); scene.background = new THREE.Color("#141834");
+scene.add(new THREE.HemisphereLight("#a9b8ff", "#2a1d4a", 1.7));
+const sun = new THREE.DirectionalLight("#ffe8cf", 2.6); sun.position.set(-30, 60, 40); scene.add(sun);
+const DB = window.DB;
+const items = [];
+if (what === "enemies") {
+  const { buildEnemyPreview } = await import("../render/enemies.js");
+  Object.keys(DB.ENEMIES).forEach((id, i) => { const g = buildEnemyPreview(DB, id); g.position.set((i % 4) * 5 - 7.5, 0, Math.floor(i / 4) * 6); scene.add(g); items.push(g); });
+} else if (one) {
+  DB.TOWERS.filter(t => t.element === one).forEach((t, i) => { for (let s = 0; s < 4; s++) { const m = createTowerModel(DB, t.id, s, s === 3 ? 2 : 0); m.root.position.set(s * 4.5 - 6.75, 0, i * 5 - 10); scene.add(m.root); } });
+} else {
+  DB.TOWERS.forEach((t, i) => { const m = createTowerModel(DB, t.id, stage, mut); m.root.position.set((i % 5) * 5 - 10, 0, Math.floor(i / 5) * 5.4 - 19); scene.add(m.root); });
+}
+const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 500);
+const aspect = innerWidth / innerHeight, halfW = what === "enemies" ? 11 : 13.5;
+cam.left = -halfW; cam.right = halfW; cam.top = halfW / aspect; cam.bottom = -halfW / aspect; cam.updateProjectionMatrix();
+const e = 40 * Math.PI / 180;
+cam.position.set(0, Math.sin(e) * 100, Math.cos(e) * 100 + (what === "enemies" ? 4 : 0)); cam.lookAt(0, 0, what === "enemies" ? 4 : 0);
+const post = createPost(renderer);
+post.render(scene, cam, QUALITY[2]);
+window.__ready = true;
+</script></body></html>

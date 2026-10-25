@@ -1,51 +1,55 @@
-# Skyhold TD — Circle Tower Wars in Voxels
+# Skyhold TD — Circle Tower Wars in voxels
 
-Skyhold TD is a voxel-rendered port of Circle Tower Wars. The intended rule set is Circle's; the voxel world replaces the 2D asset/rendering layer, not the underlying tower-defense design.
+Skyhold TD is a voxel port of [Circle Tower Wars](https://github.com/Arthaeris/Circle-TD). The rules, numbers, modes and menus are Circle's. The 2D art is replaced by one continuous, floating voxel world: corridor islands ring a chained vortex above a cosmic sea, and the camera flies between the world map and each corridor.
 
-## Run locally
+## Run it
 
-Serve the repository over HTTP because the game uses JavaScript modules:
+Serve the folder over HTTP (ES modules need it):
 
 ```bash
-python -m http.server 8000
+python3 -m http.server 8000
 ```
 
-Open [http://localhost:8000](http://localhost:8000). Three.js and Google Fonts are loaded from CDNs, so the first run needs an internet connection.
+Open <http://localhost:8000>. three.js r186 and the fonts come from CDNs, so the first load needs a connection.
 
-## What is integrated in this port slice
+- `?unlock` treats every element as mastered, which is handy for testing towers. Your saved progress is left untouched.
+- **PC controls:** Space starts a wave · W world map · Q/E or ←/→ switch corridors · 1–3 game speed · Esc pause · mouse wheel zooms · drag pans.
+- **Touch controls:** tap to build and inspect · drag to pan · pinch to zoom.
 
-- Circle's original deterministic, fixed-step simulation core, fixed-point math, seeded random stream, wave generation, and flow-field pathfinding are copied into the Skyhold repository under `sim/circle-*.js`.
-- The original Circle content database and extension data are kept under `circle/`; tower stats, enemy stats, elements, statuses, synergies, wave pacing, upgrade scaling, and economy rules come from that data.
-- A 31 × 61 corridor grid is rendered in Three.js. The highlighted route is derived from the live flow field, not a hand-authored spline.
-- Towers occupy Circle's 3 × 3 grid footprint. Placement is validated by the Circle simulation, which rejects placements that block the entrance-to-exit route.
-- Circle-style loop behavior, lives, gold, wave clears, bosses, tower upgrades/selling, target modes, and combat/status logic run in the simulation.
-- The first UI slice exposes the four starter elements and their five tower tiers, tower targeting, upgrades, selling, expert progression, mutations, and early-wave calls.
-- Mobile controls use tap-to-build, pinch zoom, and drag-to-pan; PC supports mouse placement, drag-to-pan, wheel zoom, and keyboard shortcuts.
-- Tower and enemy visuals are voxel interpretations of Circle's elemental themes and enemy data.
+## What's in this version
 
-## Current scope and honest limitations
+- **Circle's simulation, unchanged.** `sim/` is Circle-TD's deterministic fixed-point core, copied as-is. The only additions are render-only events (beam/chain/melee paths, kills) that never feed back into the state. `node tools/parity-test.mjs <path-to-Circle-TD>` runs both sims on the same seeds and commands and compares state hashes on every tick.
+- **All of Circle's content.** 8 elements, 40 towers, 26 statuses, 14 synergies, mutations, expert ranks, loop adaptations, wave affixes, bosses and the Sealed One. The content is `circle/database*.js`, byte-identical to Circle's.
+- **Modes:**
+  - Solo, with Loop, Single and Endless waves, 1–8 corridors, Gold or Essence economy, Single or Stacking statuses, and Manual or Auto pacing.
+  - Vs NPCs, with Circle's maze-building bots, sends and the send panel.
+  - Co-op and Compete are shown as *Soon*. The sim supports them; only the network lobby is missing.
+- **Circle's shell:**
+  - Menu, setup, HUD, survivors-by-origin panel, corridor nav and the wave dock with its next-wave preview.
+  - Radial build and tower rings with tap-again-to-confirm, the tower sheet with stats, targeting, synergies and mutations, the enemy sheet, boss bar and toasts.
+  - Pause, end screen with mastery progress, the Mastery and Synergy Codex screen, and Save / Import / Export. Circle's export files import here too.
+  - Autosave after every wave, and Continue.
+- **The voxel world:**
+  - Riftfall-style batched voxel meshes, a bloom + ink-outline post pass and auto quality tiers.
+  - Element-themed corridor islands carrying Circle's obstacle families, plus gate islands and bridges.
+  - A vortex that breaks its chains when the End Boss is ready.
+  - 40 unique tower models that grow at levels 4, 7 and 10 and show their mutations.
+  - 7 instanced enemy models with status tints and freeze blocks, plus projectiles, beams, chain lightning, impact rings and route chevrons.
+  - PixelPups-style voxel thumbnails in the menus.
+- **Audio:** Circle's music track plus synthesized sound effects.
 
-This is a **first gameplay port slice**, not yet complete parity with every Circle Tower Wars mode. The active scene currently displays one Fire corridor. The simulation core supports much more of Circle's systems than the current presentation exposes; multi-corridor navigation, mastery persistence/unlocks, co-op/versus interfaces, save migration, and complete visual representations of every status/attack are still follow-up work.
+## Layout
 
-For testing the combat loop, the current UI temporarily exposes all five tower tiers and mutation slots instead of enforcing the full mastery unlock profile. Persistent mastery/unlock progression and multi-corridor world navigation remain to be wired into the interface.
+| Path | What it is |
+|---|---|
+| `circle/` | Circle's content database (unchanged) |
+| `sim/` | Circle's deterministic sim (`core.js` + render-only events) |
+| `net/commands.js`, `app/loop.js`, `save.js` | Circle's command schema, fixed-step loop and save layer (Skyhold storage keys) |
+| `app/main.js` | Shell orchestrator, ported from Circle: commands, screens, autosave, bots, input |
+| `ui/shell.js`, `ui/icons.js` | Circle's UI panels and rings, elemental sigils and SVG icons |
+| `render/` | `renderer.js` (camera, sync, picking), `world.js` (ring, islands, gates, vortex, sea), `towers.js`, `enemies.js`, `effects.js`, `post.js`, `kit.js`, `theme.js`, `thumbs.js` |
+| `audio/sound.js` | Music and synthesized SFX |
+| `tools/` | `parity-test.mjs`, plus `preview.html` and `gallery.html` for eyeballing the world and models |
+| `docs/PORT_NOTES.md` | Decisions, known gaps and the backlog |
 
-The current view uses an angled orthographic camera with touch pinch-zoom and drag-pan. The HUD includes overview, tower codex, rules, and progression panels. These UI panels are an initial port slice; persistent mastery saves and multi-corridor navigation are still outstanding.
-
-The project has **not yet been verified in a live browser in this environment**. Static checks confirm all local JavaScript module imports point to files present in the repository. Please report any runtime errors or unexpected placement/combat behavior so the next iteration can target real issues.
-
-## Project layout
-
-- `circle/database.js`, `circle/database-ext.js` — Circle content, element definitions, tower/enemy balance, statuses, synergies, and extension data.
-- `sim/circle-core.js` — deterministic Circle simulation.
-- `sim/circle-pathfind.js` — Circle grid flow field and reachability.
-- `sim/circle-fx.js`, `sim/circle-rng.js`, `sim/circle-waves.js`, `sim/circle-balance.js` — original simulation support modules.
-- `sim/circle-adapter.js` — Skyhold bootstrap adapter and grid/world coordinate conversion.
-- `art.js` — reusable voxel parts and data-driven tower/enemy models.
-- `render/scene.js`, `render/terrain.js`, `render/models.js` — Three.js camera, grid/route, obstacles, portals, and entities.
-- `game.js` — input and fixed-step simulation/render loop.
-- `ui.js`, `style.css` — mobile-first HUD and PC layout.
-- `docs/STYLE_AND_PORT_PLAN.md` — visual direction and remaining port plan.
-
-## Project boundary
-
-Circle-TD is a separate source project. This port work only changes Skyhold-TD.
+Circle-TD remains a separate project; this port only changes Skyhold-TD.

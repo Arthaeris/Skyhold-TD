@@ -16,7 +16,7 @@
  * resumes the exact same random sequence.
  * ===========================================================================*/
 
-import { ONE } from "./circle-fx.js";
+import { ONE } from "./fx.js";
 
 // A stream is just { s } so it serializes trivially into the sim state.
 export function makeStream(seed) {

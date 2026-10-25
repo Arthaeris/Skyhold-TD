@@ -6,7 +6,7 @@
  * scale factors so spawning stays bit-exact.
  * ===========================================================================*/
 
-import { fromFloat, fromInt, mul } from "./circle-fx.js";
+import { fromFloat, fromInt, mul } from "./fx.js";
 
 // Returns spawn groups: { type, count, gap(fx sec), delay(fx sec) }
 export function generateWave(wave, corridorCount, bossEvery) {

@@ -16,12 +16,20 @@
  *
  * The shell (render/ui/net/app) reads `state` to draw and produces commands;
  * it must never mutate `state` directly.
+ *
+ * SKYHOLD PORT NOTE: this file is Circle-TD's sim/core.js, unchanged in every
+ * rule and number. The only additions are lines marked "[Skyhold] render-only":
+ * extra entries pushed onto `state.events` (beam/chain/melee "zap" paths, "kill",
+ * and the enemy id on "synergy") so the 3D renderer can draw hits that leave no
+ * other trace in the state. Events are transient, never hashed, never read back
+ * by the sim — gameplay and determinism are identical to Circle.
+ * tools/parity-test.mjs checks this against a Circle-TD checkout.
  * ===========================================================================*/
 
-import * as fx from "./circle-fx.js";
-import * as rng from "./circle-rng.js";
-import * as pf from "./circle-pathfind.js";
-import { generateWave, enemyScale, totalWaves, waveAffix } from "./circle-waves.js";
+import * as fx from "./fx.js";
+import * as rng from "./rng.js";
+import * as pf from "./pathfind.js";
+import { generateWave, enemyScale, totalWaves, waveAffix } from "./waves.js";
 
 const F = fx.fromFloat;
 const HALF = fx.HALF;                  // 0.5 in fixed
@@ -725,6 +733,7 @@ function killEnemy(state, e, tower) {
 
   if (tower) { tower.kills++; checkExpert(state, tower); }
   creditPl.stats.score += e.boss ? 5000 : 25;
+  state.events.push({ kind: "kill", player: e.owner, enemy: e.id, type: e.type, boss: !!e.boss, reward: r }); // [Skyhold] render-only
 
   if (e.statuses["volatile"]) aoeAround(state, e, F(2.0), e.statuses["volatile"].def.value);
 
@@ -787,7 +796,7 @@ function addStatus(e, def, statusId, dur) {
   };
 }
 function fireSynergy(state, e, syn, tower) {
-  state.events.push({ kind: "synergy", player: e.owner, id: syn.id, name: syn.name, corridor: e.corridorIndex });
+  state.events.push({ kind: "synergy", player: e.owner, id: syn.id, name: syn.name, corridor: e.corridorIndex, enemy: e.id });
   if (syn.burst) damageEnemy(state, e, syn.burst, tower, true);
   if (syn.dotMult && e.statuses["poisoned"]) e.statuses["poisoned"].dotMult = syn.dotMult;
   if (syn.curseBoost && e.statuses["cursed"]) e.statuses["cursed"].curseBoost = syn.curseBoost;
@@ -933,14 +942,19 @@ function fireTower(state, pl, corr, tw, st) {
 
   if (arche === "melee") {
     let hit = false;
+    const ids = []; // [Skyhold] render-only: who the blades touched
     for (const e of state.enemies) if (e.alive && e.owner === pl.id && e.corr === corr && inRange(tw, e.fx, e.fy, st.range)) {
+      ids.push(e.id);
       damageEnemy(state, e, st.damage, tw); maybeStatus(state, e, tw, st, statusId); hit = true;
     }
+    if (hit) state.events.push({ kind: "zap", style: "melee", player: pl.id, corridor: corr.index, tower: tw.id, element, targets: ids });
     return hit;
   }
   if (arche === "beam" || arche === "chain") {
+    const ids = [target.id]; // [Skyhold] render-only: the beam/arc path
     damageEnemy(state, target, st.damage, tw); maybeStatus(state, target, tw, st, statusId);
-    if (st.chainCount > 0) chainFrom(state, pl, corr, tw, target, st, statusId);
+    if (st.chainCount > 0) chainFrom(state, pl, corr, tw, target, st, statusId, ids);
+    state.events.push({ kind: "zap", style: arche, player: pl.id, corridor: corr.index, tower: tw.id, element, targets: ids });
     return true;
   }
   // single / splash -> projectile
@@ -961,7 +975,7 @@ function maybeStatus(state, e, tw, st, statusId) {
   if (st.mods.executeBoost && !e.boss && fx.div(e.hp, e.maxHp) < F(0.18)) damageEnemy(state, e, e.hp + 1, tw);
 }
 
-function chainFrom(state, pl, corr, tw, from, st, statusId) {
+function chainFrom(state, pl, corr, tw, from, st, statusId, outIds) {
   let count = st.chainCount, prev = from;
   const hit = new Set([from.id]);
   let dmg = fx.mul(st.damage, F(0.85));
@@ -975,6 +989,7 @@ function chainFrom(state, pl, corr, tw, from, st, statusId) {
       if (d <= bd || (d === bd && best && e.id < best.id)) { bd = d; best = e; }
     }
     if (!best) break;
+    if (outIds) outIds.push(best.id); // [Skyhold] render-only
     damageEnemy(state, best, dmg, tw); maybeStatus(state, best, tw, st, statusId);
     hit.add(best.id); prev = best; dmg = fx.mul(dmg, F(0.85));
   }

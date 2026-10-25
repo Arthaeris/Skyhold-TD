@@ -1,0 +1,11 @@
+{
+  "name": "Skyhold TD",
+  "short_name": "Skyhold",
+  "description": "Circle Tower Wars reimagined as a floating voxel world.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#070a22",
+  "theme_color": "#070a22",
+  "icons": [{ "src": "assets/ui/app-icon.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any" }]
+}

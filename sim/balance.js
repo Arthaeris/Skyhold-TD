@@ -11,7 +11,7 @@
  * and unit-testable with a fixture in Node.
  * ===========================================================================*/
 
-import { fromFloat, fromInt } from "./circle-fx.js";
+import { fromFloat, fromInt } from "./fx.js";
 
 const F = fromFloat;
 

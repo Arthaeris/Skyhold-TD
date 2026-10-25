@@ -1,133 +1,234 @@
 <!doctype html>
+<!-- =============================================================================
+  Skyhold TD — Circle Tower Wars, rebuilt as a voxel world.
+  Script order (as in Circle):
+    1) circle/database.js      — Circle's content library (window.DB)
+    2) circle/database-ext.js  — modes, sends, version fields
+    3) save.js                 — save / export / import (window.SaveSystem)
+    4) app/main.js             — the module engine (sim + 3D renderer + UI)
+============================================================================== -->
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#101327">
-  <meta name="description" content="Skyhold TD — Circle Tower Wars reimagined as a voxel battlefield.">
-  <title>Skyhold TD — Circle Tower Wars in Voxels</title>
-  <link rel="stylesheet" href="./style.css">
-  <script src="./circle/database.js"></script>
-  <script src="./circle/database-ext.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#070a22">
+  <meta name="description" content="Skyhold TD — Circle Tower Wars reimagined as a floating voxel world.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Skyhold TD">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" href="assets/ui/app-icon.png">
+  <link rel="apple-touch-icon" href="assets/ui/app-icon.png">
+  <title>Skyhold TD</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&family=Nunito:wght@600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=1">
   <script type="importmap">
-    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js" } }
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.min.js" } }
   </script>
 </head>
-<body>
-  <main id="app">
-    <section id="title-screen" class="title-screen" aria-label="Main menu">
-      <div class="title-menu-card">
-        <div class="title-brand-mark">◆</div>
-        <p class="title-eyebrow">CIRCLE TOWER WARS · VOXEL EDITION</p>
-        <h1 class="title-game-name">SKYHOLD <span>TD</span></h1>
-        <p class="title-tagline">A looping-battlefield tower defense.<br>Build your maze. Defend your world.</p>
-        <div class="title-menu-buttons">
-          <button id="menu-continue" type="button" class="title-primary" disabled>CONTINUE</button>
-          <button id="menu-new-run" type="button" class="title-primary">NEW RUN <span>→</span></button>
-          <button id="menu-mastery" type="button">ELEMENTAL MASTERY</button>
-          <button id="menu-save" type="button">SAVE / IMPORT / EXPORT</button>
-          <button id="menu-options" type="button">OPTIONS</button>
+<body data-screen="loading">
+<div id="app">
+  <canvas id="world-canvas" aria-label="The Skyhold world"></canvas>
+  <div id="world-labels"></div>
+  <div id="screen-flash"></div>
+
+  <!-- LOADING -->
+  <section id="screen-loading" class="screen active">
+    <div class="loading-wrap glass">
+      <img class="app-mark" src="assets/ui/app-icon.png" alt="">
+      <h1 class="brand">Skyhold<span>TD</span></h1>
+      <p class="dim">Raising the islands…</p>
+      <div class="loading-bar"><div id="loading-fill"></div></div>
+    </div>
+  </section>
+
+  <!-- MENU -->
+  <section id="screen-menu" class="screen">
+    <div class="menu-top">
+      <p class="eyebrow">Circle Tower Wars · Voxel Edition</p>
+      <h1 class="brand big">Skyhold<span>TD</span></h1>
+      <p class="tag">A looping-battlefield tower defense. Enemies never leave — they cycle until destroyed.</p>
+    </div>
+    <div class="menu-card glass">
+      <div id="menu-progress" class="menu-progress"></div>
+      <button id="btn-continue" class="btn big disabled">Continue</button>
+      <button id="btn-new-run" class="btn big primary">New Run</button>
+      <div class="menu-row">
+        <button id="btn-mastery" class="btn"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4.5h8v5a4 4 0 0 1-8 0zM8 6.5H5a3 3 0 0 0 3 4M16 6.5h3a3 3 0 0 1-3 4M12 13.5V17M8.5 19.5h7"/></svg>Mastery</button>
+        <button id="btn-menu-save" class="btn"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5h11l3 3v12H5z"/><path d="M8 4.5v5h7v-5M8 19.5v-5h8v5"/></svg>Save · Import</button>
+      </div>
+      <button id="btn-multiplayer" class="btn ghost soon">Multiplayer <span class="pill">Soon</span></button>
+    </div>
+  </section>
+
+  <!-- SETUP -->
+  <section id="screen-setup" class="screen">
+    <div class="setup-head glass" id="setup-head">
+      <button id="btn-setup-back" class="btn ghost small">‹ Back</button>
+      <h2>New Run</h2>
+      <span class="pv-hint" id="pv-hint">Tap an island to change its element</span>
+    </div>
+    <div class="setup-sheet glass" id="setup-sheet">
+      <div class="mt-cards">
+        <button class="mt-card" data-gamemode="solo"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="8.5" r="3.6"/><path d="M5 20a7 7 0 0 1 14 0"/></svg><span>Solo</span></button>
+        <button class="mt-card" data-gamemode="versus"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="5" y="8" width="14" height="10" rx="2.5"/><path d="M12 4.5V8M9 12.5v1M15 12.5v1M3 12v3M21 12v3"/></svg><span>Vs NPCs</span></button>
+        <button class="mt-card" data-gamemode="coop"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="9" cy="9" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><circle cx="16.5" cy="8" r="2.6"/><path d="M15 13.6A4.6 4.6 0 0 1 21 18"/></svg><span>Co-op</span><i class="pill">Soon</i></button>
+        <button class="mt-card" data-gamemode="competitive"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M5 19l9.5-9.5M14.5 5H19v4.5L9.5 19M4 15l5 5"/><path d="M19 19 14 14M15 20l5-5"/></svg><span>Compete</span><i class="pill">Soon</i></button>
+      </div>
+      <div class="opt-row">
+        <span class="opt-lbl">Waves</span>
+        <span class="opt-seg">
+          <button class="seg" data-mode="loop">Loop</button>
+          <button class="seg" data-mode="single">Single</button>
+          <button class="seg" data-mode="endless">Endless</button>
+        </span>
+      </div>
+      <div class="opt-row">
+        <span class="opt-lbl">Corridors</span>
+        <span class="opt-seg">
+          <button class="seg" id="corr-minus" aria-label="Fewer corridors">−</button>
+          <b id="corr-count">4</b>
+          <button class="seg" id="corr-plus" aria-label="More corridors">+</button>
+          <span class="opt-note" id="shape-name"></span>
+        </span>
+      </div>
+      <div class="opt-row">
+        <span class="opt-lbl">Economy</span>
+        <span class="opt-seg">
+          <button class="seg" data-econ="shared">Gold</button>
+          <button class="seg" data-econ="elemental">Essence</button>
+        </span>
+      </div>
+      <button class="opt-row opt-more" id="setup-more"><span class="opt-lbl">More — status &amp; pacing</span><span id="more-chev">▾</span></button>
+      <div id="more-body" class="more-body">
+        <div class="opt-row">
+          <span class="opt-lbl">Status</span>
+          <span class="opt-seg">
+            <button class="seg" data-status="standard">Single</button>
+            <button class="seg" data-status="advanced">Stacking</button>
+          </span>
         </div>
-        <p class="title-version">VOXEL PORT · MOBILE FIRST · DESKTOP SUPPORTED</p>
-      </div>
-    </section>
-    <div id="game-view" aria-label="Voxel battlefield, tap a tower then tap a grid cell to build"></div>
-    <div id="startup-error" role="alert" hidden></div>
-    <script>
-      addEventListener("error", function (event) {
-        var box = document.getElementById("startup-error");
-        if (!box) return;
-        box.hidden = false;
-        box.textContent = "Game startup error: " + (event.message || "A script failed to load. Check your connection and refresh.");
-      });
-      addEventListener("unhandledrejection", function (event) {
-        var box = document.getElementById("startup-error");
-        if (!box) return;
-        box.hidden = false;
-        box.textContent = "Game startup error: " + (event.reason && event.reason.message || event.reason || "A module failed to load.");
-      });
-    </script>
-    <header class="topbar">
-      <a class="brand" href="./" aria-label="Skyhold TD"><span class="brand-mark">◆</span><span>SKYHOLD <b>TD</b></span></a>
-      <div class="stats" aria-live="polite">
-        <div class="stat"><span class="stat-icon">✦</span><span id="gold-value">420</span><small>GOLD</small></div>
-        <div class="stat"><span class="stat-icon">♥</span><span id="lives-value">20</span><small>LIVES</small></div>
-        <div class="stat"><span class="stat-icon">⚑</span><span id="wave-value">0</span><small>WAVE</small></div>
-      </div>
-    </header>
-    <div class="field-label"><span id="element-icon">🔥</span><span id="field-name">FIRE CORRIDOR</span><span class="dot"></span><span id="phase-label">BUILD PHASE</span><button id="view-reset" class="view-reset" type="button" aria-label="Center battlefield">CENTER</button></div>
-    <nav class="game-nav" aria-label="Game panels"><button type="button" data-panel="overview">OVERVIEW</button><button type="button" data-panel="towers">TOWER CODEX</button><button type="button" data-panel="rules">RULES</button><button type="button" data-panel="progression">PROGRESSION</button></nav>
-    <section id="info-panel" class="info-panel" hidden aria-live="polite"><div class="info-panel-head"><strong id="info-panel-title">OVERVIEW</strong><button id="close-info-panel" type="button" aria-label="Close panel">CLOSE ✕</button></div><div id="info-panel-content"></div></section>
-    <section class="intro-card" id="intro-card">
-      <div class="eyebrow">CIRCLE TOWER WARS · VOXEL PORT</div>
-      <h1>Build the maze.<br><em>Defend the Nexus.</em></h1>
-      <p>Place towers on the grid to shape enemy flow. Keep a route open from the gate to the exit. Enemies loop through the elemental field. Pinch to zoom and drag to pan on mobile.</p>
-      <button id="dismiss-intro" class="quiet-button">LET'S BUILD <span>→</span></button>
-    </section>
-    <div class="crosshair-hint" id="hint">Choose a tower, tap an open grid cell to place it. Pinch to zoom · drag to pan.</div>
-    <footer class="buildbar">
-      <div class="build-head">
-        <div class="build-label"><span class="pulse"></span><span id="build-title">FIRE TOWERS</span></div>
-        <div class="build-actions">
-          <button id="sell-button" class="quiet-button small-button" disabled>SELL SELECTED</button>
-          <button id="upgrade-button" class="quiet-button small-button" disabled>UPGRADE</button>
+        <div class="opt-row">
+          <span class="opt-lbl">Pacing</span>
+          <span class="opt-seg">
+            <button class="seg" data-pacing="manual">Manual</button>
+            <button class="seg" data-pacing="auto">Auto-start</button>
+          </span>
         </div>
       </div>
-      <div id="element-options" class="element-options" role="group" aria-label="Choose element"></div>
-      <div id="tower-options" class="tower-options" role="group" aria-label="Choose tower"></div>
-      <div id="selected-info" class="selected-info" hidden></div>
-      <div id="mutation-options" class="mutation-options" hidden></div>
-      <div class="bar-bottom">
-        <div class="target-wrap"><label for="target-mode">TARGET</label><select id="target-mode"><option value="first">First</option><option value="last">Last</option><option value="strong">Strong</option><option value="weak">Weak</option></select></div>
-        <button id="wave-button" class="primary-button">START WAVE <span>→</span></button>
+      <div id="element-picker"></div>
+      <p class="setup-desc" id="setup-hint"></p>
+      <button id="btn-start-run" class="btn big primary start-btn">Begin Run</button>
+    </div>
+  </section>
+
+  <!-- GAME -->
+  <section id="screen-game" class="screen">
+    <div id="topbar" class="glass">
+      <div class="tb-item lives"><svg class="i heart" viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.6-7.5-10.1A4.3 4.3 0 0 1 12 7.6a4.3 4.3 0 0 1 7.5 2.8c0 5.5-7.5 10.1-7.5 10.1z" fill="currentColor"/></svg><span id="lives">20/20</span></div>
+      <div class="tb-item" id="currency-display">0</div>
+      <button class="tb-item tb-btn" id="wave-display"><span class="tb-sm">Wave</span><b id="wave-num">0</b></button>
+      <div class="tb-item time"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><span id="match-time">00:00</span></div>
+      <button class="tb-item tb-btn icon-only" id="btn-settings-ingame" aria-label="Pause"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 6v12M15 6v12"/></svg></button>
+    </div>
+    <div id="game-stage">
+      <div id="field-nav" class="glass">
+        <button id="btn-world" class="nav-btn"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.5 12 5l8 6.5"/><path d="M6.5 10v9h11v-9"/></svg><span>World</span></button>
+        <button id="btn-prev-corridor" class="nav-btn arrow" aria-label="Previous corridor">‹</button>
+        <span id="corridor-name">Corridor</span>
+        <button id="btn-next-corridor" class="nav-btn arrow" aria-label="Next corridor">›</button>
       </div>
-    </footer>
-    <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <div class="corner-note">CIRCLE RULES · VOXEL WORLD</div>
-  </main>
-  <script>
-    (function () {
-      const title = document.getElementById("title-screen");
-      const intro = document.getElementById("intro-card");
-      const modal = document.getElementById("options-modal");
-      function begin() {
-        if (title) title.classList.add("title-screen-hidden");
-        if (intro) intro.classList.add("hidden");
-      }
-      document.getElementById("menu-new-run")?.addEventListener("click", begin);
-      document.getElementById("menu-continue")?.addEventListener("click", begin);
-      document.getElementById("menu-mastery")?.addEventListener("click", function () {
-        begin();
-        document.querySelector('[data-panel="progression"]')?.click();
-      });
-      document.getElementById("menu-save")?.addEventListener("click", function () {
-        begin();
-        document.querySelector('[data-panel="overview"]')?.click();
-      });
-      document.getElementById("menu-options")?.addEventListener("click", function () {
-        if (modal) modal.hidden = false;
-      });
-      document.getElementById("options-close")?.addEventListener("click", function () {
-        if (modal) modal.hidden = true;
-      });
-      document.getElementById("camera-angle")?.addEventListener("change", function (event) {
-        document.dispatchEvent(new CustomEvent("skyhold-camera-angle", { detail: event.target.value }));
-      });
-      document.getElementById("render-quality")?.addEventListener("change", function (event) {
-        document.dispatchEvent(new CustomEvent("skyhold-render-quality", { detail: event.target.value }));
-      });
-      const script = document.createElement("script");
-      script.type = "module";
-      script.src = "./game.js";
-      script.onerror = function () {
-        const box = document.getElementById("startup-error");
-        if (box) {
-          box.hidden = false;
-          box.textContent = "Game engine failed to load. Check the connection and refresh. If it persists, report your browser and device.";
-        }
-      };
-      document.body.appendChild(script);
-    })();
-  </script>
+      <div id="boss-bar" class="glass"><span id="boss-name"></span><div class="bb-track"><div id="boss-fill"></div></div></div>
+      <div id="enemy-overview" class="overlay-panel glass"></div>
+      <div id="tower-panel" class="bottom-panel glass"></div>
+      <div id="enemy-panel" class="bottom-panel glass"></div>
+      <div id="send-panel" class="bottom-panel glass"></div>
+      <div id="toast"></div>
+      <div id="radial-menu"></div>
+      <button id="wave-fab" class="btn primary" style="display:none" aria-label="Start next wave">▶</button>
+    </div>
+    <div id="quick-wave-controls" class="glass">
+      <button id="dock-handle" aria-label="Collapse controls">▾</button>
+      <div id="wave-preview"></div>
+      <div class="dock-row">
+        <button id="quick-auto-wave" class="btn ghost dock-btn" aria-label="Toggle automatic wave start">Auto</button>
+        <button id="quick-start-wave" class="btn primary">Start Wave</button>
+        <button id="btn-send-panel" class="btn ghost dock-btn" style="display:none" aria-label="Open send menu"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M5 19l9.5-9.5M14.5 5H19v4.5L9.5 19M4 15l5 5"/><path d="M19 19 14 14M15 20l5-5"/></svg><span>Sends</span></button>
+        <button id="quick-speed-cycle" class="btn ghost dock-btn">×1</button>
+      </div>
+    </div>
+    <div id="pause-overlay" class="modal-overlay">
+      <div class="modal glass">
+        <h2>Paused</h2>
+        <div class="modal-buttons">
+          <button id="pause-resume" class="btn primary">Resume</button>
+          <button id="pause-restart" class="btn">Restart</button>
+          <button id="pause-save" class="btn">Save</button>
+          <button id="pause-exit" class="btn ghost">Exit to Menu</button>
+        </div>
+        <div class="set-row"><span class="dim">Graphics</span>
+          <span class="opt-seg"><button class="seg" data-quality="auto">Auto</button><button class="seg" data-quality="high">High</button><button class="seg" data-quality="medium">Med</button><button class="seg" data-quality="low">Low</button></span></div>
+        <div class="set-row"><span class="dim">Render FPS</span>
+          <span class="opt-seg"><button class="seg" data-fps="30">30</button><button class="seg" data-fps="45">45</button><button class="seg sel" data-fps="60">60</button></span></div>
+        <div class="set-row"><span class="dim">Sound</span><button id="audio-mute" class="btn small">On</button></div>
+        <div class="set-row"><span class="dim">Music</span><input type="range" id="audio-music" min="0" max="100" value="40" aria-label="Music volume"></div>
+        <div class="set-row"><span class="dim">Effects</span><input type="range" id="audio-sfx" min="0" max="100" value="70" aria-label="Effects volume"></div>
+        <p class="dim keys">PC: Space start wave · W world · Q/E or ←/→ corridors · 1–3 speed · Esc pause · wheel zoom · drag to pan</p>
+      </div>
+    </div>
+    <div id="end-screen" class="modal-overlay">
+      <div class="modal glass">
+        <h1 id="end-title" class="win">VICTORY</h1>
+        <div id="end-body" class="end-body"></div>
+        <div class="modal-buttons">
+          <button id="end-endless" class="btn primary">Continue into Endless</button>
+          <button id="end-again" class="btn">Play Again</button>
+          <button id="end-menu" class="btn ghost">Main Menu</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div id="mastery-screen" class="modal-overlay"></div>
+
+  <div id="save-modal" class="modal-overlay">
+    <div class="modal wide glass">
+      <button class="panel-close" id="sm-close">✕</button>
+      <h2>Save · Import · Export</h2>
+      <p class="dim sm-note">Progress auto-saves on this device after every wave. Export a JSON backup you can re-import if storage is ever cleared. Circle Tower Wars exports import here too.</p>
+      <div class="sm-actions">
+        <button id="sm-export-run" class="btn">Show Current Run</button>
+        <button id="sm-export-meta" class="btn">Show Progress</button>
+        <button id="sm-download" class="btn primary">⬇ Download .json</button>
+      </div>
+      <textarea id="save-text" placeholder="Paste a save here to import, or press a button above to export…"></textarea>
+      <input type="file" id="sm-file" accept=".json,application/json" hidden>
+      <div class="sm-actions">
+        <button id="sm-upload" class="btn">⬆ Upload File</button>
+        <button id="sm-import" class="btn primary">Import</button>
+        <button id="sm-reset" class="btn danger">Reset All Progress</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="startup-error" role="alert" hidden></div>
+</div>
+
+<script>
+  // if a module can't load (offline, old browser), say so instead of showing a frozen loading bar
+  addEventListener("error", function (e) {
+    var box = document.getElementById("startup-error");
+    if (!box || !e.message) return;
+    box.hidden = false;
+    box.textContent = "Skyhold couldn't start: " + e.message + " — three.js loads from a CDN, so the first run needs a connection.";
+  });
+</script>
+<script src="circle/database.js"></script>
+<script src="circle/database-ext.js"></script>
+<script src="save.js"></script>
+<script type="module" src="app/main.js"></script>
 </body>
 </html>

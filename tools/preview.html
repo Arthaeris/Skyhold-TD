@@ -1,0 +1,42 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Skyhold world preview</title>
+<style>html,body{margin:0;height:100%;background:#070a22;overflow:hidden}canvas{display:block;width:100%;height:100%}</style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.min.js" } }</script>
+<script src="../circle/database.js"></script><script src="../circle/database-ext.js"></script>
+</head><body><canvas id="c"></canvas>
+<script type="module">
+// Dev-only: renders the world ring without the game, for eyeballing models. ?n=4&view=world|field&i=0
+import * as THREE from "three";
+import { createWorld, ringLayout, corridorToWorld } from "../render/world.js";
+import { createPost, QUALITY } from "../render/post.js";
+const P = new URLSearchParams(location.search);
+const n = +(P.get("n") || 4), view = P.get("view") || "world", idx = +(P.get("i") || 0);
+const canvas = document.getElementById("c");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
+renderer.toneMapping = THREE.NeutralToneMapping; renderer.shadowMap.enabled = true;
+renderer.setSize(innerWidth, innerHeight, false);
+const scene = new THREE.Scene(); scene.background = new THREE.Color("#070a22");
+scene.add(new THREE.HemisphereLight("#a9b8ff", "#2a1d4a", 1.6));
+const sun = new THREE.DirectionalLight("#ffe8cf", 2.6); sun.position.set(-40, 80, 30); sun.castShadow = true; scene.add(sun, sun.target);
+const world = createWorld(scene, window.DB);
+const els = window.DB.ELEMENT_ORDER;
+world.build(Array.from({ length: n }, (_, i) => ({ element: els[(i + (+P.get("e") || 0)) % 8], grid: null, seed: i + 1 })));
+const L = world.layout;
+const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 2000);
+const aspect = innerWidth / innerHeight;
+let target, az, el, halfW;
+if (view === "world") { target = new THREE.Vector3(0, 0, 0); az = { x: 0, z: -1 }; el = 58; halfW = (L.bounds.x1 - L.bounds.x0) / 2 * 1.05; }
+else { const c = L.corridors[idx]; target = corridorToWorld(L, idx, 15.5, 30.5); az = c.t; el = 55; halfW = 18; }
+const e = el * Math.PI / 180, D = 400;
+cam.position.set(target.x - az.x * Math.cos(e) * D, Math.sin(e) * D, target.z - az.z * Math.cos(e) * D);
+cam.lookAt(target);
+const halfH = halfW / aspect;
+cam.left = -halfW; cam.right = halfW; cam.top = halfH; cam.bottom = -halfH; cam.updateProjectionMatrix();
+sun.shadow.camera.left = -120; sun.shadow.camera.right = 120; sun.shadow.camera.top = 120; sun.shadow.camera.bottom = -120; sun.shadow.mapSize.set(2048, 2048);
+sun.position.set(target.x - 60, 120, target.z + 40); sun.target.position.copy(target);
+const post = createPost(renderer);
+let t = 0;
+function frame() { t += 1 / 30; world.update(1 / 30, t, P.get("active") === "1"); post.render(scene, cam, QUALITY[+(P.get("q") || 2)]); requestAnimationFrame(frame); }
+frame();
+window.__ready = true;
+</script></body></html>
