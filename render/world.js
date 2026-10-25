@@ -132,50 +132,109 @@ function portalSwirl() {
 // ---------------------------------------------------------------------------
 // BACKDROP — cosmic sea, cloud banks, distant islets (built once)
 // ---------------------------------------------------------------------------
-function buildSea() {
+// Four candidate backdrops: a real sea ringed by mountains. Pick with ?bg=1..4 (default 1).
+export const BACKDROPS = {
+  1: { name: "Twilight Fjord", sky: "#232a5e", deep: "#0a2450", sea: "#1d5f9c", foam: "#d6ecff", spark: 0.9, wave: 0.07, glow: "#3a8cff",
+       rock: ["#3d4868", "#505d82", "#66749c"], low: "#2c3a55", snow: "#f3f7ff", snowLine: 0.62, rise: 1.0, jag: 0.35, lava: 0 },
+  2: { name: "Storm Reach", sky: "#171b29", deep: "#0d1420", sea: "#2a3c52", foam: "#c9d6e6", spark: 0.35, wave: 0.11, glow: "#5f7a9a",
+       rock: ["#2d3340", "#3b4252", "#4a5266"], low: "#20252f", snow: "#aab6c8", snowLine: 0.82, rise: 1.35, jag: 0.8, lava: 0 },
+  3: { name: "Sunlit Lagoon", sky: "#8fc7ee", deep: "#0a7a96", sea: "#2fc3c0", foam: "#f4ffff", spark: 1.3, wave: 0.05, glow: "#8ff0e0",
+       rock: ["#3f7f3c", "#58a04a", "#7bbd5c"], low: "#c9b57a", snow: "#e9efe4", snowLine: 0.9, rise: 0.8, jag: 0.15, lava: 0 },
+  4: { name: "Ember Straits", sky: "#2a0f1c", deep: "#14060d", sea: "#3a1224", foam: "#ff9a4a", spark: 0.5, wave: 0.08, glow: "#ff5a1c",
+       rock: ["#231d29", "#302836", "#41364a"], low: "#150f18", snow: "#ffb15c", snowLine: 0.88, rise: 1.15, jag: 0.6, lava: 1 },
+};
+const BG = BACKDROPS[+(typeof location !== "undefined" && new URLSearchParams(location.search).get("bg")) || 1] || BACKDROPS[1];
+const SEA_Y = -42;
+
+function buildSea(V = BG) {
   const mat = new THREE.ShaderMaterial({
     uniforms: {
-      uTime: TIME, uDeep: { value: col(WORLD.seaDeep).clone() }, uSea: { value: col(WORLD.sea).clone() },
-      uGlow: { value: col(WORLD.seaGlow).clone() }, uCur: { value: col(WORLD.current).clone() }, uR: { value: 80 },
-      uWarm: { value: 0 },
+      uTime: TIME, uDeep: { value: col(V.deep).clone() }, uSea: { value: col(V.sea).clone() }, uFoam: { value: col(V.foam).clone() },
+      uGlow: { value: col(V.glow).clone() }, uSky: { value: col(V.sky).clone() }, uSpark: { value: V.spark }, uWave: { value: V.wave },
+      uR: { value: 80 }, uWarm: { value: 0 },
     },
     vertexShader: "varying vec3 vW; void main(){ vec4 w = modelMatrix*vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix*viewMatrix*w; }",
     fragmentShader: /* glsl */`
-      uniform float uTime, uR, uWarm; uniform vec3 uDeep, uSea, uGlow, uCur; varying vec3 vW;
+      uniform float uTime, uR, uWarm, uSpark, uWave; uniform vec3 uDeep, uSea, uFoam, uGlow, uSky; varying vec3 vW;
       float h21(vec2 p){ p = fract(p*vec2(233.34,851.73)); p += dot(p,p+23.45); return fract(p.x*p.y); }
       float n2(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
         return mix(mix(h21(i), h21(i+vec2(1,0)), f.x), mix(h21(i+vec2(0,1)), h21(i+vec2(1,1)), f.x), f.y); }
       float fbm(vec2 p){ float a = 0.0, w = 0.55; for (int i = 0; i < 4; i++){ a += n2(p)*w; p = p*2.03 + vec2(13.1, 7.7); w *= 0.5; } return a; }
       void main(){
-        vec2 p = vW.xz;
-        float r = length(p);
-        // the whole sea slowly turns around the vortex, faster near it
-        float ang = uTime*0.015 + 26.0/(r*0.05 + 1.0)*0.12;
-        float cs = cos(ang), sn = sin(ang);
-        vec2 q = vec2(cs*p.x - sn*p.y, sn*p.x + cs*p.y);
-        vec2 w = q*0.012 + vec2(fbm(q*0.01 + uTime*0.01), fbm(q*0.01 - 3.1)) * 1.4;
-        float f = fbm(w*2.0);
-        float ridge = 1.0 - abs(fbm(w*3.1 + 5.0)*2.0 - 1.0);
-        vec3 c = mix(uDeep, uSea, smoothstep(0.25, 0.85, f));
-        c += uCur * pow(ridge, 9.0) * 0.42;
-        c *= 0.85;
-        float near = exp(-r/(uR*0.9));
-        c += uGlow * near * 0.35;
-        c = mix(c, c*vec3(1.4,0.7,0.5), uWarm*near);
-        // twinkling star-glints on the water
-        vec2 sp = floor(p*0.35);
-        float st = step(0.996, h21(sp)) * (0.5 + 0.5*sin(uTime*2.0 + h21(sp+3.0)*20.0));
-        c += vec3(0.8,0.9,1.0) * st * 1.4;
-        c = mix(c, uDeep*0.6, smoothstep(uR*2.6, uR*5.0, r));
+        vec2 p = vW.xz; float r = length(p);
+        // long swells drifting across, broken up by a slow warp
+        vec2 warp = vec2(fbm(p*0.02 + uTime*0.02), fbm(p*0.02 - 4.0));
+        float swell = fbm(p*vec2(0.035, 0.07) + warp*1.6 + vec2(uTime*0.04, 0.0));
+        vec3 c = mix(uDeep, uSea, smoothstep(0.2, 0.8, swell));
+        // wave crests: thin pale lines on the swell tops, snapped to a coarse grid so they read as voxels
+        vec2 g = floor(p*0.55)/0.55;
+        float cr = fbm(g*vec2(0.06, 0.13) + warp*1.2 + vec2(uTime*0.05, 0.0));
+        c = mix(c, uFoam, smoothstep(0.7, 0.735, cr) * (1.0 - smoothstep(0.735, 0.77, cr)) * 0.5 * (uWave * 8.0));
+        // soft light pooling around the ring
+        c += uGlow * exp(-r/(uR*1.1)) * 0.28;
+        c = mix(c, c*vec3(1.5,0.7,0.5) + vec3(0.12,0.03,0.0), uWarm*exp(-r/(uR*0.9)));
+        // sun/moon glints
+        vec2 sp = floor(p*0.5);
+        float st = step(0.995, h21(sp)) * (0.5 + 0.5*sin(uTime*2.5 + h21(sp+3.0)*20.0));
+        c += uFoam * st * uSpark;
+        c = mix(c, uSky, smoothstep(uR*3.0, uR*6.5, r) * 0.85);
         gl_FragColor = vec4(c, 1.0);
       }`,
   });
   const m = new THREE.Mesh(new THREE.PlaneGeometry(6000, 6000, 1, 1), mat);
   m.rotation.x = -Math.PI / 2;
-  m.position.y = -42;
+  m.position.y = SEA_Y;
   m.renderOrder = -5;
   m.frustumCulled = false;
   return m;
+}
+
+// Mountain ranges: stepped voxel columns flanking the ring on both sides, plus a distant ridge behind it.
+function buildMountains(bounds, V = BG) {
+  const b = new Batch(41), g = new Batch(42), r = rng(2026), STEP = 6;
+  const xE = Math.max(Math.abs(bounds.x0), Math.abs(bounds.x1)) + 16;
+  const tier = (k, alt, far) => {
+    const base = alt > V.snowLine ? V.snow : k < 1 ? V.low : V.rock[Math.min(2, Math.floor(alt * 3))];
+    return mix(base, V.sky, far * 0.5);
+  };
+  function column(x, z, h, far) {
+    if (h < 4) return;
+    const alt = Math.min(1, h / (70 * V.rise));
+    for (let k = 0, y = 0; y < h; k++, y += STEP) {
+      const th = Math.min(STEP, h - y), a = (y + th) / (70 * V.rise);
+      const inset = Math.min(1, k * 0.06);
+      b.box(STEP * (1 - inset) + 0.3, th, STEP * (1 - inset) + 0.3, tier(k, a, far), x, SEA_Y + y + th / 2, z, { jitter: 0.14, ao: 0.8, top: tier(k, Math.min(1, a + 0.12), far) });
+    }
+    if (V.lava && r() < 0.16 && alt > 0.25) g.box(1.2, h * 0.5, 1.2, V.glow, x + STEP / 2 - 0.2, SEA_Y + h * 0.4, z + (r() - 0.5) * 3, { glow: 2.4, jitter: 0, ao: 1 });
+  }
+  const zA = bounds.z0 - 70, zB = bounds.z1 + 50;
+  for (const side of [-1, 1]) {
+    for (let z = zA; z < zB; z += STEP) {
+      // each range hugs the sea with a wandering shoreline, then climbs into peaks
+      const shore = xE + (fbm(z * 0.02 + side * 9, 3) - 0.5) * 60 + 8 * Math.sin(z * 0.05 + side);
+      for (let d = 0; d < 20; d++) {
+        const x = side * (shore + d * STEP);
+        const wx = x + (fbm(x * 0.04, z * 0.04) - 0.5) * 30;
+        const n = fbm(wx * 0.03, z * 0.03), ridge = 1 - Math.abs(fbm(wx * 0.045 + 9, z * 0.045) * 2 - 1);
+        const prof = Math.pow(Math.min(1, (d + 0.3) / 11), 1.5);
+        const h = Math.round(((n * 0.6 + ridge * V.jag * 1.3) * 80 * V.rise * prof) / 3) * 3;
+        column(x, z, h, d / 22);
+      }
+    }
+  }
+  const zR = bounds.z0 - 110;
+  for (let x = -260; x <= 260; x += STEP) {
+    for (let d = 0; d < 4; d++) {
+      const z = zR - d * STEP;
+      const n = fbm(x * 0.025 + 40, d * 0.4), ridge = 1 - Math.abs(fbm(x * 0.04, 3 + d * 0.2) * 2 - 1);
+      const edge = Math.min(1, Math.max(0, (260 - Math.abs(x)) / 60));
+      column(x, z, Math.round(((n * 0.5 + ridge * V.jag) * 55 * V.rise * (0.6 + edge * 0.4)) / 3) * 3, 0.75);
+    }
+  }
+  const grp = new THREE.Group();
+  const m = b.mesh(MAT.lit, false); m.receiveShadow = true; grp.add(m);
+  if (V.lava) grp.add(g.mesh(MAT.glow, false));
+  return grp;
 }
 
 function cloudPuffGeometry(seed) {
@@ -190,7 +249,7 @@ function cloudPuffGeometry(seed) {
 
 function buildClouds(count = 42) {
   const geos = [cloudPuffGeometry(11), cloudPuffGeometry(23), cloudPuffGeometry(37)];
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, opacity: 0.5, depthWrite: false });
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, opacity: 0.38, depthWrite: false });
   const groups = geos.map((g) => { const m = new THREE.InstancedMesh(g, mat, Math.ceil(count / 3)); m.frustumCulled = false; return m; });
   const r = rng(91);
   const items = [];
@@ -713,6 +772,8 @@ export function createWorld(scene, DB) {
   scene.add(root);
   const sea = buildSea();
   scene.add(sea);
+  scene.background = new THREE.Color(BG.sky);
+  let mountains = null;
   const clouds = buildClouds();
   scene.add(clouds.root);
   let islets = null;
@@ -781,6 +842,8 @@ export function createWorld(scene, DB) {
     root.add(vortex.root); objects.push(vortex.root);
     const R = Math.max(L.bounds.x1 - L.bounds.x0, L.bounds.z1 - L.bounds.z0) / 2;
     sea.material.uniforms.uR.value = R;
+    if (mountains) { scene.remove(mountains); mountains.traverse((o) => o.geometry && o.geometry.dispose()); }
+    mountains = buildMountains(L.bounds); scene.add(mountains);
     if (!islets || islets.userData.R !== Math.round(R / 20)) {
       if (islets) { scene.remove(islets); islets.traverse((o) => o.geometry && o.geometry.dispose()); }
       islets = buildIslets(DB, R); islets.userData.R = Math.round(R / 20); scene.add(islets);

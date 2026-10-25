@@ -25,7 +25,7 @@ const L = world.layout;
 const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 2000);
 const aspect = innerWidth / innerHeight;
 let target, az, el, halfW;
-if (view === "world") { target = new THREE.Vector3(0, 0, 0); az = { x: 0, z: -1 }; el = 58; halfW = (L.bounds.x1 - L.bounds.x0) / 2 * 1.05; }
+if (view === "world") { target = new THREE.Vector3(0, 0, 0); az = { x: 0, z: -1 }; el = 58; halfW = (L.bounds.x1 - L.bounds.x0) / 2 * 1.05 * (+P.get("z") || 1); }
 else { const c = L.corridors[idx]; target = corridorToWorld(L, idx, 15.5, 30.5); az = c.t; el = 55; halfW = 18; }
 const e = el * Math.PI / 180, D = 400;
 cam.position.set(target.x - az.x * Math.cos(e) * D, Math.sin(e) * D, target.z - az.z * Math.cos(e) * D);
