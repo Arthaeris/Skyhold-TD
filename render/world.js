@@ -12,6 +12,7 @@
 import * as THREE from "three";
 import { Batch, Part, MAT, rng, noise, fbm, col, shade, mix, clamp, lerp, TAU, pick } from "./kit.js";
 import { THEMES, WORLD } from "./theme.js";
+import { createBackdrop } from "./backdrop.js";
 
 export const COLS = 31, ROWS = 61;
 const SIDE = 3.2, END = 6;             // rim width beside / beyond the build grid
@@ -127,202 +128,6 @@ let portalMat = null;
 function portalSwirl() {
   if (!portalMat) portalMat = swirlMaterial({ a: "#12031f", b: "#7a2fd0", c: "#e2a8ff", spin: -2.2, arms: 2, twist: 4.5, core: 0.22, bright: 2.4 });
   return portalMat;
-}
-
-// ---------------------------------------------------------------------------
-// BACKDROP — cosmic sea, cloud banks, distant islets (built once)
-// ---------------------------------------------------------------------------
-const SEA_Y = -42, MAXR = 56, SKY = "#030a22";
-const SEAC = { deep: "#021033", sea: "#0a3b8c", cur: "#34a6ff", glow: "#1d6fe0", foam: "#bfe6ff" };
-
-function buildSea() {
-  const rocks = Array.from({ length: MAXR }, () => new THREE.Vector3(1e5, 1e5, 1));
-  const mat = new THREE.ShaderMaterial({
-    uniforms: {
-      uTime: TIME, uDeep: { value: col(SEAC.deep).clone() }, uSea: { value: col(SEAC.sea).clone() }, uCur: { value: col(SEAC.cur).clone() },
-      uGlow: { value: col(SEAC.glow).clone() }, uFoam: { value: col(SEAC.foam).clone() }, uSky: { value: col(SKY).clone() },
-      uR: { value: 80 }, uWarm: { value: 0 }, uRocks: { value: rocks },
-    },
-    vertexShader: "varying vec3 vW; void main(){ vec4 w = modelMatrix*vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix*viewMatrix*w; }",
-    fragmentShader: /* glsl */`
-      #define NR ${MAXR}
-      uniform float uTime, uR, uWarm; uniform vec3 uDeep, uSea, uCur, uGlow, uFoam, uSky; uniform vec3 uRocks[NR]; varying vec3 vW;
-      float h21(vec2 p){ p = fract(p*vec2(233.34,851.73)); p += dot(p,p+23.45); return fract(p.x*p.y); }
-      float n2(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
-        return mix(mix(h21(i), h21(i+vec2(1,0)), f.x), mix(h21(i+vec2(0,1)), h21(i+vec2(1,1)), f.x), f.y); }
-      float fbm(vec2 p){ float a = 0.0, w = 0.55; for (int i = 0; i < 4; i++){ a += n2(p)*w; p = p*2.03 + vec2(13.1, 7.7); w *= 0.5; } return a; }
-      void main(){
-        vec2 p = vW.xz; float r = length(p);
-        float ang = uTime*0.02 + 24.0/(r*0.05 + 1.0)*0.14;
-        float cs = cos(ang), sn = sin(ang);
-        vec2 q = vec2(cs*p.x - sn*p.y, sn*p.x + cs*p.y);
-        vec2 w = q*0.011 + vec2(fbm(q*0.009 + uTime*0.008), fbm(q*0.009 - 3.1))*1.5;
-        float f = fbm(w*2.0);
-        vec3 c = mix(uDeep, uSea, smoothstep(0.2, 0.85, f));
-        // thin glowing current lines
-        float ridge = 1.0 - abs(fbm(w*3.4 + 5.0)*2.0 - 1.0);
-        float ridge2 = 1.0 - abs(fbm(w*6.1 - 2.0)*2.0 - 1.0);
-        c += uCur * (pow(ridge, 70.0)*0.9 + pow(ridge2, 110.0)*0.45);
-        // rings and foam around every island and rock
-        float foam = 0.0, rip = 0.0;
-        for (int i = 0; i < NR; i++){
-          vec3 k = uRocks[i]; float d = length(p - k.xy) - k.z;
-          if (d > 14.0) continue;
-          float wob = 0.6*sin(atan(p.y-k.y, p.x-k.x)*5.0 + uTime*0.8 + float(i));
-          float dd = d + wob*0.5;
-          foam = max(foam, smoothstep(2.4, 0.0, dd)*step(-4.0, dd)*(0.55 + 0.45*sin(uTime*1.6 + float(i)*1.7)));
-          rip += smoothstep(0.35, 0.0, abs(fract((d - uTime*0.7)/3.2) - 0.5) - 0.12) * exp(-max(d,0.0)*0.22) * step(0.0, d) * 0.6;
-          c = mix(c, uSea*1.7 + uGlow*0.25, smoothstep(5.0, 0.0, d)*0.55*step(-4.0, d));
-        }
-        c = mix(c, uFoam, clamp(foam, 0.0, 1.0)*0.9) + uCur*rip*0.35;
-        c += uGlow * exp(-r/(uR*0.8)) * 0.3;
-        c = mix(c, c*vec3(1.5,0.7,0.5) + vec3(0.1,0.02,0.0), uWarm*exp(-r/(uR*0.9)));
-        c = mix(c, uSky, smoothstep(uR*3.2, uR*6.0, r) * 0.9);
-        gl_FragColor = vec4(c, 1.0);
-      }`,
-  });
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(6000, 6000, 1, 1), mat);
-  m.rotation.x = -Math.PI / 2;
-  m.position.y = SEA_Y;
-  m.renderOrder = -5;
-  m.frustumCulled = false;
-  return m;
-}
-
-// ---------------------------------------------------------------------------
-// SCENERY — one elemental landmass per element around the ring (lava falls, jungle ruin, ice crystals,
-// a rune shrine…) plus scattered rock stacks, all standing in the sea with foam rings (see buildSea)
-// ---------------------------------------------------------------------------
-function palm(b, x, y, z, s, r) {
-  b.push(x, y, z, r() * TAU, 0, 0, s);
-  b.box(0.5, 1.6, 0.5, "#6b4a2e", 0, 0.8, 0, { rotZ: 0.12 }); b.box(0.45, 1.5, 0.45, "#7a5636", 0.2, 2.3, 0, { rotZ: 0.18 });
-  for (let k = 0; k < 4; k++) b.box(2.4, 0.3, 0.7, k % 2 ? "#2f7a3a" : "#3c9444", 0, 3.2, 0, { rotY: k * Math.PI / 4, rotZ: 0.12, jitter: 0.1 });
-  b.pop();
-}
-function crystal(g, x, y, z, s, color, r) {
-  g.push(x, y, z, r() * TAU, 0, 0, s);
-  g.box(0.7, 3.2, 0.7, color, 0, 1.6, 0, { glow: 2, ao: 1, jitter: 0, rotZ: (r() - 0.5) * 0.3 });
-  g.box(0.5, 2.0, 0.5, color, 0.8, 1.0, 0.3, { glow: 1.7, ao: 1, jitter: 0, rotZ: -0.3 });
-  g.pop();
-}
-
-function buildLandmass(el, rad, seed) {
-  const T = THEMES[el], r = rng(seed), b = new Batch(seed), g = new Batch(seed + 1);
-  const STEP = 3, H = rad * 1.15;
-  const top = (h, cell) => (h < 4 ? mix(T.soil, "#c9b78a", 0.45) : T.ground[cell % T.ground.length]);
-  const cells = [];
-  for (let gx = -rad - STEP; gx <= rad + STEP; gx += STEP) for (let gz = -rad - STEP; gz <= rad + STEP; gz += STEP) {
-    const d = Math.hypot(gx, gz) / rad + (fbm(gx * 0.08 + seed, gz * 0.08) - 0.5) * 0.55;
-    if (d > 1) continue;
-    const h = Math.max(3, Math.round((Math.pow(1 - d, 0.9) * H * (0.5 + fbm(gx * 0.06, gz * 0.06 + seed))) / 3) * 3);
-    cells.push({ gx, gz, h });
-    for (let y = -3, k = 0; y < h; y += 3, k++) {
-      const hh = Math.min(3, h - y), last = y + 3 >= h;
-      const colr = last ? top(h, k + gx + gz) : y < 2 ? T.deep : k % 2 ? T.rock : T.soil;
-      b.box(STEP + 0.15, hh, STEP + 0.15, colr, gx, SEA_Y + y + hh / 2, gz, { jitter: 0.16, ao: 0.8, top: last ? T.rimTop : undefined });
-    }
-  }
-  const high = cells.reduce((a, c) => (c.h > a.h ? c : a), cells[0]);
-  const pick2 = (n, f) => cells.filter(f).sort(() => r() - 0.5).slice(0, n);
-  const base = (c) => SEA_Y + c.h;
-  if (el === "fire") {
-    // a lava river down the high ground and a falling glow
-    pick2(18, (c) => c.h >= 6).forEach((c) => g.box(STEP, 0.5, STEP, T.hot, c.gx, base(c) + 0.1, c.gz, { glow: 2.1, jitter: 0, ao: 1 }));
-    g.box(2.2, high.h, 1.4, T.hot, high.gx + 3, SEA_Y + high.h / 2, high.gz + rad * 0.5, { glow: 2.0, jitter: 0, ao: 1 });
-  } else if (el === "nature") {
-    // jungle ruin: an arch with a glowing green rune
-    const a = high;
-    b.box(2, 8, 2, "#5a4a3a", a.gx - 4, base(a) + 4, a.gz); b.box(2, 8, 2, "#5a4a3a", a.gx + 4, base(a) + 4, a.gz); b.box(10, 2, 2.4, "#4a3c2e", a.gx, base(a) + 9, a.gz);
-    g.box(5, 5, 0.6, T.hot, a.gx, base(a) + 3.2, a.gz + 0.5, { glow: 1.8, jitter: 0, ao: 1 });
-    pick2(10, () => true).forEach((c) => palm(b, c.gx, base(c), c.gz, 1 + r() * 0.6, r));
-  } else if (el === "ice") {
-    pick2(7, (c) => c.h >= 4).forEach((c) => crystal(g, c.gx, base(c), c.gz, 1.6 + r() * 1.6, T.accent, r));
-    pick2(9, () => true).forEach((c) => b.box(2 + r() * 2, 3 + r() * 3, 2 + r() * 2, T.ground[2], c.gx + (r() - 0.5) * 2, base(c) + 2, c.gz, { rotY: r() }));
-  } else if (el === "darkness") {
-    const a = high;
-    b.box(3, 9, 1.6, "#2b2438", a.gx, base(a) + 4.5, a.gz);
-    g.box(1.8, 1.8, 0.4, T.hot, a.gx, base(a) + 6, a.gz + 0.9, { glow: 2.2, jitter: 0, ao: 1 });
-    pick2(6, (c) => c.h >= 4).forEach((c) => crystal(g, c.gx, base(c), c.gz, 1.2 + r(), T.accent, r));
-  } else {
-    pick2(6, (c) => c.h >= 4).forEach((c) => crystal(g, c.gx, base(c), c.gz, 1.1 + r(), T.accent, r));
-    b.box(3, 6, 3, T.rock, high.gx, base(high) + 3, high.gz, { rotY: 0.4 }); g.box(0.9, 0.9, 0.9, T.hot, high.gx, base(high) + 6.6, high.gz, { glow: 2.2, jitter: 0, ao: 1 });
-  }
-  if (el !== "nature") pick2(4, (c) => c.h <= 6).forEach((c) => palm(b, c.gx, base(c), c.gz, 0.9 + r() * 0.5, r));
-  const grp = new THREE.Group();
-  const m = b.mesh(MAT.lit, false); m.receiveShadow = false; grp.add(m);
-  grp.add(g.mesh(MAT.glow, false));
-  return grp;
-}
-
-function buildScenery(DB, bounds) {
-  const R = Math.max(bounds.x1 - bounds.x0, bounds.z1 - bounds.z0) / 2;
-  const cx = (bounds.x0 + bounds.x1) / 2, cz = (bounds.z0 + bounds.z1) / 2;
-  const grp = new THREE.Group(), rocks = [];
-  const r = rng(4242), els = DB.ELEMENT_ORDER, order = [0, 5, 2, 7, 4, 1, 6, 3];
-  const rad = Math.max(22, R * 0.3);
-  els.forEach((_, k) => {
-    const el = els[order[k % els.length]];
-    const a = ((k + 0.5) / els.length) * TAU + 0.35, ca = Math.cos(a), sa = Math.sin(a);
-    const dist = (R / Math.max(Math.abs(ca), Math.abs(sa))) * 1.12 + rad * 0.95;
-    const lm = buildLandmass(el, rad * (0.9 + r() * 0.25), 100 + k * 17);
-    const x = cx + ca * dist, z = cz + sa * dist;
-    lm.position.set(x, 0, z); lm.rotation.y = r() * TAU; grp.add(lm);
-    rocks.push([x, z, rad * 1.05]);
-  });
-  const batch = new Batch(9), glow = new Batch(10);
-  for (let i = 0, tries = 0; i < 40 && tries < 600; tries++) {
-    const a = r() * TAU, ca = Math.cos(a), sa = Math.sin(a);
-    const d = R / Math.max(Math.abs(ca), Math.abs(sa)) * (1.02 + r() * 0.9) + 6;
-    const x = cx + ca * d, z = cz + sa * d, s = 4 + r() * 3.5;
-    if (rocks.some((k) => Math.hypot(x - k[0], z - k[1]) < k[2] + s + 8)) continue;
-    const el = els[i % els.length], T = THEMES[el], h = 5 + Math.floor(r() * 3) * 3;
-    batch.push(x, 0, z, r() * TAU, 0, 0, 1);
-    for (let y = -3, k = 0; y < h; y += 3, k++) { const w = s * (1 - k * 0.12); batch.box(w, 3, w * (0.85 + r() * 0.3), y + 3 >= h ? T.ground[1] : k % 2 ? T.rock : T.soil, 0, SEA_Y + y + 1.5, 0, { jitter: 0.16, ao: 0.75, top: y + 3 >= h ? T.rimTop : undefined }); }
-    const kind = r();
-    if (kind < 0.4) palm(batch, 0, SEA_Y + h, 0, 0.8 + r() * 0.4, r);
-    else if (kind < 0.75) { glow.push(x, 0, z, 0, 0, 0, 1); crystal(glow, 0, SEA_Y + h, 0, 0.7 + r() * 0.6, T.accent, r); glow.pop(); }
-    batch.pop();
-    rocks.push([x, z, s * 0.6]); i++;
-  }
-  grp.add(batch.mesh(MAT.lit, false)); grp.add(glow.mesh(MAT.glow, false));
-  grp.userData.rocks = rocks;
-  return grp;
-}
-
-function cloudPuffGeometry(seed) {
-  const r = rng(seed), b = new Batch(seed);
-  const n = 5 + Math.floor(r() * 4);
-  for (let i = 0; i < n; i++) {
-    const w = 3 + r() * 5, h = 1.2 + r() * 1.8, d = 2.5 + r() * 4;
-    b.box(w, h, d, i % 3 ? WORLD.cloud : shade(WORLD.cloud, 0.92), (r() - 0.5) * 9, h / 2 + r() * 1.5, (r() - 0.5) * 6, { ao: 0.62, top: "#eef3ff" });
-  }
-  return b.geometry();
-}
-
-function buildClouds(count = 30) {
-  const geos = [cloudPuffGeometry(11), cloudPuffGeometry(23), cloudPuffGeometry(37)];
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, opacity: 0.32, depthWrite: false });
-  const groups = geos.map((g) => { const m = new THREE.InstancedMesh(g, mat, Math.ceil(count / 3)); m.frustumCulled = false; return m; });
-  const r = rng(91);
-  const items = [];
-  for (let i = 0; i < count; i++) {
-    items.push({ g: i % 3, k: Math.floor(i / 3), a: r() * TAU, f: 1.55 + r() * 0.9, y: -18 - r() * 10, s: 1.0 + r() * 1.2, rot: r() * TAU, v: 0.0015 + r() * 0.002 });
-  }
-  const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), P = new THREE.Vector3(), S = new THREE.Vector3(), E = new THREE.Euler();
-  const root = new THREE.Group();
-  groups.forEach((g) => root.add(g));
-  return {
-    root,
-    R: 90,
-    update(t) {
-      for (const it of items) {
-        const aa = it.a + t * it.v, dd = it.f * this.R;
-        M.compose(P.set(Math.cos(aa) * dd, it.y, Math.sin(aa) * dd), Q.setFromEuler(E.set(0, it.rot, 0)), S.set(it.s, it.s * 0.8, it.s));
-        groups[it.g].setMatrixAt(it.k, M);
-      }
-      groups.forEach((g) => { g.instanceMatrix.needsUpdate = true; });
-    },
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -796,13 +601,9 @@ function buildBridge(points, color, seed) {
 export function createWorld(scene, DB) {
   const root = new THREE.Group();
   scene.add(root);
-  const sea = buildSea();
-  scene.add(sea);
-  scene.background = new THREE.Color(SKY);
-  let scenery = null;
-  const clouds = buildClouds();
-  scene.add(clouds.root);
-    let ring = null;           // current built ring
+  const backdrop = createBackdrop(scene, DB);
+  const sea = backdrop.sea;
+  let ring = null;           // current built ring
   const islandCache = new Map(); // preview islands (no grid), keyed by element|seed
 
   function clear() {
@@ -865,29 +666,20 @@ export function createWorld(scene, DB) {
     const vortex = buildVortex(L.vortex.r);
     vortex.root.position.set(L.vortex.x, 0, L.vortex.z);
     root.add(vortex.root); objects.push(vortex.root);
-    const R = Math.max(L.bounds.x1 - L.bounds.x0, L.bounds.z1 - L.bounds.z0) / 2;
-    sea.material.uniforms.uR.value = R;
-    if (scenery) { scene.remove(scenery); scenery.traverse((o) => o.geometry && o.geometry.dispose()); }
-    scenery = buildScenery(DB, L.bounds); scene.add(scenery);
-    const U = sea.material.uniforms.uRocks.value;
-    U.forEach((v, i) => { const k = scenery.userData.rocks[i]; if (k) v.set(k[0], k[1], k[2]); else v.set(1e5, 1e5, 1); });
-    clouds.R = R;
+    backdrop.build(L, { hw: HALF_W, hl: HALF_L });
     ring = { n, L, objects, islands, gates, bridges, vortex, elements: spec.map((s) => s.element) };
     return ring;
   }
 
   return {
-    root, sea, clouds,
+    root, sea, backdrop,
     get ring() { return ring; },
     get layout() { return ring && ring.L; },
     build, clear,
     update(dt, t, vortexActive) {
       TIME.value = t;
-      clouds.update(t);
-      if (ring) {
-        ring.vortex.update(dt, t, vortexActive);
-        sea.material.uniforms.uWarm.value += ((vortexActive ? 1 : 0) - sea.material.uniforms.uWarm.value) * Math.min(1, dt * 2);
-      }
+      backdrop.update(dt, t, !!(ring && vortexActive));
+      if (ring) ring.vortex.update(dt, t, vortexActive);
     },
   };
 }

@@ -13,6 +13,7 @@ These notes supersede the earlier `STYLE_AND_PORT_PLAN.md` discussion draft. Its
 | Enemies | First-pass chunky dark-fantasy models; expected to be replaced later. |
 | UI | Circle's layout and wording, in dark liquid glass (PixelPups' glass recipe); voxel thumbnails in the rings, sheets, mastery and wave preview. |
 | Circle assets reused | Music (`assets/audio/music.mp3`; Circle's menu and game tracks are the same file) and the app icon. Everything else is rendered. |
+| World backdrop | `render/backdrop.js`, after Circle's world background art. The ring floats high above a glowing sea (y = −110). Around it are eight elemental landmasses (volcano with lava falls, jungle temple with waterfalls, ice and storm spires, rune shrines and portals), floating islets with waterfalls, sea stacks with foam rings, a whirlpool and light beam under the vortex, mist and cloud banks, and drifting motes. Coast foam and the shadows cast by floating islands come from a mask baked on the CPU. |
 | Saves | Skyhold uses its own localStorage keys (`skyhold_*`), because Circle and Skyhold share the `arthaeris.github.io` origin. The export format is unchanged, so Circle exports import here. |
 
 ## Circle effects that exist only as data
@@ -29,7 +30,7 @@ Parity means these behave as they do in Circle, where the database describes the
 
 1. **Multiplayer.** Port `net/firebase.js` and `net/lockstep.js` and wire the Co-op and Compete cards. The sim already supports both modes.
 2. **Circle's unimplemented effects** (list above), done as deliberate, documented deviations.
-3. **Real-device pass.** This version was verified in headless Chromium with software WebGL (all screens, a full wave, Vs NPCs, at phone and desktop sizes). It still needs testing on actual phones for frame rate, touch feel and safe areas.
+3. **Real-device pass.** The backdrop alone is about 0.5M vertices with 4 corridors and 0.8M with 8, so check phone frame rates and thin it out on the Low tier if needed. This version was verified in headless Chromium with software WebGL (all screens, a full wave, Vs NPCs, at phone and desktop sizes). It still needs testing on actual phones for frame rate, touch feel and safe areas.
 4. **Enemy models.** Final art pass on the 7 enemies; walking and attack animation polish.
 5. **Effects polish.** Per-element projectile shapes, status visuals beyond tints and motes (root snares, curse glyphs), and boss entrance moments.
 6. **PWA/offline.** A service worker, and bundling three.js locally.
@@ -38,5 +39,5 @@ Parity means these behave as they do in Circle, where the database describes the
 ## Dev tools
 
 - `node tools/parity-test.mjs ../Circle-TD` runs both sims on the same scripted sessions and compares state hashes on every tick.
-- `tools/preview.html?n=4&view=world|field&i=0` shows the world ring without the game.
+- `tools/preview.html?n=4&view=world|field&i=0` shows the world ring without the game. World view also takes `z` (zoom out), `el` (tilt in degrees), `az` (radians) and `tx/ty/tz` (target), and logs the vertex count.
 - `tools/gallery.html?stage=0..3&mut=0..2`, `?el=fire` (one element, all stages) and `?what=enemies` show the models.

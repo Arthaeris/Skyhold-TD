@@ -114,7 +114,7 @@ export function createRenderer(opts) {
   function shotMenu(t) {
     const b = L.bounds;
     const R = Math.max(b.x1 - b.x0, b.z1 - b.z0) / 2;
-    const cr = contentRect(); const ppu = Math.min(cr.w, H * 1.1) / (R * 1.55);
+    const cr = contentRect(); const ppu = Math.min(cr.w, H * 1.1) / (R * 2.0);
     return { tx: 0, ty: 0, tz: 0, az: t * 0.05, el: EL_MENU, ppu };
   }
   function shotSetup() {
