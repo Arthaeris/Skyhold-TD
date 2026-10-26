@@ -167,13 +167,13 @@ const HEADS = {
     B.b(0.98, 0.53, 0.98, iron, 0, h + 1.08, 0, { top: "#302523", jitter: 0.01 });
 
     // Front-facing inset service panel, layered like a fitted iron door rather than a glowing screen.
-    B.b(0.73, 0.42, 0.065, "#211a18", 0, h + 1.03, 0.535, { top: "#49372d", jitter: 0.01 });
-    B.b(0.59, 0.29, 0.035, "#302522", 0, h + 1.04, 0.58, { top: "#3b2b23", jitter: 0.01 });
-    B.b(0.39, 0.045, 0.035, bronze, 0, h + 1.15, 0.605, { jitter: 0.01 });
-    B.b(0.045, 0.19, 0.035, gold, -0.22, h + 1.04, 0.605, { jitter: 0.01 });
-    B.b(0.045, 0.19, 0.035, gold, 0.22, h + 1.04, 0.605, { jitter: 0.01 });
-    B.b(0.075, 0.075, 0.035, "#d5a66a", 0, h + 1.04, 0.63, { jitter: 0 });
-    B.g(0.045, 0.045, 0.02, "#e7a44b", 0, h + 1.04, 0.652, 0.85);
+    B.b(0.73, 0.42, 0.065, "#211a18", 0, h + 1.03, 0.69, { top: "#49372d", jitter: 0.01 });
+    B.b(0.59, 0.29, 0.035, "#302522", 0, h + 1.04, 0.745, { top: "#3b2b23", jitter: 0.01 });
+    B.b(0.39, 0.045, 0.035, bronze, 0, h + 1.15, 0.775, { jitter: 0.01 });
+    B.b(0.045, 0.19, 0.035, gold, -0.22, h + 1.04, 0.775, { jitter: 0.01 });
+    B.b(0.045, 0.19, 0.035, gold, 0.22, h + 1.04, 0.775, { jitter: 0.01 });
+    B.b(0.075, 0.075, 0.035, "#d5a66a", 0, h + 1.04, 0.80, { jitter: 0 });
+    B.g(0.045, 0.045, 0.02, "#e7a44b", 0, h + 1.04, 0.82, 0.85);
 
     // Side armor plates and narrow heat slots; subtle enough to read as metal inset into stone.
     for (const s of [-1, 1]) {
@@ -220,9 +220,9 @@ const HEADS = {
     // Small chisel-cut vent marks on the visible faces: dark grooves with one warm reflection.
     for (const s of [-1, 1]) {
       for (let i = 0; i < 4; i++) {
-        B.b(0.045, 0.12, 0.025, "#201917", s * (0.32 + i * 0.1), h + 0.96, 0.674, { jitter: 0 });
+        B.b(0.045, 0.12, 0.025, "#201917", s * (0.32 + i * 0.1), h + 0.96, 0.684, { jitter: 0 });
       }
-      B.b(0.27, 0.035, 0.025, "#7a4f34", s * 0.43, h + 1.24, 0.68, { jitter: 0.01 });
+      B.b(0.27, 0.035, 0.025, "#7a4f34", s * 0.43, h + 1.24, 0.69, { jitter: 0.01 });
     }
 
     // Stage 2: a larger outer frame, individually keyed corner blocks and side fire bowls.
@@ -259,7 +259,7 @@ const HEADS = {
       // Rear stabilizing fins keep the upper structure visually grounded.
       for (const s of [-1, 1]) {
         B.b(0.10, 0.38, 0.10, iron, 0, h + 1.39, s * 0.73, { rotX: s * 0.18, jitter: 0.01 });
-        B.b(0.045, 0.24, 0.045, "#bd5428", 0, h + 1.4, s * 0.79, 0.9);
+        B.b(0.045, 0.24, 0.045, "#bd5428", 0, h + 1.4, s * 0.79, { jitter: 0.01 });
       }
     }
     if (st >= 3) {
