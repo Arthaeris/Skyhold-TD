@@ -139,9 +139,8 @@ const HEADS = {
   // ===== FIRE ==============================================================
   fire_0(P, h, st) { // Flame Tower: an ember-forge brazier with ironwork, carved stone and molten vents
     const B = P.base;
-    const stone = "#3a2a26", stoneHi = "#5a4035", iron = "#292323";
+    const stone = "#3a2a26", iron = "#292323";
     const ember = st >= 2 ? "#ff9a38" : "#ff6a2a";
-    const scale = st >= 3 ? 1 : 1;
 
     // Broad, stepped masonry foot with a darker inset course.
     B.b(1.55, 0.28, 1.55, "#2c201c", 0, h + 0.14, 0, { top: "#594137" });
