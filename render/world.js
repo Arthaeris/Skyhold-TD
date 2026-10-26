@@ -464,8 +464,11 @@ export function buildCorridorIsland(DB, element, grid, seed = 1) {
   const topCol = T.ground.map((g) => mix(g, T.rim[0], 0.28));
   // top terrain heights (1×1 cells)
   const tops = new Map(), tk = (x, z) => x * 1000 + z;
+  // the terrain lattice shares the grid's cell boundaries (COLS/ROWS are odd, so cells sit on integer
+  // centres); a half-cell offset here once let the curb overlap the outermost build row and column
+  const LX = (COLS % 2) ? 0 : 0.5, LZ = (ROWS % 2) ? 0 : 0.5;
   for (let z = Math.floor(Z0 - 3); z < Z1 + 3; z++) for (let x = Math.floor(X0 - EXT); x < X1 + EXT; x++) {
-    const cx = x + 0.5, cz = z + 0.5;
+    const cx = x + LX, cz = z + LZ;
     const d = landD(cx, cz);
     if (d >= 0) continue;
     const inGrid = Math.abs(cx) < COLS / 2 && Math.abs(cz) < ROWS / 2;
@@ -491,7 +494,7 @@ export function buildCorridorIsland(DB, element, grid, seed = 1) {
     if (dzEnd > 0 && kind !== "plaza") h = Math.min(h, Math.max(0.2, (dzEnd - 0.8) * 0.7));
     tops.set(tk(x, z), { x, z, cx, cz, d, h, kind, dg });
   }
-  const topH = (x, z) => { const t = tops.get(tk(x, z)); if (t) return t.h; return Math.abs(x + 0.5) < COLS / 2 && Math.abs(z + 0.5) < ROWS / 2 ? 0 : -99; };
+  const topH = (x, z) => { const t = tops.get(tk(x, z)); if (t) return t.h; return Math.abs(x + LX) < COLS / 2 && Math.abs(z + LZ) < ROWS / 2 ? 0 : -99; };
   for (const t of tops.values()) {
     const { cx, cz, h, kind } = t;
     const n = [topH(t.x + 1, t.z), topH(t.x - 1, t.z), topH(t.x, t.z + 1), topH(t.x, t.z - 1)];
@@ -637,7 +640,7 @@ export function buildCorridorIsland(DB, element, grid, seed = 1) {
       glow.box(0.5, 0.6, 0.5, T.accent, sx * 3.4, (arch ? 4.4 : 1.4) + 0.35, zc, { glow: 2.4, ao: 1, jitter: 0, rotY: 0.78 });
     }
   };
-  const entZ = -oz + 2.4, extZ = oz - 2.4;
+  const entZ = -oz + 2.95, extZ = oz - 2.4;   // the entrance ring stones stay clear of the last build row
   portalStone(entZ, false);
   // exit arch
   for (let i = 0; i <= 10; i++) {

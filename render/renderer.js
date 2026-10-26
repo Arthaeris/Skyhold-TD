@@ -1022,6 +1022,7 @@ export function createRenderer(opts) {
     setCloseView(on) { closeView = !!on; try { localStorage.setItem("skyhold_closeview_v1", closeView ? "1" : "0"); } catch (e) { /* fine */ } if (mode === "field") startFly(0.6); },
     get closeView() { return closeView; },
     builderWorld(ri) { const b = brec.get(ri); return b ? b.group.position.clone() : null; },
+    probe(px, py) { ndc.set((px / W) * 2 - 1, -(py / H) * 2 + 1); ray.setFromCamera(ndc, camera); const h = ray.intersectObjects(scene.children, true).filter((x) => x.object.visible && x.object.type === "Mesh")[0]; return h ? { p: h.point.toArray().map((v) => +v.toFixed(2)), name: h.object.name, uv: worldToCorridor(L, fieldIdx, h.point.x, h.point.z) } : null; },
     debug: () => ({ builders: [...brec.values()].map((b) => ({ vis: b.group.visible, pos: b.group.position.toArray().map((x) => +x.toFixed(1)), parent: !!b.group.parent, kids: b.group.children.length })) }),
     groundAt, toScreen,
     get mode() { return mode; }, get fieldIndex() { return fieldIdx; }, get flying() { return !!fly; },
