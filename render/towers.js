@@ -137,15 +137,94 @@ const PLINTH = {
 // ---------------------------------------------------------------------------
 const HEADS = {
   // ===== FIRE ==============================================================
-  fire_0(P, h, st) { // Flame Tower: a stacked stone brazier with a roaring flame
+  fire_0(P, h, st) { // Flame Tower: an ember-forge brazier with ironwork, carved stone and molten vents
     const B = P.base;
-    B.b(1.3, 0.9, 1.3, "#3a2a26", 0, h + 0.45, 0, { top: "#4e3a32" });
-    B.b(1.0, 0.8, 1.0, "#46322c", 0, h + 1.3, 0);
-    B.b(1.5, 0.3, 1.5, "#2c201c", 0, h + 1.8, 0, { top: "#5a463e" });
-    B.g(0.1, 1.5, 1.02, "#ff6a2a", 0.52, h + 1.0, 0, 1.6); B.g(1.02, 1.5, 0.1, "#ff6a2a", 0, h + 1.0, 0.52, 1.6);
-    flame(P.float, 0, 0, 0, 1.15 + st * 0.15);
-    if (st >= 2) for (const s of [-1, 1]) { B.b(0.3, 0.6, 0.3, "#2c201c", s * 0.9, h + 0.9, s * 0.9); flame(B, s * 0.9, h + 1.2, s * 0.9, 0.4); }
-    return { fy: h + 1.95, bob: 0.06, muzzle: [0, h + 2.6, 0] };
+    const stone = "#3a2a26", stoneHi = "#5a4035", iron = "#292323";
+    const ember = st >= 2 ? "#ff9a38" : "#ff6a2a";
+    const scale = st >= 3 ? 1 : 1;
+
+    // Broad, stepped masonry foot with a darker inset course.
+    B.b(1.55, 0.28, 1.55, "#2c201c", 0, h + 0.14, 0, { top: "#594137" });
+    B.b(1.38, 0.22, 1.38, stone, 0, h + 0.37, 0, { top: "#6a4b3d" });
+    B.b(1.16, 0.12, 1.16, "#29201d", 0, h + 0.53, 0, { top: "#49332b" });
+
+    // Four chunky corner buttresses make the silhouette read clearly at game scale.
+    const corners = [[-0.57, -0.57], [0.57, -0.57], [-0.57, 0.57], [0.57, 0.57]];
+    for (const [x, z] of corners) {
+      B.b(0.3, 0.72 + st * 0.06, 0.3, stone, x, h + 0.86 + st * 0.03, z, { top: "#62483b" });
+      B.b(0.34, 0.12, 0.34, "#211a18", x, h + 0.54, z, { top: "#765443" });
+      B.b(0.34, 0.1, 0.34, "#554039", x, h + 1.25 + st * 0.06, z, { top: "#80604b" });
+      // Small iron rivets on the exposed corners.
+      B.b(0.09, 0.09, 0.06, "#a77b4e", x, h + 0.88 + st * 0.03, z + (z > 0 ? 0.16 : -0.16));
+    }
+
+    // Central furnace body, with inset dark panels and glowing vertical fire channels.
+    B.b(1.02, 0.82, 1.02, stone, 0, h + 1.12, 0, { top: "#62483b" });
+    B.b(0.82, 0.72, 0.82, "#241b19", 0, h + 1.16, 0, { top: "#382723" });
+    for (const s of [-1, 1]) {
+      B.b(0.12, 0.62, 0.12, "#76513b", s * 0.42, h + 1.14, 0.43);
+      B.b(0.07, 0.48, 0.05, ember, s * 0.42, h + 1.16, 0.505);
+      B.g(0.07, 0.44, 0.045, "#ffb15c", s * 0.42, h + 1.16, 0.54, 1.8);
+    }
+    // A forged iron belt and bronze fastening plates tie the masonry together.
+    B.b(1.18, 0.12, 1.18, iron, 0, h + 0.72, 0);
+    B.b(1.12, 0.06, 1.12, "#98633c", 0, h + 0.79, 0);
+    for (const [x, z] of [[-0.57, 0], [0.57, 0], [0, -0.57], [0, 0.57]]) {
+      B.b(0.16, 0.22, 0.08, "#a77b4e", x, h + 0.75, z);
+      B.g(0.07, 0.07, 0.035, "#ffb15c", x, h + 0.76, z > 0 ? z + 0.05 : z - 0.05, 1.5);
+    }
+
+    // Heavy brazier lip: two offset courses, with a dark cavity beneath the fire.
+    B.b(1.48, 0.2, 1.48, "#29201d", 0, h + 1.63, 0, { top: "#6a5042" });
+    B.b(1.62, 0.16, 1.62, "#40302a", 0, h + 1.78, 0, { top: "#80604b" });
+    B.b(1.22, 0.09, 1.22, "#211a18", 0, h + 1.88, 0, { top: "#30221e" });
+    B.g(1.0, 0.045, 1.0, "#ff5a1a", 0, h + 1.91, 0, 1.9);
+    B.g(0.64, 0.035, 0.64, "#ffb15c", 0, h + 1.94, 0, 2.4);
+
+    // Ember seams in the lip and short iron braces on the outer faces.
+    for (const s of [-1, 1]) {
+      B.g(0.82, 0.055, 0.055, ember, 0, h + 1.8, s * 0.79, 1.8);
+      B.g(0.055, 0.055, 0.82, ember, s * 0.79, h + 1.8, 0, 1.8);
+      B.b(0.1, 0.34, 0.1, "#a77b4e", s * 0.67, h + 1.35, 0.55, { rotZ: -s * 0.12 });
+      B.b(0.1, 0.34, 0.1, "#a77b4e", 0.55, h + 1.35, s * 0.67, { rotX: s * 0.12 });
+    }
+
+    // Higher stages add forge fittings, side vents and a more elaborate fire cradle.
+    if (st >= 1) {
+      B.b(1.72, 0.1, 1.72, "#29201d", 0, h + 1.98, 0, { top: "#72513f" });
+      for (const [x, z] of [[-0.72, 0], [0.72, 0], [0, -0.72], [0, 0.72]]) {
+        B.b(0.22, 0.28, 0.22, "#49332b", x, h + 1.7, z, { top: "#805a42" });
+        B.g(0.12, 0.2, 0.12, "#ff7a2a", x, h + 1.74, z, 2.0);
+      }
+      for (let i = -1; i <= 1; i++) {
+        B.b(0.07, 0.22, 0.07, "#b88954", i * 0.18, h + 1.36, 0.535);
+      }
+    }
+    if (st >= 2) {
+      // Side braziers are mounted on short stone arms, rather than floating beside the tower.
+      for (const s of [-1, 1]) {
+        B.b(0.42, 0.12, 0.42, "#29201d", s * 0.98, h + 0.68, 0, { top: "#604536" });
+        B.b(0.18, 0.42, 0.18, stone, s * 0.98, h + 0.91, 0);
+        B.b(0.34, 0.1, 0.34, "#29201d", s * 0.98, h + 1.15, 0, { top: "#80604b" });
+        flame(B, s * 0.98, h + 1.2, 0, 0.34 + st * 0.035, "#ffb15c", "#ff6a2a");
+      }
+      for (const s of [-1, 1]) {
+        B.b(0.16, 0.46, 0.16, "#2c201c", 0, h + 1.35, s * 0.72, { rotX: s * 0.2 });
+        B.g(0.06, 0.32, 0.05, "#ff6a2a", 0, h + 1.36, s * 0.81, 1.8);
+      }
+    }
+    if (st >= 3) {
+      // The final stage gets a forged crown: four raised corner teeth and a bright inner ring.
+      for (const [x, z] of corners) {
+        B.b(0.2, 0.36, 0.2, "#302320", x * 1.18, h + 2.08, z * 1.18, { top: "#9a6a45" });
+        B.b(0.11, 0.18, 0.11, "#b88954", x * 1.18, h + 2.34, z * 1.18, { top: "#e0a15c" });
+      }
+      B.g(1.28, 0.045, 0.07, "#ff9a38", 0, h + 2.1, 0.65, 2.0);
+      B.g(0.07, 0.045, 1.28, "#ff9a38", 0.65, h + 2.1, 0, 2.0);
+    }
+
+    flame(P.float, 0, 0, 0, 1.12 + st * 0.18);
+    return { fy: h + 1.98, bob: 0.06, muzzle: [0, h + 2.6 + st * 0.12, 0] };
   },
   fire_1(P, h, st) { // Fireball Tower: a swivel cannon, fireball glowing at its mouth
     const B = P.base, A = P.aim;
