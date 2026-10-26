@@ -10,7 +10,7 @@ import * as fx from "../sim/fx.js";
 import * as pf from "../sim/pathfind.js";
 import { createWorld, ringLayout, corridorToWorld, worldToCorridor, COLS, ROWS } from "./world.js";
 import { createTowerModel, towerStage } from "./towers.js";
-import { createEnemyRenderer, enemyScale } from "./enemies.js";
+import { createEnemyRenderer, enemyScale, setEnemyVisScale } from "./enemies.js";
 import { createSparks, createBits, createStreaks, createRings, createProjectiles, createBars, createRoute, createPreviews } from "./effects.js";
 import { createPost, QUALITY } from "./post.js";
 import { WORLD } from "./theme.js";
@@ -84,6 +84,7 @@ export function createRenderer(opts) {
     W = Math.max(1, wrap.clientWidth); H = Math.max(1, wrap.clientHeight);
     renderer.setSize(W, H, false);
     canvas.style.width = W + "px"; canvas.style.height = H + "px";
+    setEnemyVisScale(Math.min(W, H) < 560 ? 1.4 : 1.2); // phones: creeps a size up
   }
 
   // ---- ring (the built world) ---------------------------------------------
@@ -432,7 +433,16 @@ export function createRenderer(opts) {
     for (const ev of events) {
       if (ev.kind === "zap") zapFx(ev);
       else if (ev.kind === "kill") { const r = erec.get(ev.enemy); if (r) { r.killed = true; deathFx(r, true); } }
-      else if (ev.kind === "synergy") { const r = erec.get(ev.enemy); if (r && r.ri >= 0) { rings.add(r.world.clone().setY(0.1), (DB.SYNERGIES && Object.values(DB.SYNERGIES).find((s) => s.name === ev.name) || {}).color || "#ffffff", 0.3, 2.4, 0.5, 2.2); sparks.burst(r.world.x, r.world.y + 0.6, r.world.z, "#ffffff", 8, 4, 0.4, 0.4, 2); } }
+      else if (ev.kind === "synergy") {
+        const r = erec.get(ev.enemy);
+        if (r && r.ri >= 0) {
+          const syn = (DB.RULES && DB.RULES.SYNERGIES_X.find((x) => x.id === ev.id)) || (DB.SYNERGIES && Object.values(DB.SYNERGIES).find((x) => x.name === ev.name)) || {};
+          const col = syn.color || "#ffffff";
+          rings.add(r.world.clone().setY(0.1), col, 0.3, 2.4, 0.5, 2.2); sparks.burst(r.world.x, r.world.y + 0.6, r.world.z, col, 10, 4, 0.4, 0.4, 2);
+          if (r.ri === (V && V.activeCorridor) || !V) popText(r.world, (syn.icon ? syn.icon + " " : "") + ev.name, col);
+        }
+      }
+      else if (ev.kind === "bounty") { const r = erec.get(ev.enemy); if (r && r.ri >= 0) popText(r.world, "+" + ev.gold + " ✦", "#ffd23d", true); }
       else if (ev.kind === "life") lifeFlash = 1;
       else abilityFx(ev);
     }
@@ -665,7 +675,7 @@ export function createRenderer(opts) {
       if (e.hidden && Math.random() < dt * 4) sparks.spawn({ x: p.x + (Math.random() - 0.5) * 0.7, y: p.y + r.h * Math.random(), z: p.z + (Math.random() - 0.5) * 0.7, vy: 0.4, color: "#9fd8ff", life: 0.5, size: 0.22, drag: 1, glow: 1.3 });
       const top = tmpB.set(p.x, p.y + r.h + 0.35, p.z);
       const frac = clamp(e.hp / e.maxHp, 0, 1);
-      bars.bar(top, frac, e.boss ? 1.6 : 0.9, frac > 0.5 ? "#5fe07a" : frac > 0.25 ? "#ffd23d" : "#ff4d6d");
+      bars.bar(top, frac, e.boss ? 2.0 : 1.15, frac > 0.5 ? "#5fe07a" : frac > 0.25 ? "#ffd23d" : "#ff4d6d");
       if (e.loopCount > 0) bars.pips(top, e.loopCount, "#ffd23d");
       const fieldEls = view.versus ? null : view.field.elements;
       const oel = view.versus ? view.state.players[e.owner].elements[0] : fieldEls[e.originIndex];
@@ -967,6 +977,33 @@ export function createRenderer(opts) {
     renderer.setScissorTest(false); renderer.setViewport(0, 0, W, H);
     renderer.setClearColor(prevClear, prevAlpha);
   }
+  // ---- floating reaction labels: the name of an element reaction pops up where it happened ------
+  const pops = [];
+  let popLayer = null;
+  function popText(world, text, color, small) {
+    if (mode !== "field") return;
+    if (!popLayer) { popLayer = document.createElement("div"); popLayer.id = "world-pops"; (labelLayer && labelLayer.parentElement || document.body).appendChild(popLayer); }
+    // the same reaction close by within a moment shows once
+    for (const p of pops) if (p.text === text && p.t < 0.35 && p.w.distanceTo(world) < 3) return;
+    if (pops.length >= 7) { const o = pops.shift(); o.el.remove(); }
+    const el = document.createElement("div");
+    el.className = "pop" + (small ? " small" : "");
+    el.textContent = text; el.style.color = color;
+    popLayer.appendChild(el);
+    pops.push({ el, w: world.clone(), t: 0, text });
+  }
+  function syncPops(dt) {
+    const sp = { x: 0, y: 0 };
+    for (let i = pops.length - 1; i >= 0; i--) {
+      const p = pops[i]; p.t += dt;
+      if (p.t > 1.4 || mode !== "field") { p.el.remove(); pops.splice(i, 1); continue; }
+      toScreen(tmpC.set(p.w.x, p.w.y + 1.6 + p.t * 1.2, p.w.z), sp);
+      p.el.style.transform = `translate(${Math.round(sp.x)}px, ${Math.round(sp.y)}px) translate(-50%, -100%) scale(${p.t < 0.12 ? 0.7 + p.t * 2.5 : 1})`;
+      p.el.style.opacity = String(p.t > 1.0 ? Math.max(0, (1.4 - p.t) / 0.4) : 1);
+    }
+  }
+  const tmpC = new THREE.Vector3();
+
   function render(view, alpha = 1) {
     const now = performance.now();
     const rawDt = Math.min(0.25, (now - last) / 1000); last = now;
@@ -986,6 +1023,7 @@ export function createRenderer(opts) {
     route.update(clock, mode === "field" && V && V.field && (V.field.phase === "build" || (V.buildMenuOpen)) ? 1 : 0.45);
     sparks.update(dt); bits.update(dt); streaks.update(dt); rings.update(dt);
     syncLabels(V);
+    syncPops(dt);
     lifeFlash = Math.max(0, lifeFlash - dt * 2.5);
     post.final.uniforms.flash.value = lifeFlash * 0.22;
     post.render(scene, camera, QUALITY[look.level]);

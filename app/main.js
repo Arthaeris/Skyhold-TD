@@ -10,9 +10,13 @@
  * still supports both, only the network lobby is not wired yet.
  * ===========================================================================*/
 import * as fx from "../sim/fx.js";
-import { createState, step, SIM_HZ, findBuildSpot } from "../sim/core.js";
-import { AFFIXES, generateWaveExpanded, generateChallengeWave } from "../sim/waves.js";
-import { extendDB, MOB_BY_ID, CHALLENGES, BUILDER_SKINS, mobTier } from "../content/mobs.js";
+import { createState, step, SIM_HZ, findBuildSpot, previewWaveX, isBossWaveX, hpReal, upgradeCost, totalInvested, sendLoad } from "../sim/core.js";
+import { AFFIXES } from "../sim/waves.js";
+import { extendDB, MOB_BY_ID, CHALLENGES, mobTier } from "../content/mobs.js";
+import { BUILDER_SKINS, skinUnlocked as skinOk, LEGACY_SKINS, skinSwatch } from "../content/skins.js";
+import * as RULES from "../content/rules.js";
+import { createNpc, NPC_LEVELS } from "./npc.js";
+import { createTutorial } from "../ui/tutorial.js";
 import { buildBalance } from "../sim/balance.js";
 import { hashContent, hashState } from "../sim/hash.js";
 import * as C from "../net/commands.js";
@@ -53,21 +57,17 @@ const game = {
 };
 // ---- Skyhold progress beyond Circle's mastery: matches played, challenges, builder skins -----------
 const XMETA_KEY = "skyhold_xmeta_v1";
-let xmeta = { played: 0, wins: 0, challenges: {}, skin: "element" };
+let xmeta = { played: 0, wins: 0, challenges: {}, endboss: {}, skin: "element", tutorial: false };
 try { Object.assign(xmeta, JSON.parse(localStorage.getItem(XMETA_KEY)) || {}); } catch (e) { /* fine */ }
+// older saves: a challenge beaten before skins were per element counts as beaten with Fire
+for (const id in xmeta.challenges) { const c = xmeta.challenges[id]; if (c && c.normal && !c.els) c.els = { fire: { normal: true, hard: !!c.hard } }; }
+if (LEGACY_SKINS[xmeta.skin]) xmeta.skin = LEGACY_SKINS[xmeta.skin];
+xmeta.endboss = xmeta.endboss || {};
 function saveXMeta() { try { localStorage.setItem(XMETA_KEY, JSON.stringify(xmeta)); } catch (e) { /* fine */ } }
-function skinUnlocked(sk) {
-  const u = sk.unlock; if (!u) return true;
-  if (UNLOCK_ALL) return true;
-  if (u.played) return xmeta.played >= u.played;
-  if (u.wins) return xmeta.wins >= u.wins;
-  if (u.challenge) return !!(xmeta.challenges[u.challenge] && xmeta.challenges[u.challenge].normal);
-  if (u.allHard) return CHALLENGES.every((c) => xmeta.challenges[c.id] && xmeta.challenges[c.id].hard);
-  return false;
-}
+function skinUnlocked(sk) { return skinOk(sk, xmeta, UNLOCK_ALL); }
 function challengesOpen() { return UNLOCK_ALL || (meta.totalWins || 0) > 0 || xmeta.wins > 0; }
 let meta = SaveSystem ? SaveSystem.loadMeta() : { mastery: {} };
-let renderer, ui, loop;
+let renderer, ui, loop, tutorial = null;
 const sound = createSound();
 
 function masteryLevel(el) { return UNLOCK_ALL ? 5 : ((meta.mastery && meta.mastery[el]) || 0); }
@@ -112,17 +112,18 @@ function emit(c) {
   if (!game.driver || game.spectate) return;
   if (game.online && game.online.catchingUp) { ui.toast("Still catching up…", "warn"); return; }
   if (c.player == null) c.player = game.me;
-  if (c.masteryLevel == null && (c.type === "BuildTower" || c.type === "MutateTower")) {
-    const corr = fieldPlayer().corridors[c.corridorId];
-    c.masteryLevel = corr ? masteryLevel(corr.element) : 5;
+  if (c.masteryLevel == null && c.type === "BuildTower") { const d = DB.TOWER_BY_ID[c.towerType]; c.masteryLevel = d ? masteryLevel(d.element) : 5; }
+  if (c.masteryLevel == null && c.type === "MutateTower") {
+    const corr = fieldPlayer().corridors[c.corridorId]; const tw = corr && corr.towers.find((t) => t.id === c.towerId);
+    c.masteryLevel = tw ? masteryLevel(tw.def.element) : 5;
   }
   game.driver.queue(c);
 }
 const cmd = {
-  build: (corridorId, gx, gy, towerType) => emit(C.buildTower(game.me, corridorId, gx, gy, towerType, masteryLevel(fieldPlayer().corridors[corridorId].element))),
+  build: (corridorId, gx, gy, towerType) => emit(C.buildTower(game.me, corridorId, gx, gy, towerType, masteryLevel(DB.TOWER_BY_ID[towerType].element))),
   sell: (corridorId, towerId) => emit(C.sellTower(game.me, corridorId, towerId)),
   upgrade: (corridorId, towerId) => emit(C.upgradeTower(game.me, corridorId, towerId)),
-  mutate: (corridorId, towerId, mutId) => emit(C.mutateTower(game.me, corridorId, towerId, mutId, masteryLevel(fieldPlayer().corridors[corridorId].element))),
+  mutate: (corridorId, towerId, mutId) => { const tw = fieldPlayer().corridors[corridorId].towers.find((t) => t.id === towerId); emit(C.mutateTower(game.me, corridorId, towerId, mutId, masteryLevel(tw ? tw.def.element : fieldPlayer().corridors[corridorId].element))); },
   startWave: () => emit(C.startWave(game.me)),
   send: (target, enemyType) => emit(C.sendEnemy(game.me, target, enemyType)),
   setTarget: (corridorId, towerId, mode) => emit(C.setTargetMode(game.me, corridorId, towerId, mode)),
@@ -180,7 +181,7 @@ function afterTick(state) {
   }
 }
 
-const synergyToastAt = {};
+const seenReactions = new Set();
 function handleEvent(ev) {
   const mine = ev.player === game.me || ev.from === game.me;
   if (ev.kind === "zap") { if (ev.player === fieldId()) sound.play("zap"); return; }
@@ -190,8 +191,8 @@ function handleEvent(ev) {
     if (isVersus() && ev.kind === "defeat") { ui.toast("☠ " + seatName(ev.player) + " has fallen!"); ui.updateEnemyOverview(); }
     return;
   }
-  if (ev.kind === "sent" && ev.from === game.me) { ui.toast("⚔ Sent " + (ev.count > 1 ? ev.count + "× " : "") + ev.type + " (Lv" + (ev.level || 1) + ")"); ui.updateTopBar(); return; }
-  if (ev.kind === "sendLevel") { ui.toast("⬆ " + ev.type + " sends upgraded to Lv" + ev.level); ui.updateTopBar(); return; }
+  if (ev.kind === "sent" && ev.from === game.me) { ui.toast("⚔ Sent " + (ev.count > 1 ? ev.count + "× " : "") + mobName(ev.type) + (ev.level > 1 ? " (Lv" + ev.level + ")" : "")); ui.updateTopBar(); return; }
+  if (ev.kind === "sendLevel") { ui.toast("⬆ " + mobName(ev.type) + " sends upgraded to Lv" + ev.level); ui.updateTopBar(); return; }
   if (ev.kind === "leak" && isVersus()) { flash(); sound.play("life"); ui.updateTopBar(); return; }
   if (ev.kind === "steal") {
     if (ev.to === game.me) { ui.toast("❤ +" + ev.n + " — stole a life from " + seatName(ev.from), "gold"); sound.play("steal"); }
@@ -203,30 +204,40 @@ function handleEvent(ev) {
       game.autoT = null;
       const affix = ev.affix && AFFIXES[ev.affix];
       ui.updateTopBar(); ui.updateWavePanel();
-      ui.toast(ev.boss ? ("⚠ Wave " + ev.wave + " — BOSS WAVE") : ("Wave " + ev.wave + (affix ? ` — ${affix.icon} ${affix.name} (${affix.desc})` : " incoming")), ev.boss ? "boss" : "");
+      ui.toast(ev.boss ? ("⚠ Wave " + ev.wave + " — Boss wave") : ("Wave " + ev.wave + (affix ? ` — ${affix.icon} ${affix.name}` : "")), ev.boss ? "boss" : "");
       sound.play(ev.boss ? "boss" : "wave");
+      if (tutorial) tutorial.notify("wave", ev);
       break;
     }
     case "earlyBonus": ui.toast("⚡ Early call! +" + ev.bonus, "gold"); ui.updateTopBar(); break;
     case "synergy": {
-      const now = Date.now();
-      const key = ev.id || ev.name;
-      if (!synergyToastAt[key] || now - synergyToastAt[key] > 4000) { synergyToastAt[key] = now; ui.toast("⚗ " + ev.name + "!", "syn"); sound.play("synergy"); }
+      // the renderer pops the reaction's name where it happens; the first time each run, say what it is
+      if (!seenReactions.has(ev.id)) {
+        seenReactions.add(ev.id);
+        const s = RULES.SYNERGIES_X.find((x) => x.id === ev.id);
+        if (s) ui.toast(`${s.icon} <b>${s.name}</b> — ${sigil(s.a, "xs")}+${sigil(s.b, "xs")} ${s.text}`, "syn");
+        sound.play("synergy");
+      }
+      if (tutorial) tutorial.notify("synergy", ev);
       break;
     }
-    case "reject": { const M = { funds: (game.state.economy === "shared" ? "Not enough gold." : "Not enough essence."), noRoom: "No room — towers need 3×3 space and can’t fully block the path.", needMax: "Reach max level to mutate.", noSlots: "No mutation slots — raise Mastery.", locked: "That send tier hasn't unlocked yet.", stock: "Out of stock — it's recharging.", rule: "Not allowed by this match's rules.", busy: "That tower is still being built or upgraded." }; ui.toast(M[ev.reason] || "Cannot do that here.", "warn"); sound.play("reject"); break; }
+    case "reject": { const M = { funds: (game.state.economy === "shared" ? "Not enough gold." : "Not enough essence."), noRoom: "No room — towers need 3×3 space and can’t fully block the path.", needMax: "Reach max level to mutate.", noSlots: "No mutation slots — raise Mastery.", locked: "That send tier hasn't unlocked yet.", stock: "Out of stock — it's recharging.", rule: "Not allowed by this match's rules.", busy: "That tower is still being built or upgraded.", element: "That element isn't part of this run.", full: "Their corridor is already full of your sends — wait a moment." }; ui.toast(M[ev.reason] || "Cannot do that here.", "warn"); sound.play("reject"); break; }
     case "waveClear":
       ui.toast(`Wave ${ev.wave} cleared! +${ev.bonus}`, "gold");
       sound.play("clear");
       if (ev.autosave) autosave();
       if (game.autoWave && myPlayer().phase === "build") game.autoT = 5;
-      ui.updateTopBar(); ui.updateWavePanel(); ui.updateEnemyOverview(); break;
-    case "prep": ui.toast("Final wave cleared! Summon the End Boss from the Vortex.", "boss"); ui.updateWavePanel(); break;
+      ui.updateTopBar(); ui.updateWavePanel(); ui.updateEnemyOverview();
+      if (tutorial) tutorial.notify("waveClear", ev);
+      break;
+    case "wavesCleared": wavesWon(); break;
+    case "prep": ui.updateWavePanel(); break;
     case "endboss": ui.toast("THE SEALED ONE awakens!", "boss"); sound.play("boss"); ui.updateWavePanel(); break;
-    case "life": ui.updateTopBar(); flash(); sound.play("life"); break;
-    case "victory": endScreen(true); break;
-    case "defeat": endScreen(false); break;
-    case "built": break;
+    case "life": case "breach": ui.updateTopBar(); flash(); sound.play("life"); break;
+    case "escape": ui.toast("💰 The " + mobName(ev.type) + " got away with its loot"); break;
+    case "victory": endScreen(true, { endboss: !game.state.challenge }); break;
+    case "defeat": endScreen(game.wonWaves, { bossEscaped: game.wonWaves }); break;
+    case "built": if (tutorial) tutorial.notify("built", ev); break;
   }
 }
 
@@ -277,19 +288,22 @@ function refreshMenu() {
 // ---------------------------------------------------------------------------
 // SETUP -> START RUN
 // ---------------------------------------------------------------------------
-const setup = { mode: "loop", corridors: 4, economy: "shared", status: "standard", gameMode: "solo", pacing: "manual", elements: [],
-  ruleset: "expanded", difficulty: "normal",
+// mode: "single" (Quick) | "loop" (Standard) | "endless"; gameMode: "solo" | "versus"
+const SETUP_KEY = "skyhold_setup_v2";
+const setup = { mode: "single", corridors: 4, economy: "shared", gameMode: "solo", pacing: "manual", elements: [], partner: null,
+  difficulty: "normal", npc: "normal", seats: 4,
   mods: { lifeSteal: true, sendStock: true, builders: true, noFlyers: false, noDisruptors: false, noStealth: false, turbo: false, randomLanes: false, anonymous: false, doppel: false, goldMult: 1, livesMult: 1 } };
-const DIFFICULTY = {
-  easy: { incomeMult: 0.75, goldBonus: 0, act: [2.2, 3.0], towers: 14, up: 0.25, maxTier: 2, aggro: 0.3, counter: false, label: "Easy" },
-  normal: { incomeMult: 1.0, goldBonus: 0, act: [1.4, 2.0], towers: 20, up: 0.45, maxTier: 3, aggro: 0.55, counter: false, label: "Normal" },
-  hard: { incomeMult: 1.25, goldBonus: 100, act: [1.0, 1.4], towers: 24, up: 0.6, maxTier: 4, aggro: 0.75, counter: true, label: "Hard" },
-  insane: { incomeMult: 1.5, goldBonus: 250, act: [0.7, 1.0], towers: 26, up: 0.7, maxTier: 4, aggro: 0.9, counter: true, label: "Insane" },
-};
+try { const sv = JSON.parse(localStorage.getItem(SETUP_KEY)); if (sv) { for (const k of ["mode", "corridors", "economy", "gameMode", "pacing", "difficulty", "npc", "seats", "partner"]) if (sv[k] != null) setup[k] = sv[k]; if (sv.elements) setup.elements = sv.elements; if (sv.mods) Object.assign(setup.mods, sv.mods); } } catch (e) { /* fine */ }
+if (setup.gameMode !== "solo" && setup.gameMode !== "versus") setup.gameMode = "solo";
+function saveSetup() { try { localStorage.setItem(SETUP_KEY, JSON.stringify(setup)); } catch (e) { /* fine */ } }
+// kept for the online lobby and saved settings: the old NPC difficulty table, now the NPC brain's levels
+const DIFFICULTY = NPC_LEVELS;
 function openSetup() {
   const avail = DB.availableElements(masteryMap());
-  setup.elements = []; for (let i = 0; i < 8; i++) setup.elements.push(avail[i % avail.length]);
-  if (setup.gameMode !== "solo" && setup.gameMode !== "versus") setup.gameMode = "solo";
+  const els = setup.elements.filter((e) => avail.includes(e));
+  for (let i = 0; els.length < 8; i++) els.push(avail[i % avail.length]);
+  setup.elements = els.slice(0, 8);
+  if (!avail.includes(setup.partner) || setup.partner === setup.elements[0]) setup.partner = avail.find((e) => e !== setup.elements[0]) || setup.elements[0];
   setup._lastTouched = "gamemode";
   showScreen("setup");
   renderer.setMode("setup");
@@ -298,43 +312,58 @@ function openSetup() {
 // the setup preview is the real world: rebuild the ring as the options change
 function setupPreview(s, sel) {
   const vs = s.gameMode === "versus";
-  const n = vs ? s.corridors : (s.mode === "single" ? 1 : s.corridors);
+  const n = vs ? s.seats : (s.mode === "single" ? 1 : s.corridors);
   let els;
   if (vs) { const mine = s.elements[0]; const rest = DB.ELEMENT_ORDER.filter((e) => e !== mine); els = [mine]; for (let i = 1; i < n; i++) els.push(rest[(i - 1) % rest.length]); }
   else els = s.elements.slice(0, n);
   renderer.previewRing(els, "setup:" + els.join(","));
   setupSel = sel;
+  saveSetup();
 }
 let setupSel = 0;
+// the elements a run is played with, from the setup (one element per corridor; Quick and Vs add a partner)
+function runElements(cfg) {
+  if (cfg.gameMode === "versus" || cfg.mode === "single" || cfg.challenge) {
+    const a = cfg.elements[0], b = cfg.partner && cfg.partner !== a ? cfg.partner : null;
+    return b ? [a, b] : [a];
+  }
+  return cfg.elements.slice(0, cfg.corridors);
+}
 
 function startRun(cfg, seed, replay, online) {
   game.gameMode = cfg.gameMode || "solo";
   game.mode = cfg.mode;
   const ruleset = cfg.ruleset || "expanded";
   const mods = ruleset === "expanded" ? Object.assign({}, setup.mods, cfg.mods || {}) : {};
-  const diff = DIFFICULTY[cfg.difficulty || "normal"] || DIFFICULTY.normal;
+  const npcLevel = cfg.npc || cfg.difficulty || "normal";
+  const L = NPC_LEVELS[npcLevel] || NPC_LEVELS.normal;
   let players, mode = cfg.mode, economy = cfg.economy;
   if (replay || online) {
     // a replay (or an online match) brings its own exact config
     game.state = null;
   } else if (game.gameMode === "versus") {
-    const seats = Math.max(3, Math.min(8, cfg.corridors || 4));
-    let mine = cfg.elements[0] || "fire";
+    const seats = Math.max(3, Math.min(8, cfg.seats || cfg.corridors || 4));
+    let [mine, partner] = runElements(cfg);
     const pool = DB.ELEMENT_ORDER.filter((e) => e !== mine);
     for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
-    if (mods.randomLanes) { const all = DB.ELEMENT_ORDER.slice(); mine = all[Math.floor(Math.random() * all.length)]; }
-    players = [{ corridorCount: 1, elements: [mine] }];
+    const rand = () => DB.ELEMENT_ORDER[Math.floor(Math.random() * 8)];
+    if (mods.randomLanes) { mine = rand(); partner = rand(); }
+    players = [{ corridorCount: 1, elements: partner && partner !== mine ? [mine, partner] : [mine] }];
     for (let i = 0; i < seats - 1; i++) {
-      const el = mods.doppel ? mine : (mods.randomLanes ? DB.ELEMENT_ORDER[Math.floor(Math.random() * 8)] : pool[i % pool.length]);
-      players.push({ corridorCount: 1, elements: [el], incomeMult: ruleset === "expanded" ? diff.incomeMult : 1, goldBonus: ruleset === "expanded" ? diff.goldBonus : 0 });
+      const el = mods.doppel ? mine : (mods.randomLanes ? rand() : pool[i % pool.length]);
+      let pe = mods.doppel ? partner : DB.ELEMENT_ORDER[(DB.ELEMENT_ORDER.indexOf(el) + 1 + Math.floor(Math.random() * 6)) % 8];
+      if (pe === el) pe = null;
+      players.push({ corridorCount: 1, elements: pe ? [el, pe] : [el], incomeMult: L.incomeMult, goldBonus: L.goldBonus });
     }
     mode = "endless"; economy = "shared"; game.mode = "endless";
+    mods.autoWave = 32; mods.firstWave = 25; // waves arrive on a shared timer, for everyone, until one seat is left
   } else {
     const corridorCount = cfg.challenge ? 1 : (cfg.mode === "single" ? 1 : cfg.corridors);
-    players = [{ corridorCount, elements: cfg.elements.slice(0, corridorCount) }];
+    players = [{ corridorCount, elements: runElements({ ...cfg, corridors: corridorCount }) }];
     if (cfg.challenge) mode = "loop";
+    mods.difficulty = cfg.challenge ? "normal" : (cfg.difficulty || "normal");
   }
-  const stateCfg = online ? online.stateCfg : replay ? replay.cfg : { seed: seed != null ? seed : ((Math.random() * 1e9) | 0), mode, gameMode: game.gameMode, economy, statusMode: cfg.status, players, ruleset, mods, challenge: cfg.challenge || null };
+  const stateCfg = online ? online.stateCfg : replay ? replay.cfg : { seed: seed != null ? seed : ((Math.random() * 1e9) | 0), mode, gameMode: game.gameMode, economy, statusMode: "standard", players, ruleset, mods, challenge: cfg.challenge || null };
   game.state = createState(bal, structuredClone(stateCfg));
   game.runCfg = { ...cfg, ruleset, mods, stateCfg };
   game.recLog = replay ? null : [];
@@ -342,7 +371,9 @@ function startRun(cfg, seed, replay, online) {
   game.spectate = !!replay;
   game.anonymous = !!(mods.anonymous && game.gameMode === "versus");
   game.skin = xmeta.skin || "element";
-  game.difficulty = cfg.difficulty || "normal";
+  game.difficulty = npcLevel;
+  game.wonWaves = false; game.endChoice = false;
+  seenReactions.clear();
   document.body.dataset.spectate = replay ? "replay" : "";
   game.me = online ? online.me : 0; game.speed = 1; game.clock = 0; game.paused = false;
   if (!online && game.online) stopOnline();
@@ -352,6 +383,7 @@ function startRun(cfg, seed, replay, online) {
   game.driver = online ? makeOnlineDriver(game.state, online) : replay ? makeReplayDriver(game.state, replay.log) : makeSoloDriver(game.state);
   if (!replay && !online) setupBots(); else bots = [];
   document.body.dataset.online = online ? "1" : "";
+  document.body.dataset.vs = game.gameMode === "versus" ? "1" : "";
   setupSendButton();
   showScreen("game");
   ui.closeAllPanels();
@@ -361,11 +393,12 @@ function startRun(cfg, seed, replay, online) {
   if (online) ui.toast(online.rejoin ? "Rejoining — catching up with the match…" : "Online match! The first wave starts in 30 seconds.", "gold");
   else if (replay) ui.toast("Watching replay — " + (replay.title || ""));
   else if (game.state.challenge) ui.toast("Challenge: " + game.state.challenge.def.name + (game.state.challenge.hard ? " (Hard)" : ""), "boss");
-  else ui.toast("Build your defenses, then start the wave.");
+  else if (game.gameMode === "versus") ui.toast("Waves arrive every 32 seconds — the first in 25. Build fast!");
+  else if (!cfg.tutorial) ui.toast("Build your defenses, then start the wave.");
   sound.play("whoosh");
   warmThumbs(DB, DB.TOWERS.map((t) => t.id));
   refreshReplayBar();
-  if (!replay && !(online && online.rejoin)) { xmeta.played = (xmeta.played || 0) + 1; saveXMeta(); }
+  if (!replay && !(online && online.rejoin) && !cfg.tutorial) { xmeta.played = (xmeta.played || 0) + 1; saveXMeta(); }
   return stateCfg.seed;
 }
 
@@ -400,12 +433,14 @@ async function openOnline(prefill) {
 }
 function beginOnline(rejoin) {
   const st = session.room.start; if (!st) return;
-  const players = st.players.map((p) => { const D = DIFFICULTY[p.diff] || DIFFICULTY.normal; return { corridorCount: 1, elements: [p.el], incomeMult: p.kind === "npc" ? D.incomeMult : 1, goldBonus: p.kind === "npc" ? D.goldBonus : 0 }; });
+  // every seat plays its element plus a partner (picked in the lobby, or the element three steps round the wheel)
+  const partnerOf = (p) => p.partner && p.partner !== p.el ? p.partner : DB.ELEMENT_ORDER[(DB.ELEMENT_ORDER.indexOf(p.el) + 3) % 8];
+  const players = st.players.map((p) => { const D = DIFFICULTY[p.diff] || DIFFICULTY.normal; return { corridorCount: 1, elements: [p.el, partnerOf(p)], incomeMult: p.kind === "npc" ? D.incomeMult : 1, goldBonus: p.kind === "npc" ? D.goldBonus : 0 }; });
   const mods = { ...st.mods, autoWave: 35, firstWave: 30 };
   const stateCfg = { seed: st.seed, mode: "endless", gameMode: "versus", economy: "shared", statusMode: "standard", players, ruleset: "expanded", mods };
   onlineUI.close();
   game.online = { hlog: new URLSearchParams(location.search).has("nettest") ? {} : null, code: session.code, me: session.seat, n: players.length, names: st.players.map((p) => p.name), kinds: st.players.map((p) => p.kind), rejoin, catchingUp: rejoin, waitSince: 0, lastElect: 0, hashWarned: false };
-  startRun({ gameMode: "versus", mode: "endless", economy: "shared", status: "standard", pacing: "manual", elements: [players[session.seat].elements[0]], ruleset: "expanded", mods, difficulty: "normal", corridors: players.length }, st.seed, null, { stateCfg, me: session.seat, rejoin });
+  startRun({ gameMode: "versus", mode: "endless", economy: "shared", status: "standard", pacing: "manual", elements: [players[session.seat].elements[0]], partner: players[session.seat].elements[1], ruleset: "expanded", mods, difficulty: "normal", corridors: players.length, seats: players.length }, st.seed, null, { stateCfg, me: session.seat, rejoin });
   if (!rejoin) session.armPresence(session.seat);
   setView("world", true);
   enterCorridor(session.seat);
@@ -494,7 +529,7 @@ function onlineFrame(dt) {
     const want = [];
     for (let i = 0; i < o.n; i++) if (i !== o.me && net.drives(i)) want.push(i);
     bots = bots.filter((b) => want.includes(b.id));
-    for (const i of want) if (!bots.find((b) => b.id === i)) bots.push({ id: i, D: DIFFICULTY[(seats[i] && seats[i].diff) || "normal"] || DIFFICULTY.normal, nextAt: game.clock + 0.8 });
+    for (const i of want) if (!bots.find((b) => b.id === i)) bots.push(createNpc({ id: i, level: (seats[i] && seats[i].diff) || "normal", DB, sends: true, startAt: game.clock + 0.8 }));
   }
   // acks are paced by the wall clock (not the frame rate), a little ahead of what we've run
   if (!o.t0) o.t0 = now - Math.max(0, o.execTurn) * TURN * 1000 / SIM_HZ;
@@ -537,7 +572,8 @@ function leaveOnline() {
 function serializeRun() {
   const s = game.state, pl = s.players[game.me];
   return {
-    v: 2, seed: s.seedBase, mode: s.mode, gameMode: "solo", economy: s.economy, statusMode: s.statusMode, ruleset: s.ruleset, mods: game.runCfg && game.runCfg.mods,
+    v: 3, seed: s.seedBase, mode: s.mode, gameMode: "solo", economy: s.economy, statusMode: s.statusMode, ruleset: s.ruleset, mods: game.runCfg && game.runCfg.mods,
+    difficulty: s.x ? s.x.difficulty : "normal", challenge: s.challenge ? { id: s.challenge.id, hard: s.challenge.hard } : null, wonWaves: !!game.wonWaves,
     corridorCount: pl.corridorCount, elements: pl.elements.slice(),
     pacing: game.autoWave ? "auto" : "manual",
     gold: pl.gold, essence: Object.assign({}, pl.essence), lives: pl.lives, wave: pl.wave, phase: pl.phase,
@@ -545,7 +581,7 @@ function serializeRun() {
     corridors: pl.corridors.map((c) => ({ towers: c.towers.map((t) => ({ defId: t.def.id, c: t.c, r: t.r, level: t.level, expert: t.expert, kills: t.kills, mutations: t.mutations.slice(), targetMode: t.targetMode || "first" })), spawnedTotal: c.spawnedTotal })),
   };
 }
-function autosave() { if (game.gameMode !== "solo") return; try { localStorage.setItem(RUN_KEY, JSON.stringify(serializeRun())); } catch (e) { /* fine */ } }
+function autosave() { if (game.gameMode !== "solo" || game.runCfg && game.runCfg.tutorial) return; try { localStorage.setItem(RUN_KEY, JSON.stringify(serializeRun())); } catch (e) { /* fine */ } }
 function hasRun() { try { return !!localStorage.getItem(RUN_KEY); } catch (e) { return false; } }
 function continueRun() {
   let raw = null; try { raw = localStorage.getItem(RUN_KEY); } catch (e) { /* fine */ }
@@ -554,7 +590,10 @@ function continueRun() {
   restoreRun(d);
 }
 function restoreRun(d) {
-  startRun({ mode: d.mode, corridors: d.corridorCount, economy: d.economy, status: d.statusMode, gameMode: "solo", pacing: d.pacing || "manual", elements: d.elements, ruleset: d.ruleset || "classic", mods: d.mods || {} }, d.seed);
+  // the run's own elements (a Quick run's partner included), its difficulty and challenge come back exactly
+  const els = d.elements || [];
+  startRun({ mode: d.mode, corridors: d.corridorCount, economy: d.economy, status: d.statusMode, gameMode: "solo", pacing: d.pacing || "manual", elements: d.corridorCount > 1 ? els : [els[0]], partner: d.corridorCount > 1 ? null : els[1], ruleset: d.ruleset || "classic", mods: d.mods || {}, difficulty: d.difficulty || "normal", challenge: d.challenge || null }, d.seed);
+  game.wonWaves = !!d.wonWaves;
   const pl = game.state.players[0];
   pl.lives = d.lives; pl.wave = d.wave; pl.phase = d.phase === "wave" || d.phase === "endboss" ? "build" : d.phase;
   pl.stats = Object.assign(pl.stats, d.stats || {});
@@ -732,55 +771,155 @@ function bindPointer() {
 // ---------------------------------------------------------------------------
 // END SCREEN
 // ---------------------------------------------------------------------------
-function endScreen(win) {
-  if (game.replay) return; // replays just play out
+// The run is WON the moment the last wave is cleared (Mastery counts it right then). The Sealed One is an
+// optional bonus round on top: beat it for a Sealbreaker skin per element in the run.
+function runElementsOf(pl) { const out = []; for (const e of (pl.buildable || pl.elements)) if (!out.includes(e)) out.push(e); return out; }
+let lastUnlocks = [];
+function recordRunWin() {
   const pl = game.state.players[game.me];
-  let unlockMsgs = [];
-  if (SaveSystem && !game.state.challenge) {
-    const proxy = { mode: game.mode, elements: pl.elements, wave: pl.wave, totalWaves: pl.totalWaves, score: pl.stats.score };
-    try { if (win) unlockMsgs = SaveSystem.recordVictory(meta, proxy) || []; else SaveSystem.recordDefeat(meta, proxy); SaveSystem.saveMeta(meta); } catch (e) { /* fine */ }
-  }
-  // Skyhold progress: wins, challenges, builder skins
   const skinsBefore = BUILDER_SKINS.filter(skinUnlocked).map((k) => k.id);
-  if (win) xmeta.wins = (xmeta.wins || 0) + 1;
+  let msgs = [];
+  if (SaveSystem) {
+    const proxy = { mode: game.mode, elements: runElementsOf(pl), wave: pl.wave, totalWaves: pl.totalWaves, score: pl.stats.score };
+    try { msgs = SaveSystem.recordVictory(meta, proxy) || []; SaveSystem.saveMeta(meta); } catch (e) { /* fine */ }
+  }
+  xmeta.wins = (xmeta.wins || 0) + 1; saveXMeta();
+  for (const k of BUILDER_SKINS) if (skinUnlocked(k) && !skinsBefore.includes(k.id)) msgs.push("Builder skin unlocked: " + k.name);
+  try { localStorage.removeItem(RUN_KEY); } catch (e) { /* fine */ }
+  return msgs;
+}
+function wavesWon() {
+  if (game.wonWaves || game.replay) return;
+  game.wonWaves = true;
+  lastUnlocks = recordRunWin();
+  refreshMenu();
+  sound.play("victory");
+  if (tutorial) { tutorial.notify("wavesCleared"); return; }
+  const pl = myPlayer();
+  const m = $("bonus-modal"); if (!m) return;
+  const els = runElementsOf(pl);
+  const skins = els.map((e) => BUILDER_SKINS.find((k) => k.id === "seal_" + e)).filter(Boolean);
+  const fresh = skins.filter((k) => !skinUnlocked(k));
+  const diff = RULES.SOLO_DIFFICULTY[game.state.x ? game.state.x.difficulty : "normal"];
+  m.innerHTML = `<div class="modal glass bonus">
+    <h1 class="win">VICTORY</h1>
+    <p class="bonus-sub">Every wave held${diff && diff.id !== "normal" ? " on " + diff.name : ""}. The win is yours — it counts for Mastery.</p>
+    ${lastUnlocks.length ? `<div class="end-unlocks">${lastUnlocks.slice(0, 6).map((u) => `<span class="unlock">${u}</span>`).join("")}</div>` : ""}
+    <div class="bonus-card"><img src="${enemyThumb(DB, "endboss")}" alt=""><div><b>Bonus round: the Sealed One</b>
+      <span>${fresh.length ? `Beat it to unlock ${fresh.map((k) => `<em>${k.name}</em>`).join(", ")}.` : "You've broken this seal before — beat it again for glory."} If it gets away, you keep your win.</span></div></div>
+    <div class="end-actions"><button class="btn primary" id="bonus-fight">☠ Face the Sealed One</button><button class="btn" id="bonus-skip">Finish run</button></div></div>`;
+  m.classList.add("show");
+  $("bonus-fight").onclick = () => { m.classList.remove("show"); game.endChoice = true; cmd.startWave(); };
+  $("bonus-skip").onclick = () => { m.classList.remove("show"); endScreen(true, { skipped: true }); };
+}
+function endScreen(win, o = {}) {
+  if (game.replay) return; // replays just play out
+  if (game._endShown === game.state) return;
+  game._endShown = game.state;
+  const bm = $("bonus-modal"); if (bm) bm.classList.remove("show");
+  const pl = game.state.players[game.me];
   const ch = game.state.challenge;
-  if (win && ch) { const c = xmeta.challenges[ch.id] || (xmeta.challenges[ch.id] = {}); c.normal = true; if (ch.hard) c.hard = true; }
+  let unlockMsgs = o.endboss || o.bossEscaped || o.skipped ? lastUnlocks.slice() : [];
+  const skinsBefore = BUILDER_SKINS.filter(skinUnlocked).map((k) => k.id);
+  if (ch) {
+    if (win) {
+      const c = xmeta.challenges[ch.id] || (xmeta.challenges[ch.id] = {});
+      c.normal = true; if (ch.hard) c.hard = true;
+      c.els = c.els || {};
+      for (const e of runElementsOf(pl)) { const ce = c.els[e] || (c.els[e] = {}); ce.normal = true; if (ch.hard) ce.hard = true; }
+      xmeta.wins = (xmeta.wins || 0) + 1;
+      try { localStorage.removeItem(RUN_KEY); } catch (e) { /* fine */ }
+    }
+  } else if (o.endboss && win) {
+    for (const e of runElementsOf(pl)) xmeta.endboss[e] = true;
+  } else if (!win && SaveSystem && !game.wonWaves) {
+    // a loss still records how far each element got (Endless waves count toward Mastery 5)
+    const proxy = { mode: game.mode, elements: runElementsOf(pl), wave: pl.wave, totalWaves: pl.totalWaves, score: pl.stats.score };
+    try { SaveSystem.recordDefeat(meta, proxy); SaveSystem.saveMeta(meta); } catch (e) { /* fine */ }
+    try { localStorage.removeItem(RUN_KEY); } catch (e) { /* fine */ }
+  }
   saveXMeta();
   for (const k of BUILDER_SKINS) if (skinUnlocked(k) && !skinsBefore.includes(k.id)) unlockMsgs.push("Builder skin unlocked: " + k.name);
-  try { localStorage.removeItem(RUN_KEY); } catch (e) { /* fine */ }
   storeReplay(win ? "Victory" : "Defeat");
   sound.play(win ? "victory" : "defeat");
   const sc = $("end-screen"); if (!sc) return;
-  sc.querySelector("#end-title").textContent = win ? (ch ? "CHALLENGE COMPLETE" : "VICTORY") : "DEFEAT";
+  const title = !win ? "DEFEAT" : ch ? "CHALLENGE COMPLETE" : o.endboss ? "SEAL BROKEN" : "VICTORY";
+  sc.querySelector("#end-title").textContent = title;
   sc.querySelector("#end-title").className = win ? "win" : "lose";
-  const eb = sc.querySelector("#end-endless"); if (eb) eb.style.display = (win && game.mode !== "endless" && !ch) ? "" : "none";
+  const eb = sc.querySelector("#end-endless"); if (eb) eb.style.display = (win && game.mode !== "endless" && !ch && !isVersus()) ? "" : "none";
   const spb = $("end-spectate"); if (spb) spb.style.display = (!win && isVersus() && game.state.x && !game.state.finished) ? "" : "none";
   const eag = $("end-again"); if (eag) eag.textContent = game.online ? "Back to Online" : "Play Again";
-  let html = `<div class="end-tiles"><div><span>${icon("wave", "xs")} Waves</span><b>${pl.wave}</b></div><div><span>${icon("skull", "xs")} Kills</span><b>${pl.stats.kills}</b></div><div><span>${icon("trophy", "xs")} Bosses</span><b>${pl.stats.bossesKilled}</b></div><div><span>${icon("star", "xs")} Score</span><b>${pl.stats.score}</b></div></div>`;
+  let html = "";
+  if (o.bossEscaped) html += `<p class="end-note">The Sealed One got away this time — your victory stands.</p>`;
+  else if (o.endboss) html += `<p class="end-note gold">You broke the seal. The Sealed One is no more.</p>`;
+  html += `<div class="end-tiles"><div><span>${icon("wave", "xs")} Waves</span><b>${pl.wave}</b></div><div><span>${icon("skull", "xs")} Kills</span><b>${pl.stats.kills}</b></div><div><span>${icon("trophy", "xs")} Bosses</span><b>${pl.stats.bossesKilled}</b></div><div><span>${icon("star", "xs")} Score</span><b>${pl.stats.score}</b></div></div>`;
+  if (!win && game.state.x) html += defeatReasonsHTML(game.state, pl);
   if (win && !ch) {
-    const seen = new Set();
     let rows = "";
-    for (const eid of pl.elements) {
-      if (seen.has(eid)) continue; seen.add(eid);
+    for (const eid of runElementsOf(pl)) {
       const el = DB.ELEMENTS[eid]; if (!el) continue;
       const lvl = (meta.mastery && meta.mastery[eid]) || 0;
       const wins = (meta.elementWins && meta.elementWins[eid]) || 0;
       let prog;
       if (lvl >= 5) prog = "Mastery MAX";
-      else if (lvl === 4) prog = "Wave 100 → M5";
-      else prog = wins + "/" + DB.MASTERY.winsRequired[lvl + 1] + " → M" + (lvl + 1);
+      else if (lvl === 4) prog = "Endless wave " + RULES_M5_WAVE + " → M5";
+      else prog = wins + "/" + DB.MASTERY.winsRequired[lvl + 1] + " wins → M" + (lvl + 1);
       rows += `<span class="end-m" style="--ec:${el.color}">${sigil(eid, "xs")} ${el.name} <em>${prog}</em></span>`;
     }
     if (rows) html += `<div class="end-mastery">${rows}</div>`;
   }
-  if (unlockMsgs.length) html += `<details class="end-unl"><summary>🎉 ${unlockMsgs.length} new unlock${unlockMsgs.length > 1 ? "s" : ""}</summary><div class="end-unlocks">${unlockMsgs.map((m) => `<span class="unlock">${m}</span>`).join("")}</div></details>`;
+  if (unlockMsgs.length) html += `<details class="end-unl" open><summary>🎉 ${unlockMsgs.length} new unlock${unlockMsgs.length > 1 ? "s" : ""}</summary><div class="end-unlocks">${unlockMsgs.map((m) => `<span class="unlock">${m}</span>`).join("")}</div></details>`;
   if (game.state.x) html += `<div class="end-stats-wrap">${statsHTML(game.state)}</div>`;
   const body = sc.querySelector("#end-body");
   body.innerHTML = html;
   bindStatsTabs(body);
   sc.classList.add("show");
+  if (tutorial) tutorial.notify("end", { win });
   refreshMenu();
 }
+const RULES_M5_WAVE = 50;
+
+// ---- why you lost: read the leak report and name the one or two things to try ------------------
+function defeatReasonsHTML(st, pl) {
+  const L = pl.log; if (!L || !L.leaks.length) return "";
+  const tally = { fly: 0, stealth: 0, boss: 0, armored: 0, ethereal: 0, swarm: 0, sent: 0, fast: 0, total: L.leaks.length };
+  const types = {};
+  for (const l of L.leaks) {
+    const d = st.bal.enemies[l.type] || {}, t = (d.x && d.x.t) || {}, cls = d.cls;
+    types[l.type] = (types[l.type] || 0) + 1;
+    if (t.fly) tally.fly++;
+    if (t.invisible || t.cloakCycle || t.cloakAura) tally.stealth++;
+    if (d.boss) tally.boss++;
+    if (cls === "heavy" || cls === "fortified") tally.armored++;
+    if (cls === "ethereal") tally.ethereal++;
+    if ((d.x && d.x.pack >= 4) || l.type === "swarm") tally.swarm++;
+    if (l.from != null) tally.sent++;
+    if (d.speed >= F17) tally.fast++;
+  }
+  // what the player had
+  let air = 0, det = 0, n = 0; const typeN = { physical: 0, blast: 0, magic: 0, chaos: 0 };
+  for (const c of pl.corridors) for (const tw of c.towers) {
+    n++; const a = tw.def.archetype;
+    if (a !== "splash" && a !== "melee" && a !== "support") air++;
+    if (tw.def.element === "light" || tw.level >= 7 || a === "support") det++;
+    typeN[RULES.towerDamageType(DB.TOWER_BY_ID[tw.def.id], a)]++;
+  }
+  const tips = [];
+  const share = (k) => tally[k] / tally.total;
+  if (share("fly") >= 0.25 && air < n * 0.5) tips.push(["🪽", "Flyers got through", "Splash and blade towers can't hit them. Mix in single-target, beam or chain towers along the middle of the corridor, where flyers cross."]);
+  if (share("stealth") >= 0.2 && det === 0) tips.push(["👁", "Invisible creeps walked past", "Only Light towers, support towers, any tower at level 7+ and your builder's lantern can see them. Park the builder near the entrance by Inspiring a tower there."]);
+  if (share("boss") >= 0.25) tips.push(["☠", "The bosses outlasted you", "Bosses have heavy armour: Magic (beams, chains) and upgrades that raise damage per hit do best. Slows and stuns buy time."]);
+  if (share("armored") >= 0.3 && typeN.magic + typeN.blast < n * 0.35) tips.push(["🛡", "Armoured creeps shrugged off your towers", "Heavy armour takes +25% from Magic; Fortified takes +35% from Blast. Your towers were mostly Physical."]);
+  if (share("ethereal") >= 0.2 && typeN.physical > n * 0.5) tips.push(["👻", "Ethereal creeps slipped through", "Physical hits deal half damage to spirits — Magic deals +50%."]);
+  if (share("swarm") >= 0.3 && typeN.blast < n * 0.25) tips.push(["🐀", "Swarms overwhelmed single targets", "Packs melt under Blast towers and chain lightning."]);
+  if (share("sent") >= 0.4) tips.push(["⚔", "Your neighbour's sends broke you", "Keep some gold in reserve after each wave, and send back: every send raises your income."]);
+  if (!tips.length) {
+    const top = Object.entries(types).sort((a, b) => b[1] - a[1])[0];
+    tips.push(["🧭", `${mobName(top[0])} leaked most (${top[1]}×)`, "Lengthen the maze so creeps pass more towers, and mix your two elements: their reactions do big damage."]);
+  }
+  return `<div class="end-why"><div class="st-sub">Why it slipped away</div>${tips.slice(0, 2).map(([i, t, d]) => `<div class="why-row"><span class="why-i">${i}</span><div><b>${t}</b><span>${d}</span></div></div>`).join("")}</div>`;
+}
+const F17 = 1.7 * 65536;
 
 // ---- match stats: summary, leak report, towers, sends ---------------------------------
 function fmtT(ticks) { const s = Math.floor(ticks / SIM_HZ); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }
@@ -789,13 +928,13 @@ function corrName(p, i) { const c = p.corridors[i]; const el = c && DB.ELEMENTS[
 function statsHTML(st) {
   const me = st.players[game.me], L = me.log;
   if (!L) return "";
-  const tabs = [["sum", "Summary"], ["leaks", "Leaks"], ["towers", "Towers"], ["sends", "Sends"]];
+  const tabs = [["sum", "Summary"], ["leaks", "Leaks"], ["towers", "Towers"]].concat(isVersus() ? [["sends", "Sends"]] : []);
   let h = `<div class="st-tabs">${tabs.map(([k, n], i) => `<button class="seg ${i ? "" : "sel"}" data-st="${k}">${n}</button>`).join("")}</div>`;
   // summary
   const killTop = Object.entries(L.kills).sort((a, b) => b[1] - a[1]).slice(0, 6);
   h += `<div class="st-pane show" data-pane="sum"><div class="st-grid">
     <div><span>Gold earned</span><b>${L.goldEarned}</b></div><div><span>Gold spent</span><b>${L.goldSpent}</b></div>
-    <div><span>Lives lost</span><b>${L.livesLost}</b></div><div><span>Lives stolen</span><b>${L.livesStolen}</b></div>
+    <div><span>Lives lost</span><b>${L.livesLost}</b></div>${isVersus() ? `<div><span>Lives stolen</span><b>${L.livesStolen}</b></div>` : `<div><span>Reactions</span><b>${L.syn || 0}</b></div>`}
     <div><span>Leaks</span><b>${L.leaks.length}</b></div><div><span>Match time</span><b>${fmtT(st.tick)}</b></div></div>
     <div class="st-sub">Most killed</div><div class="st-list">${killTop.map(([t, n]) => `<span class="st-chip"><img src="${enemyThumb(DB, t)}" alt="">${mobName(t)} ×${n}</span>`).join("") || "<span class='dim'>—</span>"}</div>`;
   if (isVersus()) {
@@ -907,29 +1046,78 @@ function refreshReplayBar() {
 // ---- challenges -----------------------------------------------------------------------
 function openChallenges() {
   const m = $("challenges-modal"); if (!m) return;
-  if (!challengesOpen()) { ui.toast("Win any match to open the Challenges."); return; }
+  if (!challengesOpen()) { ui.toast("Win any run to open the Challenges."); return; }
   const avail = DB.availableElements(masteryMap());
   if (!avail.includes(game.chEl)) game.chEl = avail[0];
-  const skinName = (id) => (BUILDER_SKINS.find((k) => k.id === id) || {}).name || id;
+  if (game.chPartner === game.chEl || (game.chPartner && !avail.includes(game.chPartner))) game.chPartner = null;
+  const pills = (sel, attr, allowNone) => (allowNone ? `<button class="elbtn ${!sel ? "sel" : ""}" data-${attr}="">—<span>None</span></button>` : "") + avail.map((e) => `<button class="elbtn ${e === sel ? "sel" : ""}" style="--ec:${DB.ELEMENTS[e].color}" data-${attr}="${e}">${sigil(e, "sm")}<span>${DB.ELEMENTS[e].name}</span></button>`).join("");
+  const els = [game.chEl, game.chPartner].filter(Boolean);
   m.innerHTML = `<div class="modal wide glass"><button class="panel-close" id="ch-close">${icon("close")}</button><h2>Challenges</h2>
-    <p class="dim">Ten waves, then a boss. Hard mode adds a restriction. Beat one to unlock a builder skin.</p>
-    <div class="assign-opts ch-els">${avail.map((e) => `<button class="elbtn ${e === game.chEl ? "sel" : ""}" style="--ec:${DB.ELEMENTS[e].color}" data-chel="${e}">${sigil(e, "sm")}<span>${DB.ELEMENTS[e].name}</span></button>`).join("")}</div>
-    <div class="ch-list">${CHALLENGES.map((c) => { const done = xmeta.challenges[c.id] || {}; return `<div class="ch-card"><img src="${enemyThumb(DB, c.boss)}" alt=""><div class="ch-info"><b>${c.name}</b><span>${c.desc}</span><span class="dim">Boss: ${mobName(c.boss)} · Reward: ${skinName(c.reward)} builder</span><span class="dim">Hard: ${c.hard.label}</span></div>
+    <p class="dim">Ten waves from one themed pool, then its boss. Every challenge can be won more than one way — read the hint and pick elements that answer it. Each element you beat it with earns that challenge's builder look in your element.</p>
+    <div class="ch-pick"><span class="ch-lbl">Element</span><div class="assign-opts ch-els">${pills(game.chEl, "chel")}</div>
+    <span class="ch-lbl">Partner <i class="dim">(optional — unlocks reactions)</i></span><div class="assign-opts ch-els">${pills(game.chPartner, "chp", true)}</div></div>
+    <div class="ch-list">${CHALLENGES.map((c) => {
+      const done = xmeta.challenges[c.id] || {}; const L = c.look || {};
+      const earned = els.map((e) => { const k = BUILDER_SKINS.find((x) => x.id === "ch_" + c.id + "_" + e); return k ? `<span class="ch-skin ${skinUnlocked(k) ? "have" : ""}">${skinUnlocked(k) ? "✓" : "🔒"} ${k.name}</span>` : ""; }).join("");
+      return `<div class="ch-card"><img src="${enemyThumb(DB, c.boss)}" alt=""><div class="ch-info"><b>${c.name}</b><span>${c.desc}</span><span class="ch-hint">💡 ${c.hint || ""}</span><span class="dim">Hard: ${c.hard.label}</span><div class="ch-skins">${earned}</div></div>
       <div class="ch-btns"><button class="btn small primary" data-ch="${c.id}">${done.normal ? "✓ " : ""}Normal</button><button class="btn small danger" data-chh="${c.id}">${done.hard ? "✓ " : ""}Hard</button></div></div>`; }).join("")}</div></div>`;
   m.classList.add("show");
   $("ch-close").onclick = () => m.classList.remove("show");
   m.querySelectorAll("[data-chel]").forEach((b) => b.onclick = () => { game.chEl = b.dataset.chel; openChallenges(); });
-  const go = (id, hard) => { m.classList.remove("show"); startRun({ gameMode: "solo", mode: "loop", corridors: 1, economy: "shared", status: "standard", pacing: "manual", elements: [game.chEl], ruleset: "expanded", mods: {}, challenge: { id, hard } }); };
+  m.querySelectorAll("[data-chp]").forEach((b) => b.onclick = () => { game.chPartner = b.dataset.chp || null; openChallenges(); });
+  const go = (id, hard) => { m.classList.remove("show"); startRun({ gameMode: "solo", mode: "loop", corridors: 1, economy: "shared", status: "standard", pacing: "manual", elements: [game.chEl], partner: game.chPartner, ruleset: "expanded", mods: {}, challenge: { id, hard } }); };
   m.querySelectorAll("[data-ch]").forEach((b) => b.onclick = () => go(b.dataset.ch, false));
   m.querySelectorAll("[data-chh]").forEach((b) => b.onclick = () => go(b.dataset.chh, true));
 }
 
 // wave preview for the dock (mirrors the sim's wave generator, so it's exact)
-function previewWave(state, fp, wave) {
-  if (!state.x) return null;
-  if (state.challenge) return generateChallengeWave(state.seedBase, wave, state.challenge.def, bal.roster);
-  const m = state.x;
-  return generateWaveExpanded(state.seedBase, wave, fp.corridorCount, DB.CONFIG.bossEvery, { roster: bal.roster, filter: (r) => !(m.noFlyers && r.fly) && !(m.noDisruptors && r.disrupt) && !(m.noStealth && r.stealth) });
+function previewWave(state, fp, wave) { return previewWaveX(state, fp, wave); }
+
+// ---------------------------------------------------------------------------
+// TUTORIAL — a short guided Quick run (Fire + Ice, Chill). Replay it from the menu or the pause menu.
+// ---------------------------------------------------------------------------
+function cellRect(c0, r0, c1, r1) {
+  if (!renderer || game.view !== "field") return null;
+  const pts = [renderer.cellScreen(c0, r0, 0.2), renderer.cellScreen(c1, r0, 0.2), renderer.cellScreen(c0, r1, 0.2), renderer.cellScreen(c1, r1, 0.2)];
+  const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+  const left = Math.min(...xs), top = Math.min(...ys);
+  return { left, top, width: Math.max(...xs) - left, height: Math.max(...ys) - top };
+}
+function startTutorial() {
+  if (tutorial && tutorial.active) tutorial.end();
+  ["mastery-screen", "wardrobe-modal", "challenges-modal", "end-screen", "bonus-modal"].forEach((id) => { const m = $(id); if (m) m.classList.remove("show"); });
+  startRun({ gameMode: "solo", mode: "single", corridors: 1, economy: "shared", pacing: "manual", elements: ["fire"], partner: "ice", difficulty: "chill", ruleset: "expanded", mods: { builders: true }, tutorial: true }, 4242);
+  const G = game.state.grid;
+  const plan = DB.makeMazePlan(G.cols, G.rows, DB.CONFIG.towerSize);
+  const spot = plan[0];
+  const pl = () => game.state.players[0];
+  const corr = () => pl().corridors[0];
+  const q = (sel) => () => document.querySelector(sel);
+  const steps = [
+    { title: "Welcome to Skyhold", text: "Creeps march through your floating corridor. Build towers to stop them before they get through.<br><br>This tour takes about three minutes — you'll play a real (and relaxed) run. You can replay it any time from the menu.", pause: true },
+    { title: "Lives", text: "Every creep that makes it through costs a life — a boss costs two. Lose them all and the run is over.", target: q("#topbar .lives"), pause: true },
+    { title: "Gold", text: "Gold buys towers and upgrades. Kills, cleared waves and some reactions pay more.", target: q("#currency-display"), pause: true },
+    { title: "Waves", text: "Hold all <b>10 waves</b> and the run is won. Every 5th wave brings a Warlord boss.", target: q("#wave-display"), pause: true },
+    { title: "Your corridor", text: "Creeps come out of the portal at the <b>top</b> and walk to the portal at the <b>bottom</b>. They can't walk through towers — so your towers build the path. A longer path means more shots.", enter: () => { if (game.view !== "field") enterCorridor(0); }, target: () => cellRect(0, 0, G.cols, G.rows), pad: 2, pause: true },
+    { title: "Build a tower", text: "Tap the glowing spot near the entrance.", target: () => cellRect(spot.c, spot.r, spot.c + 3, spot.r + 3), allow: true, done: () => ui.ringOpen || corr().towers.length > 0 },
+    { title: "Pick a tower", text: "Each bubble is a tower — 🔥 Fire and ❄ Ice, your two elements. Tap one to see what it does, then tap it <b>again</b> to build.", target: () => { const m = $("radial-menu"); return m && m.classList.contains("show") ? m : null; }, pad: 14, allow: true, done: () => corr().towers.length > 0, enter: () => { if (!ui.ringOpen && corr().towers.length === 0) { const sp = renderer.cellScreen(spot.c + 1.5, spot.r + 1.5, 0.2); onTap(sp.x, sp.y); } } },
+    { title: "Your builder", text: "Your builder flies over and raises the tower — it can't fire until it's finished. Its lantern also reveals invisible creeps close to it — Inspire a tower to park it there.", target: () => { const b = corr().builder; if (!b) return null; const p = renderer.cellScreen(b.x / 65536, b.y / 65536, 1.5); return { left: p.x - 34, top: p.y - 44, width: 68, height: 68 }; }, pause: false },
+    { title: "Make a wall", text: "Build <b>two more towers</b> next to the first one. Mix Fire and Ice — you'll see why in a moment.", target: () => cellRect(0, spot.r - 6, G.cols, spot.r + 8), allow: true, done: () => corr().towers.length >= 3 },
+    { title: "The next wave", text: "This line shows what comes next. 🪽 flies over your maze, 👁 is invisible. If your towers can't deal with them, a red warning appears right here.", target: q("#wave-preview"), pause: true },
+    { title: "Start the wave", text: "Ready? Tap <b>Start Wave</b>.", target: q("#quick-start-wave"), allow: true, on: "wave" },
+    { title: "Speed", text: "Speed the game up to ×2, ×3 or ×5 here — or slow it back down when it gets busy.", target: q("#quick-speed-cycle"), pause: true },
+    { title: "Reactions", text: "Every pair of elements reacts. A creep <b>Burning</b> from Fire that gets hit by an Ice tower (or <b>Chilled</b> and hit by Fire) sets off 🌡 <b>Thermal Shock</b> — a big burst of damage. Names pop up where reactions happen.<br><br>All 28 pairs are in <b>⚗ Reactions</b> in the pause menu.", pause: true },
+    { title: "Tower cards", text: "Tap one of your towers to open its card.", target: () => cellRect(0, spot.r - 1, G.cols, spot.r + 4), allow: true, done: () => !!game.selectedTowerId },
+    { title: "Upgrades and tags", text: "⬆ upgrades it. The card shows its <b>damage type</b>, whether it <b>hits flyers</b> and whether it <b>sees stealth</b> — and which reactions it can set off.", target: () => { const p = $("tower-panel"); return p && p.classList.contains("show") ? p : null; }, pause: true },
+    { title: "Armour", text: "Creeps wear armour classes. 🗡 <b>Physical</b> shreds Light runners, 💥 <b>Blast</b> cracks Medium packs and Fortified walls, ✦ <b>Magic</b> melts Heavy and Ethereal foes. Tap any creep to see its class.", pause: true, enter: () => ui.closeAllPanels() },
+    { title: "Wave guide", text: "ⓘ lists the next three waves and every creep's traits.", target: q("#btn-wave-info"), pause: true },
+    { title: "You're ready", text: "Clear all 10 waves to win. After that, the <b>Sealed One</b> waits as an optional bonus round — beat it for a new builder look.<br><br>Have fun!", next: "Let's play", pause: true },
+  ];
+  tutorial = createTutorial({
+    layer: $("tutorial-layer"), steps,
+    setPaused: (p) => { game.paused = p; },
+    onEnd: (skipped) => { xmeta.tutorial = true; saveXMeta(); tutorial = null; if (skipped) ui.toast("Tour skipped — replay it from the menu any time."); },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -978,7 +1166,15 @@ function boot() {
     isFollowing: (id) => renderer.following === id,
     toggleFollow: (id) => renderer.setFollow(renderer.following === id ? null : id),
     setSkin: (id) => { xmeta.skin = id; game.skin = id; saveXMeta(); },
+    skinSwatch: (id) => skinSwatch(id),
+    npcLevels: NPC_LEVELS,
+    isBossWave: (st, fp, w) => isBossWaveX(st, fp, w),
+    hpReal: (st, v) => hpReal(st, v),
+    upgradeCost: (def, level) => game.state ? upgradeCost(game.state, def, level) : 0,
+    sellValue: (tw) => game.state ? Math.round(game.state.x && tw.bState ? tw.def.cost : totalInvested(game.state, tw) * DB.CONFIG.sellRefund) : 0,
+    sendLoad: (st, id) => sendLoad(st, id),
   });
+  tutorial = null;
   loadDockPref();
   document.addEventListener("pointerdown", () => sound.unlock(), { once: true });
   bindUI();
@@ -999,6 +1195,7 @@ function boot() {
     if (i < steps.length) setTimeout(work, 0);
     else {
       showScreen("menu"); refreshMenu(); renderer.setMode("menu", true);
+      if (!xmeta.tutorial) { const tb = $("btn-tutorial"); if (tb) tb.classList.add("pulse"); setTimeout(() => ui.toast("New to Skyhold? Take the 3-minute tour: 🎓 How to Play"), 900); }
       const roomQ = new URLSearchParams(location.search).get("room");
       if (roomQ) setTimeout(() => openOnline(roomQ), 300);
       // portraits for the menus are drawn in the background, a few per frame
@@ -1029,10 +1226,20 @@ function boot() {
     renderFps: +(new URLSearchParams(location.search).get("fps") || 60), // ?fps= (dev/testing)
   });
   loop.start();
-  setInterval(() => { if (game.screen === "game" && game.state) { ui.updateTopBar(); ui.refreshPanels(); ui.updateEnemyOverview(); refreshAutoBtn(); refreshWaveFab(); if (game.spectate) refreshReplayBar(); } }, 250);
+  setInterval(() => { if (game.screen === "game" && game.state) { ui.updateTopBar(); ui.refreshPanels(); ui.updateEnemyOverview(); refreshAutoBtn(); refreshWaveFab(); refreshVsTimer(); if (game.spectate) refreshReplayBar(); } }, 250);
   window.__skyhold = { openOnline, getSession: () => session, leaveOnline, game, view, renderer, cmd, DB, startRun, setView, enterCorridor, onTap, ui, botTick, openStats, openReplays, openChallenges, endScreen, watchReplay, loadReplays };
   // dev/test helper: fast-forward n ticks (bots included)
   window.__skyhold.ff = (n) => { for (let i = 0; i < n && game.driver; i++) { game.clock += 1 / 30; botTick(); game.driver.tick(); if (game.state.finished) break; } return game.state.tick; };
+}
+// Vs NPCs: the waves come on a shared timer — the dock button shows the countdown
+function refreshVsTimer() {
+  if (!isVersus() || game.online || !game.state || !game.state.x) return;
+  const st = game.state, b = $("quick-start-wave"); if (!b) return;
+  const at = st.nextWaveTick != null ? st.nextWaveTick : st.x.firstWave;
+  const secs = Math.max(0, Math.ceil((at - st.tick) / SIM_HZ));
+  const html = `${icon("wave", "xs")} Wave ${myPlayer().wave + 1} in ${secs}s`;
+  if (b._h !== html) { b.innerHTML = html; b._h = html; }
+  b.classList.add("disabled");
 }
 function refreshAutoBtn() {
   const b = $("quick-auto-wave"); if (!b) return;
@@ -1061,29 +1268,26 @@ function bindUI() {
   bind("pause-stats", () => { openStats(); });
   bind("end-spectate", () => { const sc = $("end-screen"); if (sc) sc.classList.remove("show"); game.spectate = !game.online; game.paused = false; document.body.dataset.spectate = "live"; refreshReplayBar(); ui.toast("Spectating — the match plays on without you."); });
   bind("end-replay", () => { const sc = $("end-screen"); if (sc) sc.classList.remove("show"); const r = loadReplays()[0]; if (r) watchReplay(r); else ui.toast("No replay saved for this match.", "warn"); });
-  document.querySelectorAll("[data-ruleset]").forEach((b) => b.onclick = () => { setup.ruleset = b.dataset.ruleset; setup._lastTouched = "ruleset"; ui.renderSetup(setup, avail()); sound.play("click"); });
-  document.querySelectorAll("[data-diff]").forEach((b) => b.onclick = () => { setup.difficulty = b.dataset.diff; setup._lastTouched = "difficulty"; ui.renderSetup(setup, avail()); sound.play("click"); });
+  document.querySelectorAll("[data-diff]").forEach((b) => b.onclick = () => { setup.npc = b.dataset.diff; setup._lastTouched = "npc"; ui.renderSetup(setup, avail()); sound.play("click"); });
+  document.querySelectorAll("[data-sdiff]").forEach((b) => b.onclick = () => { setup.difficulty = b.dataset.sdiff; setup._lastTouched = "difficulty"; ui.renderSetup(setup, avail()); sound.play("click"); });
+  const stepSeats = (dir) => { setup.seats = Math.max(3, Math.min(8, setup.seats + dir)); ui.renderSetup(setup, avail()); sound.play("click"); };
+  bind("seats-minus", () => stepSeats(-1));
+  bind("seats-plus", () => stepSeats(1));
   document.querySelectorAll("[data-mod]").forEach((b) => b.onclick = () => {
     const k = b.dataset.mod;
     if (k === "goldMult" || k === "livesMult") { const S = [0.5, 1, 2]; setup.mods[k] = S[(S.indexOf(setup.mods[k]) + 1) % S.length]; }
     else setup.mods[k] = !setup.mods[k];
     setup._lastTouched = "mod:" + k; ui.renderSetup(setup, avail()); sound.play("click");
   });
-  const RULES_KEY = "skyhold_setuprules_v1";
-  const applyRules = (open) => { const m = $("rules-body"); if (m) m.classList.toggle("open", open); const ch = $("rules-chev"); if (ch) ch.textContent = open ? "▴" : "▾"; };
-  let rulesOpen = false; try { rulesOpen = localStorage.getItem(RULES_KEY) === "1"; } catch (e) { /* fine */ }
-  applyRules(rulesOpen);
-  bind("setup-rules", () => { rulesOpen = !rulesOpen; try { localStorage.setItem(RULES_KEY, rulesOpen ? "1" : "0"); } catch (e) { /* fine */ } applyRules(rulesOpen); });
   bind("btn-setup-back", () => { showScreen("menu"); refreshMenu(); });
-  bind("btn-start-run", () => startRun({ mode: setup.mode, corridors: setup.corridors, economy: setup.economy, status: setup.status, gameMode: setup.gameMode, pacing: setup.pacing, elements: setup.elements, ruleset: setup.ruleset, mods: { ...setup.mods }, difficulty: setup.difficulty }));
+  bind("btn-start-run", () => { saveSetup(); startRun({ mode: setup.mode, corridors: setup.corridors, seats: setup.seats, economy: setup.economy, gameMode: setup.gameMode, pacing: setup.pacing, elements: setup.elements, partner: setup.partner, ruleset: "expanded", mods: { ...setup.mods }, difficulty: setup.difficulty, npc: setup.npc }); });
   const avail = () => DB.availableElements(masteryMap());
-  document.querySelectorAll("[data-mode]").forEach((b) => b.onclick = () => { setup.mode = b.dataset.mode; if (setup.mode === "single") setup.corridors = 1; else if (setup.corridors < 3) setup.corridors = 4; setup._lastTouched = "mode"; ui.renderSetup(setup, avail()); sound.play("click"); });
+  document.querySelectorAll("[data-mode]").forEach((b) => b.onclick = () => { setup.mode = b.dataset.mode; if (setup.corridors < 3) setup.corridors = 4; setup._lastTouched = "mode"; ui.renderSetup(setup, avail()); sound.play("click"); });
   document.querySelectorAll("[data-econ]").forEach((b) => b.onclick = () => { setup.economy = b.dataset.econ; setup._lastTouched = "econ"; ui.renderSetup(setup, avail()); sound.play("click"); });
-  document.querySelectorAll("[data-status]").forEach((b) => b.onclick = () => { setup.status = b.dataset.status; setup._lastTouched = "status"; ui.renderSetup(setup, avail()); sound.play("click"); });
   document.querySelectorAll("[data-pacing]").forEach((b) => b.onclick = () => { setup.pacing = b.dataset.pacing; setup._lastTouched = "pacing"; ui.renderSetup(setup, avail()); sound.play("click"); });
   const stepCorridors = (dir) => {
     if (setup.mode === "single" && setup.gameMode !== "versus") return;
-    const optsN = DB.CORRIDOR_OPTIONS.filter((n) => (setup.gameMode === "versus" ? n >= 3 : n > 1));
+    const optsN = DB.CORRIDOR_OPTIONS.filter((n) => n > 1);
     let i = optsN.indexOf(setup.corridors); if (i < 0) i = 0;
     i = Math.max(0, Math.min(optsN.length - 1, i + dir));
     setup.corridors = optsN[i];
@@ -1137,7 +1341,7 @@ function bindUI() {
     refreshAutoBtn();
     ui.toast(game.autoWave ? "Auto wave-start ON — waves begin 5s after a clear" : "Auto wave-start OFF");
   });
-  bind("quick-speed-cycle", () => { if (game.online) return; game.speed = game.speed >= 3 ? 1 : game.speed + 1; ui.updateWavePanel(); sound.play("click"); });
+  bind("quick-speed-cycle", () => { if (game.online) return; const S = [1, 2, 3, 5]; game.speed = S[(S.indexOf(game.speed) + 1) % S.length]; ui.updateWavePanel(); sound.play("click"); });
   bind("btn-send-panel", () => ui.toggleSendPanel());
   bind("btn-settings-ingame", () => togglePause(true));
   bind("pause-resume", () => togglePause(false));
@@ -1147,7 +1351,11 @@ function bindUI() {
   bind("end-again", () => { const sc = $("end-screen"); if (sc) sc.classList.remove("show"); if (game.online) { leaveOnline(); openOnline(); return; } startRun(rematchCfg()); });
   bind("end-menu", () => { const sc = $("end-screen"); if (sc) sc.classList.remove("show"); if (game.online) { leaveOnline(); return; } game.driver = null; showScreen("menu"); refreshMenu(); });
   bind("btn-bestiary", () => ui.openBestiary());
-  bind("end-endless", () => { const sc = $("end-screen"); if (sc) sc.classList.remove("show"); game.state.players[game.me].phase = "build"; game.state.mode = "endless"; game.mode = "endless"; ui.updateTopBar(); ui.updateWavePanel(); ui.toast("Endless Mode!"); });
+  bind("btn-wardrobe", () => ui.openWardrobe());
+  bind("btn-tutorial", () => startTutorial());
+  bind("pause-tutorial", () => { togglePause(false); if (game.online) { ui.toast("Finish the online match first.", "warn"); return; } startTutorial(); });
+  bind("pause-codex", () => ui.openCodex());
+  bind("end-endless", () => { const sc = $("end-screen"); if (sc) sc.classList.remove("show"); const pl = game.state.players[game.me]; if (pl.lives <= 0) { ui.toast("No lives left to go on with.", "warn"); return; } pl.phase = "build"; pl.alive = true; game.state.finished = false; game._endShown = null; game.state.mode = "endless"; game.mode = "endless"; ui.updateTopBar(); ui.updateWavePanel(); ui.toast("Endless Mode! How far can you go?"); });
   // Save / Import / Export (Circle's flow)
   bind("sm-close", () => $("save-modal").classList.remove("show"));
   bind("sm-export-run", () => { const t = $("save-text"); if (!t || !SaveSystem) return; if (!game.state) { ui.toast("No run in progress"); return; } t.value = SaveSystem.exportRunText(serializeRun()); });
@@ -1173,7 +1381,7 @@ function bindUI() {
     else if (e.key === "ArrowLeft" || e.key.toLowerCase() === "q") enterCorridor((game.activeCorridor - 1 + corridorNavCount()) % corridorNavCount());
     else if (e.key === "ArrowRight" || e.key.toLowerCase() === "e") enterCorridor((game.activeCorridor + 1) % corridorNavCount());
     else if (e.key === "Enter" && game.online) { e.preventDefault(); onlineUI.toggleChatInput(true); }
-    else if ((e.key === "1" || e.key === "2" || e.key === "3") && !game.online) { game.speed = +e.key; ui.updateWavePanel(); }
+    else if ((e.key === "1" || e.key === "2" || e.key === "3" || e.key === "5") && !game.online) { game.speed = +e.key; ui.updateWavePanel(); }
   });
 }
 function bind(id, fn) { const e = $(id); if (e) e.onclick = (ev) => { sound.unlock(); fn(ev); }; }
@@ -1186,9 +1394,11 @@ function refreshAudio() {
 function rematchCfg() {
   const pacing = game.autoWave ? "auto" : "manual";
   const rc = game.runCfg || {};
-  const keep = { ruleset: game.state.ruleset, mods: rc.mods, difficulty: rc.difficulty, challenge: rc.challenge };
-  if (isVersus()) return { mode: "endless", corridors: game.state.players.length, economy: "shared", status: game.state.statusMode, gameMode: "versus", pacing, elements: [myPlayer().elements[0]], ...keep };
-  return { mode: game.mode === "endless" ? "loop" : game.mode, corridors: myPlayer().corridorCount, economy: game.state.economy, status: game.state.statusMode, gameMode: "solo", pacing, elements: myPlayer().elements, ...keep };
+  const keep = { ruleset: game.state.ruleset === "classic" ? "classic" : "expanded", mods: rc.mods, difficulty: rc.difficulty, npc: rc.npc, challenge: rc.challenge, tutorial: rc.tutorial };
+  const els = myPlayer().elements;
+  if (isVersus()) return { mode: "endless", corridors: game.state.players.length, seats: game.state.players.length, economy: "shared", gameMode: "versus", pacing, elements: [els[0]], partner: els[1], ...keep };
+  const multi = myPlayer().corridorCount > 1;
+  return { mode: rc.mode || game.mode, corridors: myPlayer().corridorCount, economy: game.state.economy, gameMode: "solo", pacing, elements: multi ? els : [els[0]], partner: multi ? null : els[1], ...keep };
 }
 function updateGameModeButtons() {
   document.querySelectorAll("[data-gamemode]").forEach((b) => {
@@ -1210,147 +1420,17 @@ function togglePause(force) {
 function setupSendButton() { const b = $("btn-send-panel"); if (!b) return; b.style.display = (game.gameMode === "competitive" || game.gameMode === "versus") ? "" : "none"; }
 
 // ---------------------------------------------------------------------------
-// NPC BOTS (versus) — verbatim from Circle: shell-side, they only ever emit COMMANDS
+// NPC BOTS (versus) — the NPC brain in app/npc.js; shell-side, they only ever emit COMMANDS
 // ---------------------------------------------------------------------------
 let bots = [];
 function setupBots() {
   bots = [];
   if (!isVersus() || !game.state) return;
-  const D = DIFFICULTY[game.difficulty] || DIFFICULTY.normal;
-  for (let i = 1; i < game.state.players.length; i++) bots.push({ id: i, D, nextAt: game.clock + 1.5 + i * 0.5 });
+  for (let i = 1; i < game.state.players.length; i++) bots.push(createNpc({ id: i, level: game.difficulty, DB, sends: true, startAt: game.clock + 1 + i * 0.4 }));
 }
 function botTick() {
   if (!isVersus() || !game.state || game.state.finished || game.replay) return;
-  for (const b of bots) {
-    if (game.clock < b.nextAt) continue;
-    const D = b.D || DIFFICULTY.normal;
-    b.nextAt = game.clock + D.act[0] + Math.random() * (D.act[1] - D.act[0]);
-    botAct(b);
-  }
-}
-// what the next corridor's defence is weak against (Hard/Insane pick sends that exploit it)
-function scoutDefence(st, target) {
-  const corr = target.corridors[0]; if (!corr) return null;
-  let air = 0, splash = 0, detect = 0, n = 0;
-  for (const tw of corr.towers) {
-    const d = DB.TOWER_BY_ID[tw.def.id]; if (!d) continue;
-    n++;
-    const a = d.archetype;
-    if (a !== "splash" && a !== "melee" && a !== "support") air++;
-    if (a === "splash" || a === "melee") splash++;
-    if (d.element === "light" || tw.level >= 7 || a === "support") detect++;
-  }
-  return { n, air, splash, detect };
-}
-function botAct(b) {
-  const st = game.state, pl = st.players[b.id];
-  if (!pl || !pl.alive) return;
-  const D = b.D || DIFFICULTY.normal;
-  const corr = pl.corridors[0];
-  const q = (c) => game.driver.queue(c);
-  const wave = Math.max(1, pl.wave);
-  const reserve = 30 + wave * 6;
-  const G = st.grid;
-  const X = !!st.x;
-  if (!b.plan) { b.plan = DB.makeMazePlan(G.cols, G.rows, DB.CONFIG.towerSize); b.fails = {}; }
-  if (b.lastBuild != null) {
-    if (corr.towers.length <= b.lastBuild.count) b.fails[b.lastBuild.idx] = (b.fails[b.lastBuild.idx] || 0) + 1;
-    b.lastBuild = null;
-  }
-  // build the maze (with builders, don't queue up more than a couple of constructions)
-  const pending = X && corr.builder ? corr.builder.queue.length + (corr.builder.cur ? 1 : 0) : 0;
-  const want = Math.min(D.towers, 3 + Math.ceil(wave * 0.8));
-  if (corr.towers.length < want && pending < 2) {
-    let idx = -1;
-    for (let i = 0; i < b.plan.length; i++) {
-      if ((b.fails[i] || 0) >= 3) continue;
-      const sp = b.plan[i];
-      if (corr.grid[(sp.r + 1) * G.cols + (sp.c + 1)] === 2) continue;
-      idx = i; break;
-    }
-    if (idx >= 0) {
-      let options = DB.TOWERS.filter((t) => t.element === corr.element && t.cost <= pl.gold - 20).sort((a, z) => z.cost - a.cost);
-      // smarter bots keep some anti-air and detection in the mix once flyers and stealth appear
-      if (D.counter && X && options.length) {
-        const mine = scoutDefence(st, pl);
-        const needAir = mine && mine.n >= 4 && mine.air < mine.n * 0.5;
-        if (needAir) { const aa = options.filter((t) => t.archetype !== "splash" && t.archetype !== "melee" && t.archetype !== "support"); if (aa.length) options = aa; }
-      }
-      if (options.length) {
-        const t = Math.random() < 0.6 ? options[0] : options[Math.floor(Math.random() * options.length)];
-        const sp = b.plan[idx];
-        b.lastBuild = { idx, count: corr.towers.length };
-        q(C.buildTower(b.id, 0, sp.c + 1, sp.r + 1, t.id, 5));
-        return;
-      }
-    }
-  }
-  if (corr.towers.length && Math.random() < D.up) {
-    let tw = null;
-    for (const t of corr.towers) if (!t.bState && !(t.upT > 0) && (!tw || t.level < tw.level)) tw = t;
-    if (tw && tw.level < DB.CONFIG.maxLevel) {
-      const cost = Math.round(tw.def.cost * DB.SCALING.upgradeCostBase * Math.pow(DB.SCALING.costGrowth, tw.level - 1));
-      if (pl.gold > cost + reserve) { q(C.upgradeTower(b.id, 0, tw.id)); return; }
-    } else if (tw && tw.mutations.length < 2 && tw.def.mutations.length) {
-      const m = tw.def.mutations[Math.floor(Math.random() * tw.def.mutations.length)];
-      q(C.mutateTower(b.id, 0, tw.id, m.id, 5)); return;
-    }
-  }
-  if (corr.towers.length < 3 || wave < 2 || Math.random() > D.aggro) return;
-  // sends
-  const catalog = X ? DB.SENDS_EXPANDED : DB.SENDS;
-  const costOf = X ? DB.sendCostX : DB.sendCost, upOf = X ? DB.sendUpgradeCostX : DB.sendUpgradeCost;
-  const tiers = st.bal.sendTiers;
-  const usable = Object.keys(catalog).filter((t) => {
-    if (!X) return true;
-    const s = catalog[t];
-    if (s.tier > D.maxTier) return false;
-    const d = st.bal.enemies[t] && st.bal.enemies[t].x; const tt = d ? d.t : {};
-    const m = st.x;
-    if ((m.noFlyers && tt.fly) || (m.noStealth && (tt.invisible || tt.cloakCycle || tt.cloakAura))) return false;
-    if (m.noDisruptors && MOB_BY_ID[t] && (tt.jamPass || tt.corrodeAura || tt.chillAura || tt.chillFly || tt.confuseAura || tt.boulder || tt.rootTower || tt.curseTower || tt.deathTowerSlow || tt.deathStun || tt.shredObstacle)) return false;
-    if (m.sendStock && tiers && tiers[s.tier]) {
-      if (st.tick < tiers[s.tier].unlockTicks) return false;
-      const sk = pl.sendStock[t]; if (sk && sk.n <= 0) return false;
-    }
-    return true;
-  });
-  if (!usable.length) return;
-  if (Math.random() < 0.2) {
-    const t = usable[Math.floor(Math.random() * usable.length)];
-    const lvl = (pl.sendLevels && pl.sendLevels[t]) || 1;
-    if (lvl < DB.SEND_MAX_LEVEL && pl.gold > upOf(t, lvl) + reserve * 2) { q(C.upgradeSend(b.id, t)); return; }
-  }
-  const budget = pl.gold - reserve * 2;
-  let pick = null;
-  if (D.counter && X) {
-    // exploit the neighbour's defence: flyers vs ground-only mazes, stealth vs no detection, swarms vs single-target
-    let target = null; for (let i = 1; i < st.players.length; i++) { const p = st.players[(b.id + i) % st.players.length]; if (p.alive) { target = p; break; } }
-    const sc = target && scoutDefence(st, target);
-    const traitsOf = (t) => (st.bal.enemies[t] && st.bal.enemies[t].x && st.bal.enemies[t].x.t) || {};
-    const fit = (t) => {
-      const tt = traitsOf(t), c = costOf(t, (pl.sendLevels && pl.sendLevels[t]) || 1);
-      if (c > budget) return -1;
-      let v = c;
-      if (sc && sc.n) {
-        if (tt.fly && sc.air < sc.n * 0.4) v *= 2.2;
-        if ((tt.invisible || tt.cloakAura) && sc.detect === 0) v *= 2.5;
-        if ((catalog[t].count || 1) >= 4 && sc.splash < sc.n * 0.25) v *= 1.6;
-        if (tt.splashResist && sc.splash > sc.n * 0.4) v *= 1.6;
-      }
-      return v;
-    };
-    let best = -1;
-    for (const t of usable) { const v = fit(t); if (v > best) { best = v; pick = t; } }
-  } else {
-    let bestC = 0;
-    for (const t of usable) { const c = costOf(t, (pl.sendLevels && pl.sendLevels[t]) || 1); if (c <= budget && c > bestC && Math.random() < 0.85) { bestC = c; pick = t; } }
-  }
-  if (pick) {
-    const c = costOf(pick, (pl.sendLevels && pl.sendLevels[pick]) || 1);
-    const n = Math.max(1, Math.min(3, Math.floor(budget / Math.max(1, c))));
-    for (let i = 0; i < n; i++) q(C.sendEnemy(b.id, 0, pick));
-  }
+  for (const b of bots) b.tick(game.state, game.clock, (c) => game.driver.queue(c));
 }
 
 function preventBrowserGestures() {

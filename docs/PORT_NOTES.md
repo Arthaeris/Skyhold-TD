@@ -44,8 +44,18 @@ Parity means these behave as they do in Circle, where the database describes the
   - Replays: seed plus command log, verified by state hash at the end, with export and import.
   - Spectating after a Vs defeat.
   - Four challenges with Normal and Hard modes; eight builder skins.
-- **Tune later:** all of the numbers are a first pass, including mob HP and costs, wave mixing (featured creeps take about 45% of each wave's HP budget) and tier timings.
-- **Armour classes** are recorded on every creep (unarmored, light, medium, heavy, fortified, ethereal), waiting for the damage-type pass.
+- **Balance pass (Oct 2026).** Every number lives in `content/rules.js` (`TUNE`, `SEND_RULES`, `SOLO_DIFFICULTY`, `WAVES_BY_CORRIDORS`), compiled to fixed point by `sim/balance.js` (`bal.rx`). The new rules are gated on `state.x`, so Classic replays and `parity-test.mjs` are untouched.
+  - Health is stored in units of 16 HP (`HPS`, `hpReal()`), so late waves and End Bosses can't overflow 16.16.
+  - Armour: `dmg × K/(K+armour)` with K = 25, times the class table (damage type × armour class). Reactions deal "pure" damage.
+  - Wave generator `generateWaveX`: a boss every 5th wave and on the last, escorts, staggered spawns (`minGap`), a per-group creep cap, treasure creeps. Challenges use `generateChallengeWaveX`, which introduces the pool two creeps at a time (stealth and flyers last) and charges fast creeps more of the budget.
+  - Challenge bosses are sized as a wave-10 Warlord × a per-boss factor (`TUNE.challengeBoss`); their brood enters at the gate at a lower wave level.
+  - Vs: shared wave timer offline too; wave HP ×0.8, then +30% a minute (compounding) after 5 minutes; per-target cap on sent HP; sent creeps leave after leaking; life steal capped at max lives + 5.
+- **Calibration** (`node tools/balance-sim.mjs`, Normal NPC brain as the player, Mastery 0; challenges at Mastery 3). Wins = every wave held:
+  - Quick: Chill 100%, Normal ~81–88%, Hard ~67%, Brutal ~21–25%; End Boss ~46–57% on Normal. Every element wins on Normal.
+  - Standard: 4 corridors Normal ~69%, Hard ~38%; 6 corridors Normal ~81%, Hard ~38%; 8 corridors Normal ~100%, Hard 0% (the NPC can't tend eight mazes on Hard; a human should do better, but this is the one known cliff).
+  - Challenges, Normal / Hard: Burrow 38% / 13%, Mire 69% / 19%, Foundry 50% / 25%, Eclipse 44% / 13%, with 5–8 of 8 elements winning each on Normal.
+  - Vs NPCs: matches last ~12–16 min; a seat that dumps everything into sends doesn't wipe a Normal defender (2/4 outlive it).
+  - The NPC builds a plain serpentine and rarely upgrades, so a human who mazes properly does noticeably better.
 - **Multiplayer:** the expanded sim is deterministic (the soak runs every scenario twice and compares hashes every tick), so lockstep can use it as-is. Ranked play and ratings come with multiplayer.
 
 ## Online play (Firebase Realtime Database)
@@ -78,6 +88,7 @@ Parity means these behave as they do in Circle, where the database describes the
 ## Dev tools
 
 - `node tools/parity-test.mjs ../Circle-TD` runs both sims on the same scripted sessions and compares state hashes on every tick (Classic ruleset).
+- `node tools/balance-sim.mjs solo|vs|ch|curve|leaks|one [seeds]` plays whole runs with the NPC brain and prints win rates per mode, difficulty and element, Vs match lengths and a send-spam test, challenge wins per element, or a per-wave curve. Env: `MODES`, `DIFFS`, `MASTERY`, `CH`, `HARD=0`, `TUNE='{"enemySpeed":2}'` to try numbers without editing.
 - `node tools/expanded-soak.mjs [ticks]` soaks the Expanded ruleset (Vs with every send, a deep solo loop, a Hard challenge). It checks for crashes and bad values, confirms determinism and reports which mobs and abilities appeared.
 - `tools/gallery.html?what=bestiary&page=0..3` and `&builders` show the new models.
 - `tools/preview.html?n=4&view=world|field&i=0` shows the world ring without the game. World view also takes `z` (zoom out), `el` (tilt in degrees), `az` (radians) and `tx/ty/tz` (target), and logs the vertex count.

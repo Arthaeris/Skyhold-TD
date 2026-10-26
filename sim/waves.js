@@ -135,3 +135,95 @@ export function generateChallengeWave(seedBase, wave, challenge, roster) {
 }
 
 export default { generateWave, generateWaveExpanded, generateChallengeWave, enemyScale, totalWaves, waveAffix, AFFIXES };
+
+// ---------------------------------------------------------------------------
+// [Skyhold rules] WAVES — Circle's backbone (trimmed), one or two featured
+// creeps from the bestiary, a Warlord every 5th wave and on the last wave,
+// counts that grow with the corridor count, and creeps spaced out enough to
+// read on a phone. Pure integer hash of (seed, wave) like everything above, so
+// the UI can preview it exactly.
+// opts: { roster, filter(r), final (bool), tune: { countPerCorridor, minGap, bossEvery, bossHpMinor } }
+// ---------------------------------------------------------------------------
+export function generateWaveX(seedBase, wave, corridorCount, opts) {
+  const T = opts.tune, roster = opts.roster || [];
+  const ok = (r) => !opts.filter || opts.filter(r);
+  const isBoss = wave % T.bossEvery === 0 || !!opts.final;
+  const cm = 1 + T.countPerCorridor * Math.max(0, corridorCount - 1);
+  const gapOf = (g, pack) => fromFloat(Math.max(g, pack ? T.minGap * 0.6 : T.minGap));
+  const out = [];
+  let budget = 0;
+  if (isBoss) {
+    const major = wave % 10 === 0 || !!opts.final;
+    out.push({ type: "boss", count: 1, gap: 0, delay: 0, hpMult: fromFloat(major ? T.bossHpMajor : T.bossHpMinor) });
+    // escorts: grunts and sprites early, golems from wave 10
+    const esc = Math.max(1, Math.round((1 + wave / 5) * cm));
+    const heavy = wave >= 10 ? "brute" : "grunt";
+    out.push({ type: heavy, count: esc, gap: gapOf(1.1), delay: fromFloat(2.5) });
+    out.push({ type: "runner", count: esc * 2, gap: gapOf(0.5), delay: fromFloat(1.2) });
+    budget = esc * (CLASSIC_HP[heavy] || 60) + esc * 2 * 34;
+  } else {
+    const base = 6 + Math.floor(wave * 0.7);
+    const add = (type, n, g, d) => { const c = Math.max(1, Math.round(n * T.waveCount * cm)); out.push({ type, count: c, gap: gapOf(g, type === "swarm"), delay: fromFloat(d) }); budget += c * (CLASSIC_HP[type] || 60); };
+    add("grunt", base * 0.6, 0.75, 0);
+    add("runner", 3 + wave * 0.3, 0.5, 0.8);
+    if (wave >= 4) add("swarm", 6 + wave * 0.6, 0.3, 2.0);
+    if (wave >= 6) add("brute", 1 + Math.floor(wave / 6), 1.3, 3.0);
+    if (wave >= 12) add("tank", Math.floor(wave / 12), 1.8, 4.0);
+  }
+  const share = isBoss ? 0.3 : wave < 4 ? 0 : wave < 7 ? 0.3 : 0.45;
+  const pool = roster.filter((r) => r.minWave <= wave && !r.elite && !r.treasure && ok(r));
+  if (pool.length && share > 0) {
+    const nFeat = wave >= 8 ? 2 : 1;
+    const picked = [];
+    for (let k = 0; k < nFeat * 4 && picked.length < nFeat; k++) {
+      const h = hmix(seedBase + k * 7919, wave * 31 + k);
+      const weighted = [];
+      for (const r of pool) { const w = wave - r.minWave < 8 ? 3 : 1; for (let i = 0; i < w; i++) weighted.push(r); }
+      const r = weighted[h % weighted.length];
+      if (!picked.includes(r)) picked.push(r);
+    }
+    const part = (budget * share) / picked.length;
+    const cap = Math.round((5 + wave * 0.5) * cm); // creeps per featured group, packs included
+    picked.forEach((r, i) => {
+      let units = Math.max(1, Math.round(part / (r.hp * r.pack)));
+      units = Math.max(1, Math.min(units, Math.floor(cap / r.pack) || 1));
+      out.push({ type: r.id, count: units * r.pack, gap: gapOf(r.pack > 1 ? 0.3 : 0.9, r.pack > 1), delay: fromFloat(2.2 + i * 1.8) });
+    });
+  }
+  if (isBoss && wave >= 20) {
+    const elites = roster.filter((r) => r.elite && !r.treasure && r.minWave <= wave && ok(r));
+    if (elites.length) out.push({ type: elites[hmix(seedBase, wave * 17) % elites.length].id, count: 1, gap: 0, delay: fromFloat(5) });
+  }
+  if (!isBoss && wave >= 5 && hmix(seedBase ^ 0x5eed, wave) % 7 === 0) {
+    const tg = roster.find((r) => r.treasure);
+    if (tg) out.push({ type: tg.id, count: 1, gap: 0, delay: fromFloat(3) });
+  }
+  return out;
+}
+
+// [Skyhold rules] challenge waves: the challenge's own pool, a fair start and a steady climb.
+// tune: { minGap }
+// how much a creep asks of a fresh maze: invisible > flying > the rest, then by its usual first wave
+function trick(r) { return (r.stealth ? 20 : 0) + (r.fly ? 10 : 0) + r.minWave; }
+export function generateChallengeWaveX(seedBase, wave, challenge, roster, tune) {
+  // the pool is introduced gently: the easiest two first, one more every other wave,
+  // and fast creeps cost more of the budget (a pack of hounds at wave 2 is a wall, not a wave)
+  const pool = roster.filter((r) => challenge.pool.includes(r.id))
+    .slice().sort((a, b) => (trick(a) - trick(b)) || (a.hp * a.speed - b.hp * b.speed) || (a.id < b.id ? -1 : 1));
+  const out = [];
+  const C = challenge.waves || {};
+  const budget = (C.base || 320) + wave * (C.per || 190);
+  const avail = Math.min(pool.length, 2 + Math.floor((wave - 1) / 2));
+  const n = Math.min(avail, 1 + Math.floor(wave / 3));
+  const cap = Math.round((C.cap0 || 5) + wave * (C.capPer || 1.1));
+  for (let k = 0; k < n; k++) {
+    // the newest arrival leads the wave it is introduced in, the rest are drawn from what is known
+    const r = k === 0 && wave >= 3 && wave % 2 === 1 ? pool[avail - 1] : pool[(hmix(seedBase + k, wave) + k) % avail];
+    const cost = r.hp * (r.speed > 1 ? r.speed * r.speed : 1);
+    let units = Math.max(1, Math.round(budget / n / (cost * r.pack)));
+    units = Math.max(1, Math.min(units, Math.floor(cap / r.pack) || 1));
+    out.push({ type: r.id, count: units * r.pack, gap: fromFloat(Math.max(r.pack > 1 ? 0.35 : 0.9, tune.minGap * (r.pack > 1 ? 0.7 : 1.1))), delay: fromFloat(k * 3.0) });
+  }
+  out.push({ type: "grunt", count: 2 + Math.floor(wave / 2), gap: fromFloat(Math.max(0.6, tune.minGap)), delay: 0 });
+  return out;
+}
