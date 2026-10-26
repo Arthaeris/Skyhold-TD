@@ -137,111 +137,162 @@ const PLINTH = {
 // ---------------------------------------------------------------------------
 const HEADS = {
   // ===== FIRE ==============================================================
-  fire_0(P, h, st) { // Flame Tower: open basalt forge with bronze fittings and a tapered, layered flame
-    const B = P.base;
-    const stone = "#3a2a26", stoneLight = "#594137", iron = "#292323";
-    const bronze = "#8c6040";
+  fire_0(P, h, st) { // Flame Tower: masterwork basalt-and-bronze ember forge
+    const B = P.base, F = P.float;
+    const basalt = "#302725", stone = "#493831", stoneHi = "#665044";
+    const iron = "#211e1d", bronze = "#89613e", gold = "#b58a53";
+    const ember = st >= 2 ? "#d9682c" : "#bd4b24";
+    const corners = [[-0.58, -0.58], [0.58, -0.58], [-0.58, 0.58], [0.58, 0.58]];
 
-    // Low, readable foundation. Keep the brightest accents away from the outer silhouette.
-    B.b(1.72, 0.24, 1.72, "#251b18", 0, h + 0.12, 0, { top: "#49342b", jitter: 0.025 });
-    B.b(1.52, 0.18, 1.52, stone, 0, h + 0.32, 0, { top: stoneLight, jitter: 0.035 });
-    B.b(1.28, 0.12, 1.28, "#241b18", 0, h + 0.47, 0, { top: "#49342b", jitter: 0.02 });
-
-    // Four corner piers: large masonry forms with restrained bronze caps.
-    const corners = [[-0.57, -0.57], [0.57, -0.57], [-0.57, 0.57], [0.57, 0.57]];
+    // Foundation: stepped, cut-stone courses with dark joints and a restrained bronze reveal.
+    B.b(1.92, 0.20, 1.92, "#1e1917", 0, h + 0.10, 0, { top: "#41312a", jitter: 0.02 });
+    B.b(1.78, 0.13, 1.78, basalt, 0, h + 0.265, 0, { top: "#584238", jitter: 0.035 });
+    B.b(1.56, 0.10, 1.56, "#211a17", 0, h + 0.38, 0, { top: "#392923", jitter: 0.02 });
+    B.b(1.44, 0.10, 1.44, stone, 0, h + 0.48, 0, { top: stoneHi, jitter: 0.035 });
+    // Individually dressed corner stones and inset bronze corner keys.
     for (const [x, z] of corners) {
-      B.b(0.29, 0.78 + st * 0.04, 0.29, stone, x, h + 0.86 + st * 0.02, z, { top: "#674a3b", jitter: 0.035 });
-      B.b(0.34, 0.11, 0.34, "#211916", x, h + 0.53, z, { top: "#6a4a38", jitter: 0.02 });
-      B.b(0.31, 0.075, 0.31, bronze, x, h + 1.27 + st * 0.04, z, { top: "#b18458", jitter: 0.02 });
-      B.b(0.075, 0.075, 0.055, "#b18458", x, h + 0.9 + st * 0.02, z + (z > 0 ? 0.15 : -0.15), { jitter: 0.01 });
+      B.b(0.36, 0.18, 0.36, "#211a17", x * 1.34, h + 0.43, z * 1.34, { top: "#725542", jitter: 0.02 });
+      B.b(0.27, 0.08, 0.27, bronze, x * 1.34, h + 0.54, z * 1.34, { top: "#c09258", jitter: 0.01 });
+      B.b(0.07, 0.035, 0.07, "#d4aa70", x * 1.34, h + 0.59, z * 1.34, { jitter: 0 });
+    }
+    // Four low feet carry the furnace visually above its plinth.
+    for (const [x, z] of corners) {
+      B.b(0.31, 0.24, 0.31, basalt, x, h + 0.65, z, { top: "#705442", jitter: 0.03 });
+      B.b(0.35, 0.055, 0.35, iron, x, h + 0.55, z, { top: bronze, jitter: 0.01 });
     }
 
-    // Compact furnace body. Deep inset panels read as a chamber, not as a neon control console.
-    B.b(0.98, 0.68, 0.98, stone, 0, h + 1.12, 0, { top: "#62483b", jitter: 0.035 });
-    B.b(0.72, 0.48, 0.72, "#211917", 0, h + 1.14, 0, { top: "#30221e", jitter: 0.015 });
-    B.b(0.5, 0.035, 0.05, bronze, 0, h + 1.19, 0.37, { jitter: 0.01 });
-    B.b(0.07, 0.28, 0.04, "#c78a4b", -0.2, h + 1.17, 0.385, { jitter: 0.01 });
-    B.b(0.07, 0.28, 0.04, "#c78a4b", 0.2, h + 1.17, 0.385, { jitter: 0.01 });
-    B.g(0.09, 0.18, 0.035, "#ff9a3d", 0, h + 1.15, 0.405, 1.35);
+    // Main furnace housing: large readable masonry masses with carved, recessed side panels.
+    B.b(1.32, 0.82, 1.32, basalt, 0, h + 1.02, 0, { top: "#725542", jitter: 0.035 });
+    B.b(1.18, 0.66, 1.18, stone, 0, h + 1.05, 0, { top: stoneHi, jitter: 0.035 });
+    B.b(0.98, 0.53, 0.98, iron, 0, h + 1.08, 0, { top: "#302523", jitter: 0.01 });
 
-    // Iron binding belt and four simple, legible fasteners.
-    B.b(1.12, 0.105, 1.12, iron, 0, h + 0.72, 0, { jitter: 0.015 });
-    B.b(1.08, 0.045, 1.08, bronze, 0, h + 0.79, 0, { jitter: 0.015 });
-    for (const [x, z] of [[-0.54, 0], [0.54, 0], [0, -0.54], [0, 0.54]]) {
-      B.b(0.13, 0.15, 0.075, bronze, x, h + 0.76, z, { top: "#b18458", jitter: 0.01 });
-    }
+    // Front-facing inset service panel, layered like a fitted iron door rather than a glowing screen.
+    B.b(0.73, 0.42, 0.065, "#211a18", 0, h + 1.03, 0.69, { top: "#49372d", jitter: 0.01 });
+    B.b(0.59, 0.29, 0.035, "#302522", 0, h + 1.04, 0.745, { top: "#3b2b23", jitter: 0.01 });
+    B.b(0.39, 0.045, 0.035, bronze, 0, h + 1.15, 0.775, { jitter: 0.01 });
+    B.b(0.045, 0.19, 0.035, gold, -0.22, h + 1.04, 0.775, { jitter: 0.01 });
+    B.b(0.045, 0.19, 0.035, gold, 0.22, h + 1.04, 0.775, { jitter: 0.01 });
+    B.b(0.075, 0.075, 0.035, "#d5a66a", 0, h + 1.04, 0.80, { jitter: 0 });
+    B.g(0.045, 0.045, 0.02, "#e7a44b", 0, h + 1.04, 0.82, 0.85);
 
-    // Open brazier bowl: four thick rim bars surround a dark, visible cavity.
-    // Avoid a solid bright plate beneath the fire — the negative space is part of the design.
-    B.b(1.48, 0.16, 0.22, "#30231e", 0, h + 1.68, -0.63, { top: "#765641", jitter: 0.025 });
-    B.b(1.48, 0.16, 0.22, "#30231e", 0, h + 1.68, 0.63, { top: "#765641", jitter: 0.025 });
-    B.b(0.22, 0.16, 1.04, "#30231e", -0.63, h + 1.68, 0, { top: "#765641", jitter: 0.025 });
-    B.b(0.22, 0.16, 1.04, "#30231e", 0.63, h + 1.68, 0, { top: "#765641", jitter: 0.025 });
-    B.b(0.92, 0.06, 0.92, "#1b1412", 0, h + 1.64, 0, { top: "#241815", jitter: 0.01 });
-    B.g(0.66, 0.025, 0.66, "#b94220", 0, h + 1.68, 0, 1.25);
-    B.g(0.34, 0.025, 0.34, "#ff9b3d", 0, h + 1.7, 0, 1.55);
-
-    // Four short bronze braces tie the rim back to the masonry.
+    // Side armor plates and narrow heat slots; subtle enough to read as metal inset into stone.
     for (const s of [-1, 1]) {
-      B.b(0.085, 0.32, 0.085, bronze, s * 0.68, h + 1.38, 0.48, { rotZ: -s * 0.1, jitter: 0.01 });
-      B.b(0.085, 0.32, 0.085, bronze, 0.48, h + 1.38, s * 0.68, { rotX: s * 0.1, jitter: 0.01 });
-    }
-    for (const [x, z] of [[-0.53, -0.53], [0.53, -0.53], [-0.53, 0.53], [0.53, 0.53]]) {
-      B.g(0.055, 0.035, 0.055, "#ff9b3d", x, h + 1.77, z, 1.25);
+      B.b(0.055, 0.46, 0.52, iron, s * 0.665, h + 1.03, 0, { jitter: 0.01 });
+      B.b(0.035, 0.32, 0.34, "#6a4934", s * 0.697, h + 1.03, 0, { jitter: 0.01 });
+      for (let i = 0; i < 3; i++) {
+        B.b(0.025, 0.045, 0.21, ember, s * 0.72, h + 0.92 + i * 0.105, 0, { jitter: 0 });
+      }
+      B.b(0.09, 0.11, 0.09, gold, s * 0.63, h + 1.29, 0.32, { jitter: 0.01 });
+      B.b(0.09, 0.11, 0.09, gold, s * 0.63, h + 0.77, 0.32, { jitter: 0.01 });
     }
 
-    // Stage 2 adds side braziers on visible stone arms, not detached glowing cubes.
-    if (st >= 1) {
-      // An outer forge frame adds a stronger silhouette while leaving the bowl open.
-      B.b(1.92, 0.09, 0.09, "#2a1e1a", 0, h + 1.88, -0.83, { top: "#604535", jitter: 0.02 });
-      B.b(1.92, 0.09, 0.09, "#2a1e1a", 0, h + 1.88, 0.83, { top: "#604535", jitter: 0.02 });
-      B.b(0.09, 0.09, 1.58, "#2a1e1a", -0.83, h + 1.88, 0, { top: "#604535", jitter: 0.02 });
-      B.b(0.09, 0.09, 1.58, "#2a1e1a", 0.83, h + 1.88, 0, { top: "#604535", jitter: 0.02 });
-      for (const [x, z] of [[-0.72, 0], [0.72, 0], [0, -0.72], [0, 0.72]]) {
-        B.b(0.19, 0.22, 0.19, stone, x, h + 1.72, z, { top: "#805a42", jitter: 0.02 });
-        B.g(0.075, 0.11, 0.075, "#ff7b2e", x, h + 1.78, z, 1.45);
+    // Heavy forged binding rings and segmented corner clamps.
+    B.b(1.48, 0.095, 1.48, iron, 0, h + 0.69, 0, { jitter: 0.01 });
+    B.b(1.43, 0.04, 1.43, bronze, 0, h + 0.75, 0, { jitter: 0.01 });
+    B.b(1.38, 0.07, 1.38, iron, 0, h + 1.36, 0, { jitter: 0.01 });
+    B.b(1.43, 0.045, 1.43, gold, 0, h + 1.40, 0, { jitter: 0.01 });
+    for (const [x, z] of corners) {
+      B.b(0.16, 0.40, 0.13, iron, x * 1.12, h + 1.04, z * 1.12, { top: bronze, jitter: 0.01 });
+      B.b(0.075, 0.075, 0.045, gold, x * 1.16, h + 1.05, z * 1.16, { jitter: 0 });
+      B.b(0.075, 0.075, 0.045, gold, x * 1.16, h + 1.22, z * 1.16, { jitter: 0 });
+    }
+
+    // The open brazier is a real framed cavity. Layered rim blocks have bevel-like steps and visible joints.
+    B.b(1.56, 0.13, 0.25, basalt, 0, h + 1.54, -0.66, { top: "#725542", jitter: 0.02 });
+    B.b(1.56, 0.13, 0.25, basalt, 0, h + 1.54, 0.66, { top: "#725542", jitter: 0.02 });
+    B.b(0.25, 0.13, 1.08, basalt, -0.66, h + 1.54, 0, { top: "#725542", jitter: 0.02 });
+    B.b(0.25, 0.13, 1.08, basalt, 0.66, h + 1.54, 0, { top: "#725542", jitter: 0.02 });
+    B.b(1.43, 0.07, 0.12, stoneHi, 0, h + 1.63, -0.66, { jitter: 0.015 });
+    B.b(1.43, 0.07, 0.12, stoneHi, 0, h + 1.63, 0.66, { jitter: 0.015 });
+    B.b(0.12, 0.07, 1.19, stoneHi, -0.66, h + 1.63, 0, { jitter: 0.015 });
+    B.b(0.12, 0.07, 1.19, stoneHi, 0.66, h + 1.63, 0, { jitter: 0.015 });
+    B.b(0.94, 0.035, 0.94, "#171211", 0, h + 1.49, 0, { top: "#251915", jitter: 0.01 });
+    B.g(0.58, 0.025, 0.58, "#8f321c", 0, h + 1.52, 0, 0.95);
+    B.g(0.31, 0.02, 0.31, "#d65b25", 0, h + 1.54, 0, 1.05);
+
+    // Forged braces run from the bowl to the body; pins and seams break up the broad surfaces.
+    for (const s of [-1, 1]) {
+      B.b(0.10, 0.31, 0.10, bronze, s * 0.72, h + 1.34, 0.47, { rotZ: -s * 0.13, jitter: 0.01 });
+      B.b(0.10, 0.31, 0.10, bronze, 0.47, h + 1.34, s * 0.72, { rotX: s * 0.13, jitter: 0.01 });
+      B.b(0.065, 0.065, 0.035, gold, s * 0.71, h + 1.36, 0.53, { jitter: 0 });
+      B.b(0.065, 0.065, 0.035, gold, 0.53, h + 1.36, s * 0.71, { jitter: 0 });
+    }
+    // Small chisel-cut vent marks on the visible faces: dark grooves with one warm reflection.
+    for (const s of [-1, 1]) {
+      for (let i = 0; i < 4; i++) {
+        B.b(0.045, 0.12, 0.025, "#201917", s * (0.32 + i * 0.1), h + 0.96, 0.684, { jitter: 0 });
       }
-      for (let i = -1; i <= 1; i++) {
-        B.b(0.06, 0.18, 0.06, bronze, i * 0.17, h + 1.39, 0.51, { jitter: 0.01 });
+      B.b(0.27, 0.035, 0.025, "#7a4f34", s * 0.43, h + 1.24, 0.69, { jitter: 0.01 });
+    }
+
+    // Stage 2: a larger outer frame, individually keyed corner blocks and side fire bowls.
+    if (st >= 1) {
+      B.b(1.88, 0.09, 0.11, iron, 0, h + 1.72, -0.84, { top: "#644a38", jitter: 0.01 });
+      B.b(1.88, 0.09, 0.11, iron, 0, h + 1.72, 0.84, { top: "#644a38", jitter: 0.01 });
+      B.b(0.11, 0.09, 1.58, iron, -0.84, h + 1.72, 0, { top: "#644a38", jitter: 0.01 });
+      B.b(0.11, 0.09, 1.58, iron, 0.84, h + 1.72, 0, { top: "#644a38", jitter: 0.01 });
+      for (const [x, z] of corners) {
+        B.b(0.22, 0.20, 0.22, stone, x * 1.28, h + 1.70, z * 1.28, { top: stoneHi, jitter: 0.02 });
+        B.b(0.10, 0.045, 0.10, gold, x * 1.28, h + 1.82, z * 1.28, { jitter: 0 });
+      }
+      // Four narrow vent chimneys with deep recesses and copper lips.
+      for (const [x, z] of [[-0.76, 0], [0.76, 0], [0, -0.76], [0, 0.76]]) {
+        B.b(0.22, 0.18, 0.22, basalt, x, h + 1.72, z, { top: "#77563f", jitter: 0.02 });
+        B.b(0.12, 0.06, 0.12, iron, x, h + 1.82, z, { jitter: 0.01 });
+        B.g(0.055, 0.045, 0.055, "#d86a2c", x, h + 1.84, z, 0.95);
       }
     }
     if (st >= 2) {
+      // Side braziers are supported by masonry arms and use a quieter, hotter center.
       for (const s of [-1, 1]) {
-        B.b(0.48, 0.12, 0.38, "#2b201c", s * 1.0, h + 0.7, 0, { top: "#5b4032", jitter: 0.02 });
-        B.b(0.16, 0.32, 0.16, stone, s * 1.0, h + 0.91, 0, { top: "#765541", jitter: 0.02 });
-        B.b(0.34, 0.09, 0.34, "#30231e", s * 1.0, h + 1.12, 0, { top: "#8b6548", jitter: 0.02 });
-        B.g(0.19, 0.035, 0.19, "#b94220", s * 1.0, h + 1.17, 0, 1.25);
-        // Smaller tapered side flames echo the main flame without competing with it.
-        B.g(0.16, 0.24, 0.16, "#e9682e", s * 1.0, h + 1.32, 0, 1.45, { rotZ: -s * 0.16 });
-        B.g(0.095, 0.22, 0.095, "#ffc05a", s * 1.0, h + 1.48, 0, 1.65, { rotZ: -s * 0.2 });
+        B.b(0.52, 0.15, 0.42, basalt, s * 1.02, h + 0.72, 0, { top: "#604637", jitter: 0.02 });
+        B.b(0.18, 0.30, 0.18, stone, s * 1.02, h + 0.94, 0, { top: stoneHi, jitter: 0.02 });
+        B.b(0.38, 0.10, 0.38, iron, s * 1.02, h + 1.13, 0, { top: "#7b593e", jitter: 0.01 });
+        B.b(0.27, 0.045, 0.27, "#211613", s * 1.02, h + 1.19, 0, { jitter: 0.01 });
+        B.g(0.14, 0.22, 0.14, "#d85b27", s * 1.02, h + 1.34, 0, 0.95, { rotZ: -s * 0.15 });
+        B.g(0.085, 0.18, 0.085, "#f4a847", s * 1.02, h + 1.48, 0, 1.05, { rotZ: -s * 0.2 });
+        // Bronze collar rings and paired rivets make the supports feel assembled.
+        B.b(0.22, 0.045, 0.22, bronze, s * 1.02, h + 0.84, 0, { jitter: 0.01 });
+        B.b(0.055, 0.055, 0.035, gold, s * 0.91, h + 0.94, 0.1, { jitter: 0 });
+        B.b(0.055, 0.055, 0.035, gold, s * 1.13, h + 0.94, 0.1, { jitter: 0 });
       }
+      // Rear stabilizing fins keep the upper structure visually grounded.
       for (const s of [-1, 1]) {
-        B.b(0.12, 0.34, 0.12, "#30231e", 0, h + 1.42, s * 0.72, { rotX: s * 0.18 });
-        B.g(0.045, 0.22, 0.045, "#e9682e", 0, h + 1.43, s * 0.79, 1.35);
+        B.b(0.10, 0.38, 0.10, iron, 0, h + 1.39, s * 0.73, { rotX: s * 0.18, jitter: 0.01 });
+        B.b(0.045, 0.24, 0.045, "#bd5428", 0, h + 1.4, s * 0.79, { jitter: 0.01 });
       }
     }
     if (st >= 3) {
-      // A forged crown of dark prongs and bronze tips — architectural, not a generic halo.
+      // Masterwork crown: four stepped basalt prongs, bronze inlays and a restrained ember circuit.
       for (const [x, z] of corners) {
-        B.b(0.17, 0.32, 0.17, "#2b201c", x * 1.2, h + 2.03, z * 1.2, { top: "#8a6041", jitter: 0.015 });
-        B.b(0.095, 0.18, 0.095, "#b18458", x * 1.2, h + 2.28, z * 1.2, { top: "#d6a46b", jitter: 0.01 });
+        B.b(0.23, 0.33, 0.23, basalt, x * 1.28, h + 1.94, z * 1.28, { top: "#79573e", jitter: 0.015 });
+        B.b(0.16, 0.10, 0.16, bronze, x * 1.28, h + 2.15, z * 1.28, { top: "#c09660", jitter: 0.01 });
+        B.b(0.09, 0.17, 0.09, gold, x * 1.28, h + 2.28, z * 1.28, { top: "#e0b87b", jitter: 0.005 });
+        B.b(0.045, 0.20, 0.045, iron, x * 1.28, h + 2.34, z * 1.28, { rotZ: x * 0.12, jitter: 0.005 });
       }
-      B.g(0.9, 0.035, 0.07, "#ff9b3d", 0, h + 2.02, 0.58, 1.45);
-      B.g(0.07, 0.035, 0.9, "#ff9b3d", 0.58, h + 2.02, 0, 1.45);
-      for (const s of [-1, 1]) B.b(0.08, 0.38, 0.08, bronze, s * 0.9, h + 1.91, 0, { rotZ: -s * 0.18, jitter: 0.01 });
+      B.b(1.40, 0.07, 0.09, bronze, 0, h + 1.91, 0.64, { jitter: 0.01 });
+      B.b(1.40, 0.07, 0.09, bronze, 0, h + 1.91, -0.64, { jitter: 0.01 });
+      B.b(0.09, 0.07, 1.20, bronze, 0.64, h + 1.91, 0, { jitter: 0.01 });
+      B.b(0.09, 0.07, 1.20, bronze, -0.64, h + 1.91, 0, { jitter: 0.01 });
+      for (const [x, z] of [[-0.64, -0.64], [0.64, -0.64], [-0.64, 0.64], [0.64, 0.64]]) {
+        B.g(0.075, 0.04, 0.075, "#e18a39", x, h + 1.96, z, 0.9);
+      }
+      // Small forged crest at the rear gives the top stage a unique profile without a huge halo.
+      B.b(0.14, 0.42, 0.14, basalt, 0, h + 2.12, -0.82, { top: "#78563d", jitter: 0.01 });
+      B.b(0.09, 0.22, 0.09, gold, 0, h + 2.39, -0.82, { jitter: 0.005 });
     }
 
-    // A narrower, three-layer flame: dark ember edge, orange body, and a small gold heart.
-    // Rotated, overlapping voxel prisms give it a tapered silhouette instead of one big pink block.
-    const F = P.float;
-    const fs = 0.9 + st * 0.1;
-    F.g(0.52 * fs, 0.74 * fs, 0.42 * fs, "#c94324", 0.02, 0.28 * fs, 0, 1.25, { rotY: 0.35, rotZ: -0.12 });
-    F.g(0.39 * fs, 0.86 * fs, 0.34 * fs, "#f06b2c", -0.02, 0.62 * fs, 0.015, 1.45, { rotY: 0.15, rotZ: 0.18 });
-    F.g(0.27 * fs, 0.68 * fs, 0.24 * fs, "#ff9b3d", 0.055, 0.98 * fs, 0.025, 1.7, { rotY: 0.6, rotZ: -0.22 });
-    F.g(0.17 * fs, 0.42 * fs, 0.16 * fs, "#ffd16a", 0.015, 1.24 * fs, 0.045, 1.9, { rotY: 0.25, rotZ: 0.12 });
-    F.g(0.09 * fs, 0.22 * fs, 0.09 * fs, "#fff0b2", -0.015, 1.36 * fs, 0.06, 2.0, { rotY: 0.7, rotZ: -0.15 });
+    // Flame is deliberately built mostly from shaded solid facets; restrained glow accents preserve shape under bloom.
+    const fs = 0.9 + st * 0.09;
+    F.b(0.52 * fs, 0.72 * fs, 0.42 * fs, "#a9361f", 0.015, 0.25 * fs, 0, { rotY: 0.32, rotZ: -0.12, jitter: 0.01 });
+    F.b(0.40 * fs, 0.78 * fs, 0.34 * fs, "#d84c22", -0.025, 0.57 * fs, 0.01, { rotY: 0.12, rotZ: 0.17, jitter: 0.01 });
+    F.b(0.30 * fs, 0.68 * fs, 0.25 * fs, "#f4772c", 0.045, 0.91 * fs, 0.025, { rotY: 0.58, rotZ: -0.2, jitter: 0.01 });
+    F.b(0.20 * fs, 0.46 * fs, 0.18 * fs, "#ffb64b", 0.01, 1.16 * fs, 0.04, { rotY: 0.24, rotZ: 0.13, jitter: 0.005 });
+    F.b(0.11 * fs, 0.26 * fs, 0.10 * fs, "#ffe29a", -0.018, 1.32 * fs, 0.055, { rotY: 0.68, rotZ: -0.15, jitter: 0.005 });
+    F.g(0.13 * fs, 0.32 * fs, 0.11 * fs, "#e56a2a", -0.05, 0.66 * fs, 0.06, 0.8, { rotY: 0.4, rotZ: 0.2 });
+    F.g(0.075 * fs, 0.20 * fs, 0.07 * fs, "#ffc35a", 0.015, 1.12 * fs, 0.08, 0.9, { rotY: 0.3, rotZ: -0.12 });
 
-    return { fy: h + 1.78, bob: 0.045, muzzle: [0, h + 2.45 + st * 0.1, 0] };
+    return { fy: h + 1.68, bob: 0.035, muzzle: [0, h + 2.45 + st * 0.1, 0] };
   },
   fire_1(P, h, st) { // Fireball Tower: a swivel cannon, fireball glowing at its mouth
     const B = P.base, A = P.aim;
