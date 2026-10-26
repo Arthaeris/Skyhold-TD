@@ -470,15 +470,16 @@ export function builderModel(id) {
     armL(P) { P.b(0.14 * s, 0.4 * s, 0.14 * s, c1, 0, -0.2 * s, 0); },
     armR(P) {
       P.b(0.14 * s, 0.4 * s, 0.14 * s, c1, 0, -0.2 * s, 0);
-      P.b(0.06 * s, 0.5 * s, 0.06 * s, "#6a4a2e", 0, -0.4 * s, 0.22 * s, { rotX: 1.2 });
-      P.b(0.24 * s, 0.16 * s, 0.16 * s, "#8a8f99", 0, -0.5 * s, 0.44 * s, { rotX: 1.2, top: "#b8bcc8" });
       if (isFire) {
+        // Continuous haft: the rotated shaft runs directly into the center of the hammer head.
+        P.b(0.075 * s, 0.56 * s, 0.075 * s, "#6a4a2e", 0, -0.45 * s, 0.34 * s, { rotX: 1.2, top: "#a47a4d" });
         P.b(0.18 * s, 0.13 * s, 0.18 * s, "#5c2a1c", 0, -0.33 * s, 0.12 * s, { top: "#b85c31", jitter: 0.005 });
         P.b(0.075 * s, 0.055 * s, 0.075 * s, "#d4a05b", 0, -0.39 * s, 0.20 * s, { jitter: 0.002 });
         P.b(0.29 * s, 0.19 * s, 0.20 * s, "#4b4c50", 0, -0.51 * s, 0.43 * s, { rotX: 1.2, top: "#a7a29a", jitter: 0.005 });
         P.b(0.18 * s, 0.07 * s, 0.13 * s, "#c18a4c", 0, -0.51 * s, 0.48 * s, { rotX: 1.2, top: "#f0c477", jitter: 0.002 });
         P.g(0.07 * s, 0.07 * s, 0.07 * s, "#ff8a32", 0, -0.51 * s, 0.54 * s, 1.8);
       } else {
+        P.b(0.06 * s, 0.5 * s, 0.06 * s, "#6a4a2e", 0, -0.4 * s, 0.22 * s, { rotX: 1.2 });
         P.b(0.24 * s, 0.16 * s, 0.16 * s, "#8a8f99", 0, -0.5 * s, 0.44 * s, { rotX: 1.2, top: "#b8bcc8" });
         P.g(0.08 * s, 0.08 * s, 0.08 * s, o.tool, 0, -0.5 * s, 0.54 * s, 2.4);
       }
