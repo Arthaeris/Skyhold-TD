@@ -428,6 +428,7 @@ export const BUILDER_SPECS = {
 export function builderModel(id) {
   const o = BUILDER_SPECS[id] || BUILDER_SPECS.fire;
   const s = 0.7, c1 = o.c1, c2 = o.c2;
+  const isFire = id === "fire";
   const parts = {
     body(P) {
       P.b(0.5 * s, 0.5 * s, 0.4 * s, c1, 0, 0.55 * s, 0, { top: shade(c1, 1.2) });
@@ -441,13 +442,46 @@ export function builderModel(id) {
       P.b(0.3 * s, 0.2 * s, 0.26 * s, c2, 0, 0.24 * s, 0);
       // tool belt pack
       P.b(0.36 * s, 0.34 * s, 0.2 * s, c2, 0, 0.6 * s, -0.28 * s, { top: shade(c2, 1.2) });
+      // Fire artisan only: layered ember-forged apron, shoulder guards, furnace-heart and twin-flue pack.
+      if (isFire) {
+        P.b(0.34 * s, 0.08 * s, 0.075 * s, "#d09a55", 0, 0.77 * s, 0.205 * s, { top: "#f0c477", jitter: 0.005 });
+        P.b(0.28 * s, 0.23 * s, 0.055 * s, "#632b1b", 0, 0.64 * s, 0.225 * s, { top: "#a84b29", jitter: 0.005 });
+        P.b(0.22 * s, 0.12 * s, 0.04 * s, "#8c3b20", 0, 0.66 * s, 0.262 * s, { top: "#d56a32", jitter: 0.005 });
+        P.g(0.105 * s, 0.13 * s, 0.035 * s, "#ffb447", 0, 0.67 * s, 0.288 * s, 1.45);
+        P.b(0.055 * s, 0.08 * s, 0.025 * s, "#fff0b0", 0, 0.68 * s, 0.306 * s, { jitter: 0.002 });
+        for (const side of [-1, 1]) {
+          P.b(0.22 * s, 0.16 * s, 0.24 * s, "#5a291b", side * 0.27 * s, 0.78 * s, 0, { top: "#b4542d", jitter: 0.01 });
+          P.b(0.18 * s, 0.055 * s, 0.19 * s, "#c18a4c", side * 0.27 * s, 0.87 * s, 0, { top: "#f0c477", jitter: 0.005 });
+          P.b(0.045 * s, 0.045 * s, 0.035 * s, "#ffe0a0", side * 0.27 * s, 0.88 * s, 0.105 * s, { jitter: 0 });
+          P.b(0.035 * s, 0.035 * s, 0.025 * s, "#e9b76a", side * 0.105 * s, 0.58 * s, 0.229 * s, { jitter: 0 });
+          P.b(0.035 * s, 0.13 * s, 0.025 * s, "#c18a4c", side * 0.14 * s, 0.49 * s, 0.222 * s, { jitter: 0.002 });
+        }
+        P.b(0.31 * s, 0.28 * s, 0.12 * s, "#40221a", 0, 0.62 * s, -0.37 * s, { top: "#76503a", jitter: 0.01 });
+        for (const side of [-1, 1]) {
+          P.b(0.12 * s, 0.22 * s, 0.13 * s, "#282526", side * 0.105 * s, 0.79 * s, -0.39 * s, { top: "#b66a3b", jitter: 0.005 });
+          P.b(0.08 * s, 0.045 * s, 0.09 * s, "#d49a54", side * 0.105 * s, 0.91 * s, -0.39 * s, { jitter: 0.002 });
+          P.g(0.045 * s, 0.12 * s, 0.045 * s, "#ff6a2a", side * 0.105 * s, 0.80 * s, -0.39 * s, 1.0);
+        }
+        P.b(0.31 * s, 0.07 * s, 0.055 * s, "#54271c", 0, 1.105 * s, 0.235 * s, { top: "#d18a4b", jitter: 0.003 });
+        P.b(0.07 * s, 0.12 * s, 0.035 * s, "#8d4328", -0.16 * s, 1.01 * s, 0.236 * s, { jitter: 0.003 });
+        P.b(0.07 * s, 0.12 * s, 0.035 * s, "#8d4328", 0.16 * s, 1.01 * s, 0.236 * s, { jitter: 0.003 });
+      }
     },
     armL(P) { P.b(0.14 * s, 0.4 * s, 0.14 * s, c1, 0, -0.2 * s, 0); },
     armR(P) {
       P.b(0.14 * s, 0.4 * s, 0.14 * s, c1, 0, -0.2 * s, 0);
       P.b(0.06 * s, 0.5 * s, 0.06 * s, "#6a4a2e", 0, -0.4 * s, 0.22 * s, { rotX: 1.2 });
       P.b(0.24 * s, 0.16 * s, 0.16 * s, "#8a8f99", 0, -0.5 * s, 0.44 * s, { rotX: 1.2, top: "#b8bcc8" });
-      P.g(0.08 * s, 0.08 * s, 0.08 * s, o.tool, 0, -0.5 * s, 0.54 * s, 2.4);
+      if (isFire) {
+        P.b(0.18 * s, 0.13 * s, 0.18 * s, "#5c2a1c", 0, -0.33 * s, 0.12 * s, { top: "#b85c31", jitter: 0.005 });
+        P.b(0.075 * s, 0.055 * s, 0.075 * s, "#d4a05b", 0, -0.39 * s, 0.20 * s, { jitter: 0.002 });
+        P.b(0.29 * s, 0.19 * s, 0.20 * s, "#4b4c50", 0, -0.51 * s, 0.43 * s, { rotX: 1.2, top: "#a7a29a", jitter: 0.005 });
+        P.b(0.18 * s, 0.07 * s, 0.13 * s, "#c18a4c", 0, -0.51 * s, 0.48 * s, { rotX: 1.2, top: "#f0c477", jitter: 0.002 });
+        P.g(0.07 * s, 0.07 * s, 0.07 * s, "#ff8a32", 0, -0.51 * s, 0.54 * s, 1.8);
+      } else {
+        P.b(0.24 * s, 0.16 * s, 0.16 * s, "#8a8f99", 0, -0.5 * s, 0.44 * s, { rotX: 1.2, top: "#b8bcc8" });
+        P.g(0.08 * s, 0.08 * s, 0.08 * s, o.tool, 0, -0.5 * s, 0.54 * s, 2.4);
+      }
     },
   };
   const pivots = { armL: [-0.33 * s, 0.75 * s, 0], armR: [0.33 * s, 0.75 * s, 0] };
