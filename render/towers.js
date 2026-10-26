@@ -140,7 +140,7 @@ const HEADS = {
   fire_0(P, h, st) { // Flame Tower: open basalt forge with bronze fittings and a tapered, layered flame
     const B = P.base;
     const stone = "#3a2a26", stoneLight = "#594137", iron = "#292323";
-    const bronze = "#8c6040", ember = st >= 2 ? "#ff9b3d" : "#e9682e";
+    const bronze = "#8c6040";
 
     // Low, readable foundation. Keep the brightest accents away from the outer silhouette.
     B.b(1.72, 0.24, 1.72, "#251b18", 0, h + 0.12, 0, { top: "#49342b", jitter: 0.025 });
@@ -192,7 +192,11 @@ const HEADS = {
 
     // Stage 2 adds side braziers on visible stone arms, not detached glowing cubes.
     if (st >= 1) {
-      B.b(1.7, 0.09, 1.7, "#2a1e1a", 0, h + 1.88, 0, { top: "#604535", jitter: 0.02 });
+      // An outer forge frame adds a stronger silhouette while leaving the bowl open.
+      B.b(1.92, 0.09, 0.09, "#2a1e1a", 0, h + 1.88, -0.83, { top: "#604535", jitter: 0.02 });
+      B.b(1.92, 0.09, 0.09, "#2a1e1a", 0, h + 1.88, 0.83, { top: "#604535", jitter: 0.02 });
+      B.b(0.09, 0.09, 1.58, "#2a1e1a", -0.83, h + 1.88, 0, { top: "#604535", jitter: 0.02 });
+      B.b(0.09, 0.09, 1.58, "#2a1e1a", 0.83, h + 1.88, 0, { top: "#604535", jitter: 0.02 });
       for (const [x, z] of [[-0.72, 0], [0.72, 0], [0, -0.72], [0, 0.72]]) {
         B.b(0.19, 0.22, 0.19, stone, x, h + 1.72, z, { top: "#805a42", jitter: 0.02 });
         B.g(0.075, 0.11, 0.075, "#ff7b2e", x, h + 1.78, z, 1.45);
