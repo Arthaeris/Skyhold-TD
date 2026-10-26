@@ -294,17 +294,131 @@ const HEADS = {
 
     return { fy: h + 1.68, bob: 0.035, muzzle: [0, h + 2.45 + st * 0.1, 0] };
   },
-  fire_1(P, h, st) { // Fireball Tower: a swivel cannon, fireball glowing at its mouth
+  fire_1(P, h, st) { // Fireball Tower: precision-built siege cannon with a furnace-core muzzle
     const B = P.base, A = P.aim;
-    octo(B, 0.7, 0.6, "#3a2a26", 0, h + 0.3, 0, "#55403a");
-    A.b(1.3, 0.5, 1.0, "#2c201c", 0, 0, 0, { top: "#4a3630" });
+    const iron = "#25282a", ironHi = "#414347", bronze = "#9a6a3c";
+    const brass = "#c49a53", stone = "#493831", ember = st >= 2 ? "#ff8a32" : "#e7652a";
+
+    // Weighted, machined turntable anchored to the same elemental stone plinth.
+    octo(B, 0.78, 0.28, "#211a18", 0, h + 0.18, 0, "#4a3931");
+    octo(B, 0.68, 0.20, stone, 0, h + 0.38, 0, "#71503c");
+    B.b(1.22, 0.10, 1.22, iron, 0, h + 0.52, 0, { top: "#4d4036", jitter: 0.02 });
+    B.b(1.12, 0.055, 1.12, bronze, 0, h + 0.59, 0, { jitter: 0.01 });
+    B.b(0.94, 0.12, 0.94, "#292525", 0, h + 0.68, 0, { top: "#574238", jitter: 0.02 });
+
+    // Four articulated bearing housings, bolts, and visible hinge pins.
+    for (const [x,z] of [[-0.55,-0.55],[0.55,-0.55],[-0.55,0.55],[0.55,0.55]]) {
+      B.b(0.25, 0.18, 0.25, iron, x, h + 0.63, z, { top: "#65503e", jitter: 0.015 });
+      B.b(0.12, 0.07, 0.12, brass, x, h + 0.75, z, { top: "#e0bc75", jitter: 0.005 });
+    }
+    for (const s of [-1,1]) {
+      B.b(0.18, 0.12, 0.46, "#2a2421", s * 0.72, h + 0.58, 0, { top: "#66503b", jitter: 0.015 });
+      B.b(0.09, 0.09, 0.09, brass, s * 0.79, h + 0.62, 0, { jitter: 0.005 });
+    }
+
+    // The aim assembly has its own pivot. This offset preserves the tower's existing aiming contract.
     A.push(0, 0.35, 0.2, 0, -0.45);
-    A.b(0.62, 0.62, 1.9, "#3d2b26", 0, 0, 0.6, { top: "#5a443a" });
-    A.b(0.78, 0.78, 0.3, "#c9a24a", 0, 0, 0.0); A.b(0.78, 0.78, 0.3, "#c9a24a", 0, 0, 1.5);
-    A.g(0.5, 0.5, 0.5, "#ffb15c", 0, 0, 1.75, 3);
-    A.g(0.7, 0.7, 0.4, "#ff6a2a", 0, 0, 1.95, 2.2);
+
+    // Armoured breech: stacked cast-metal volumes with a clearly readable rear mass.
+    A.b(1.16, 0.72, 0.86, iron, 0, -0.04, 0.12, { top: "#5b5146", jitter: 0.025 });
+    A.b(0.98, 0.55, 0.72, ironHi, 0, -0.02, 0.17, { top: "#716052", jitter: 0.02 });
+    A.b(0.78, 0.40, 0.58, "#302b28", 0, -0.015, 0.23, { top: "#4b3b30", jitter: 0.015 });
+    // Recessed breech hatch with brass border and a central heat-sink boss.
+    A.b(0.52, 0.30, 0.045, "#1b1b1c", 0, 0.00, -0.22, { jitter: 0.005 });
+    A.b(0.40, 0.20, 0.035, bronze, 0, 0.00, -0.25, { jitter: 0.005 });
+    A.b(0.26, 0.12, 0.04, "#29282a", 0, 0.00, -0.28, { top: "#74604b", jitter: 0.005 });
+    A.g(0.12, 0.12, 0.045, "#ff9a3e", 0, 0.00, -0.31, 1.0);
+    for (const s of [-1,1]) {
+      A.b(0.055, 0.055, 0.045, brass, s * 0.24, 0.10, -0.27, { jitter: 0 });
+      A.b(0.055, 0.055, 0.045, brass, s * 0.24, -0.10, -0.27, { jitter: 0 });
+    }
+
+    // Main barrel: a tapered, multi-stage jacket, not one long featureless block.
+    A.b(0.70, 0.70, 0.28, "#292625", 0, 0.02, 0.52, { top: "#655447", jitter: 0.015 });
+    A.b(0.58, 0.58, 0.42, "#49413a", 0, 0.02, 0.79, { top: "#82705c", jitter: 0.02 });
+    A.b(0.48, 0.48, 0.70, "#383333", 0, 0.02, 1.26, { top: "#6e5b49", jitter: 0.015 });
+    A.b(0.38, 0.38, 0.44, "#29292b", 0, 0.02, 1.78, { top: "#5a4a3c", jitter: 0.01 });
+
+    // Raised longitudinal ribs catch light and make the barrel feel machined and reinforced.
+    for (const s of [-1,1]) {
+      A.b(0.075, 0.075, 1.18, bronze, s * 0.255, 0.10, 1.18, { rotY: s * 0.06, jitter: 0.01 });
+      A.b(0.045, 0.045, 0.72, brass, s * 0.22, 0.13, 1.32, { jitter: 0.005 });
+    }
+    // Heavy segmented collars around the barrel, with thin brass inlay rings.
+    for (const [z, r] of [[0.68,0.62],[1.05,0.49],[1.58,0.43],[1.91,0.42]]) {
+      A.b(r, r, 0.12, iron, 0, 0.02, z, { top: "#77614b", jitter: 0.01 });
+      A.b(r * 0.91, r * 0.91, 0.045, bronze, 0, 0.02, z + 0.075, { jitter: 0.005 });
+      for (const s of [-1,1]) A.b(0.065, 0.065, 0.06, brass, s * r * 0.35, r * 0.28, z + 0.09, { jitter: 0 });
+    }
+
+    // Muzzle crown: layered dark steel, copper lip, and a recessed bore.
+    A.b(0.60, 0.60, 0.18, "#211f20", 0, 0.02, 2.05, { top: "#74604d", jitter: 0.01 });
+    A.b(0.50, 0.50, 0.10, bronze, 0, 0.02, 2.16, { top: "#c59a58", jitter: 0.005 });
+    A.b(0.40, 0.40, 0.08, "#17191b", 0, 0.02, 2.22, { top: "#37302a", jitter: 0.005 });
+    A.g(0.30, 0.30, 0.06, "#ff9d3d", 0, 0.02, 2.27, 1.5);
+    A.g(0.18, 0.18, 0.065, "#ffd36d", 0, 0.02, 2.31, 1.8);
+    // Four locking lugs and tiny radial heat vents around the muzzle.
+    for (let i = 0; i < 8; i++) {
+      const a = i * Math.PI / 4;
+      A.b(0.085, 0.085, 0.11, i % 2 ? bronze : brass, Math.cos(a) * 0.255, 0.02 + Math.sin(a) * 0.255, 2.17, { jitter: 0.005 });
+    }
+    for (const s of [-1,1]) {
+      A.b(0.12, 0.20, 0.42, iron, s * 0.49, -0.06, 0.66, { top: "#62503e", jitter: 0.015 });
+      A.b(0.16, 0.12, 0.14, bronze, s * 0.49, -0.06, 0.86, { jitter: 0.005 });
+      A.b(0.10, 0.10, 0.10, brass, s * 0.49, -0.06, 0.88, { jitter: 0 });
+    }
+
+    // Elevation trunnions, toothed side sectors, and compact recoil struts.
+    for (const s of [-1,1]) {
+      A.b(0.22, 0.32, 0.32, "#201f20", s * 0.64, -0.14, 0.12, { top: "#6a503a", jitter: 0.01 });
+      A.b(0.16, 0.16, 0.16, brass, s * 0.76, -0.14, 0.12, { jitter: 0.005 });
+      A.b(0.09, 0.09, 0.09, "#e2bd74", s * 0.79, -0.14, 0.12, { jitter: 0 });
+      A.b(0.10, 0.18, 0.62, "#353132", s * 0.52, -0.39, 0.35, { rotX: s * 0.05, jitter: 0.01 });
+      A.b(0.06, 0.08, 0.42, bronze, s * 0.52, -0.39, 0.42, { jitter: 0.005 });
+      for (let i = 0; i < 4; i++) A.b(0.045, 0.045, 0.07, brass, s * 0.68, -0.14, 0.48 + i * 0.13, { jitter: 0 });
+    }
+
+    // Upper stages gain purposeful engineering details and a more imposing silhouette.
+    if (st >= 1) {
+      // Paired heat exhausts and shoulder armour.
+      for (const s of [-1,1]) {
+        A.b(0.20, 0.28, 0.34, "#242426", s * 0.48, 0.35, 0.28, { top: "#6b523b", jitter: 0.01 });
+        A.b(0.12, 0.07, 0.22, bronze, s * 0.48, 0.51, 0.28, { jitter: 0.005 });
+        A.g(0.07, 0.035, 0.13, "#f0782e", s * 0.48, 0.55, 0.28, 0.8);
+      }
+      A.b(0.88, 0.12, 0.16, iron, 0, 0.42, 0.34, { top: "#70533c", jitter: 0.01 });
+      A.b(0.66, 0.06, 0.10, brass, 0, 0.50, 0.35, { jitter: 0.005 });
+      // Inlaid calibre markings along the upper barrel.
+      for (let i = 0; i < 5; i++) A.b(0.035, 0.035, 0.08, "#d8ad63", -0.13 + i * 0.065, 0.265, 1.28, { jitter: 0 });
+    }
+    if (st >= 2) {
+      // Side-mounted fuel canisters, protected by ribbed cages.
+      for (const s of [-1,1]) {
+        A.b(0.22, 0.38, 0.28, "#252426", s * 0.63, -0.02, 1.05, { top: "#70533c", jitter: 0.01 });
+        A.b(0.16, 0.25, 0.18, "#5b3a29", s * 0.63, -0.02, 1.05, { top: "#8a5a37", jitter: 0.01 });
+        A.g(0.07, 0.20, 0.07, "#ff8c38", s * 0.63, -0.02, 1.05, 0.85);
+        for (let i = 0; i < 3; i++) A.b(0.035, 0.32, 0.32, bronze, s * 0.75, -0.02, 0.95 + i * 0.1, { jitter: 0.005 });
+      }
+      // Recoil rail behind the breech and a small heat shield below the barrel.
+      A.b(0.14, 0.12, 0.72, iron, 0, -0.48, -0.02, { jitter: 0.01 });
+      A.b(0.10, 0.06, 0.58, bronze, 0, -0.55, 0.02, { jitter: 0.005 });
+    }
+    if (st >= 3) {
+      // Masterwork siege crown: articulated side fins, engraved brass plates, and a restrained arcane charge.
+      for (const s of [-1,1]) {
+        A.b(0.14, 0.36, 0.52, iron, s * 0.66, 0.18, 1.35, { rotZ: -s * 0.14, top: "#786046", jitter: 0.01 });
+        A.b(0.055, 0.24, 0.40, brass, s * 0.73, 0.18, 1.35, { rotZ: -s * 0.14, jitter: 0.005 });
+        A.b(0.08, 0.08, 0.08, "#e5c17b", s * 0.69, 0.34, 1.53, { jitter: 0 });
+      }
+      A.b(0.42, 0.08, 0.42, iron, 0, 0.42, 0.88, { top: "#806342", jitter: 0.01 });
+      A.b(0.24, 0.035, 0.24, brass, 0, 0.47, 0.88, { jitter: 0.005 });
+      A.g(0.12, 0.12, 0.12, "#ffb34e", 0, 0.50, 0.88, 1.0);
+      for (let i = 0; i < 6; i++) {
+        const a = i * Math.PI / 3;
+        A.b(0.07, 0.12, 0.07, bronze, Math.cos(a) * 0.30, 0.30, 0.88 + Math.sin(a) * 0.30, { rotY: -a, jitter: 0.005 });
+      }
+    }
     A.pop();
-    if (st >= 2) { A.b(0.3, 0.3, 0.9, "#2c201c", 0.75, 0.15, -0.1); A.g(0.2, 0.2, 0.2, "#ff6a2a", 0.75, 0.15, -0.6, 2.4); }
     return { ay: h + 0.8, muzzle: [0, 1.2, 2.0] };
   },
   fire_2(P, h, st) { // Magma Tower: a squat forge with a magma pool and flame vents
