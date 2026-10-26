@@ -9,6 +9,7 @@ import * as fx from "../sim/fx.js";
 import { generateWave, waveAffix, AFFIXES } from "../sim/waves.js";
 import { icon, sigil } from "./icons.js";
 import { traitList, MOB_BY_ID, ARMOR_CLASSES, SEND_TIERS } from "../content/mobs.js";
+import * as R from "../content/rules.js";
 
 const $ = (id) => document.getElementById(id);
 const toI = (v) => fx.toInt(v);
@@ -57,9 +58,9 @@ export function createUI(opts) {
   function showRing(sx, sy, items, o) {
     const m = $("radial-menu"), stage = $("game-stage"); if (!m || !stage) return;
     m.innerHTML = "";
-    const W = stage.clientWidth, H = stage.clientHeight, R = items.length > 6 ? 86 : 80;
+    const W = stage.clientWidth, H = stage.clientHeight, R = items.length > 6 ? Math.min(124, 70 + items.length * 5) : 80;
     const cx = Math.max(R + 40, Math.min(W - R - 40, sx));
-    const cy = Math.max(R + 86, Math.min(H - R - 44, sy));
+    const cy = Math.max(R + ringTop(), Math.min(H - R - 44, sy));
     const hub = document.createElement("div"); hub.className = "rad-hub"; hub.style.left = cx + "px"; hub.style.top = cy + "px"; m.appendChild(hub);
     const label = document.createElement("div");
     label.className = "rad-label";
@@ -98,41 +99,65 @@ export function createUI(opts) {
     });
     m.classList.add("show");
   }
+  // the ring's caption sits above it, so keep the ring low enough that the caption clears the top bars
+  function ringTop() {
+    const stage = $("game-stage"), nav = $("field-nav");
+    const st = stage ? stage.getBoundingClientRect().top : 0;
+    const navB = nav && nav.offsetParent !== null ? nav.getBoundingClientRect().bottom - st : 60;
+    return Math.max(86, navB + 64);
+  }
   function refreshRing() { if (!_ring) return; for (const k in _ring.items) _ring.items[k].render(); }
   // keep the ring on its tower/tile while the camera glides (clamped above the open card)
   function trackRing(sx, sy, maxY) {
     if (!_ring) return;
     const stage = $("game-stage"); const W = stage.clientWidth, H = stage.clientHeight, R = _ring.R;
     const cx = Math.max(R + 40, Math.min(W - R - 40, sx));
-    const cy = Math.max(R + 86, Math.min(Math.min(H - R - 44, (maxY || H) - R - 30), sy));
+    const cy = Math.max(R + ringTop(), Math.min(Math.min(H - R - 44, (maxY || H) - R - 30), sy));
     $("radial-menu").style.transform = `translate(${Math.round(cx - _ring.cx)}px, ${Math.round(cy - _ring.cy)}px)`;
   }
 
   const curOf = (v, el) => v.state.economy === "shared" ? v.player.gold : v.player.essence[el];
   const curIcon = (v, el) => v.state.economy === "shared" ? icon("coins", "gold") : sigil(el, "sm");
 
-  // Build ring: one bubble per unlocked tower of the corridor's element
+  // tags every tower shows: what it hits, its damage type, whether it sees stealth
+  function towerTags(def, arche, level) {
+    const a = arche || def.archetype;
+    const air = a !== "splash" && a !== "melee";
+    const det = def.element === "light" || (level || 1) >= 7 || a === "support";
+    const dt = R.DAMAGE_TYPES[R.towerDamageType(def, a)];
+    return { air, det, dt };
+  }
+  // Build ring: one bubble per unlocked tower of every element in this run
   function openBuildRing(corr, tile, sx, sy) {
     closeAllPanels();
     const v = getView(); v.buildTile = tile; v.buildMenuOpen = true;
-    const el = DB.ELEMENTS[corr.element];
-    const slots = DB.unlockedTowerSlots(masteryLevel(corr.element));
-    const list = DB.TOWERS.filter((t) => t.element === corr.element && t.slot < slots);
-    const items = list.map((t) => ({
-      key: t.id, color: el.color, confirm: true,
-      html: `<img class="ri-thumb" src="${thumb(t.id)}" alt=""><span class="ri-cost">${t.cost}</span>`,
-      focusHtml: () => {
-        const dps = t.archetype === "support" ? "" : ` · ${Math.round(t.damage * t.fireRate)} DPS`;
-        const st = t.status ? ` · ${DB.STATUSES[t.status].icon} ${DB.STATUSES[t.status].name}` : "";
-        return `<b>${t.name}</b> — ${t.cost}${dps}${st}<br><span class="rl-dim">${t.archetype} · tap again to build</span>`;
-      },
-      onFocus: () => { v.buildPreview = { range: t.range }; },
-      exec: () => { cmd.build(corr.index, tile.c, tile.r, t.id); closeAllPanels(); },
-      isDisabled: () => curOf(v, corr.element) < t.cost,
-    }));
-    const locked = DB.TOWERS.filter((t) => t.element === corr.element && t.slot >= slots).length;
+    const els = (v.player && v.player.buildable) || [corr.element];
+    const list = [], lockedBy = [];
+    for (const e of els) {
+      const slots = DB.unlockedTowerSlots(masteryLevel(e));
+      for (const t of DB.TOWERS) if (t.element === e && t.slot < slots) list.push(t);
+      const lk = DB.TOWERS.filter((t) => t.element === e && t.slot >= slots).length;
+      if (lk) lockedBy.push(`${lk} ${DB.ELEMENTS[e].name}`);
+    }
+    const items = list.map((t0) => {
+      const t = R.towerX(t0), el = DB.ELEMENTS[t.element];
+      return {
+        key: t.id, color: el.color, confirm: true,
+        html: `<img class="ri-thumb" src="${thumb(t.id)}" alt=""><span class="ri-cost">${t.cost}</span>${els.length > 1 ? `<span class="ri-el">${sigil(t.element, "xs")}</span>` : ""}`,
+        focusHtml: () => {
+          const tg = towerTags(t);
+          const dps = t.archetype === "support" ? "aura" : `${Math.round(t.damage * t.fireRate * R.TUNE.towerDamage)} DPS`;
+          const st = t.status ? ` · ${DB.STATUSES[t.status].icon} ${DB.STATUSES[t.status].name}` : "";
+          return `<b>${t.name}</b> — ${t.cost} · ${dps}${st}<br><span class="rl-dim">${tg.dt.icon} ${tg.dt.name} · ${tg.air ? "🪽 hits air" : "ground only"}${tg.det ? " · 👁 sees stealth" : ""} · tap again to build</span>`;
+        },
+        onFocus: () => { v.buildPreview = { range: t.range }; },
+        exec: () => { cmd.build(corr.index, tile.c, tile.r, t.id); closeAllPanels(); },
+        isDisabled: () => curOf(v, t.element) < t.cost,
+      };
+    });
     items.push({ key: "x", cls: "rad-cancel", confirm: false, html: icon("close"), exec: closeAllPanels });
-    showRing(sx, sy, items, { anchor: { u: tile.c + 0.5, v: tile.r + 0.5 }, title: `${sigil(corr.element, "sm")} Build — ${curIcon(v, corr.element)} ${Math.floor(curOf(v, corr.element))}${locked ? `<br><span class="rl-dim">${icon("lock", "xs")} ${locked} more with ${el.name} Mastery</span>` : ""}` });
+    const cur = v.state.economy === "shared" ? `${curIcon(v, corr.element)} ${Math.floor(curOf(v, corr.element))}` : els.map((e) => `${sigil(e, "xs")} ${Math.floor(curOf(v, e))}`).join(" ");
+    showRing(sx, sy, items, { anchor: { u: tile.c + 0.5, v: tile.r + 0.5 }, title: `Build — ${cur}${lockedBy.length ? `<br><span class="rl-dim">${icon("lock", "xs")} ${lockedBy.join(", ")} more with Mastery</span>` : ""}` });
     if (opts.onPanels) opts.onPanels();
   }
 
@@ -142,7 +167,7 @@ export function createUI(opts) {
     const v = getView(); v.selectedTowerId = tw.id;
     const el = DB.ELEMENTS[tw.def.element], def = DB.TOWER_BY_ID[tw.def.id];
     const gold = () => curOf(v, def.element);
-    const upCost = () => Math.round(def.cost * DB.SCALING.upgradeCostBase * Math.pow(DB.SCALING.costGrowth, tw.level - 1));
+    const upCost = () => opts.upgradeCost ? opts.upgradeCost(tw.def, tw.level) : Math.round(def.cost * DB.SCALING.upgradeCostBase * Math.pow(DB.SCALING.costGrowth, tw.level - 1));
     const maxed = () => tw.level >= DB.CONFIG.maxLevel;
     const TM = ["first", "last", "strong", "weak"];
     const items = [
@@ -154,8 +179,8 @@ export function createUI(opts) {
         html: () => `${icon("target")}<span class="ri-cost">${tw.targetMode || "first"}</span>`,
         exec: () => { const m = TM[(TM.indexOf(tw.targetMode || "first") + 1) % TM.length]; cmd.setTarget(corr.index, tw.id, m); } },
       { key: "sell", cls: "rad-sell", confirm: true,
-        html: `${icon("coins")}<span class="ri-cost">+${sellRefund(def, tw.level)}</span>`,
-        focusHtml: () => `<b>Sell for +${sellRefund(def, tw.level)}</b><br><span class="rl-dim">tap again to confirm</span>`,
+        html: () => `${icon("coins")}<span class="ri-cost">+${sellRefund(def, tw.level, tw)}</span>`,
+        focusHtml: () => `<b>Sell for +${sellRefund(def, tw.level, tw)}</b><br><span class="rl-dim">tap again to confirm</span>`,
         exec: () => { cmd.sell(corr.index, tw.id); closeAllPanels(); } },
       { key: "x", cls: "rad-cancel", confirm: false, html: icon("close"), exec: closeAllPanels },
     ];
@@ -236,24 +261,45 @@ export function createUI(opts) {
     const v = getView(), pl = v.field;
     let label = `${icon("play")} Start Wave ${pl.wave + 1}`;
     if (v.state.mode !== "endless" && pl.wave >= pl.totalWaves && pl.phase !== "prep") label = "Clear Enemies";
-    if (pl.phase === "prep") label = `${icon("skull")} Summon Boss`;
+    if (pl.phase === "prep") label = v.state.challenge ? `${icon("skull")} Summon the Boss` : `${icon("skull")} Bonus: the Sealed One`;
     if (pl.phase === "endboss") label = "Boss Active";
     const b = $("quick-start-wave");
     if (v.online) { const sb0 = $("quick-speed-cycle"); if (sb0) sb0.style.display = "none"; updateWavePreview(); return; }
+    if (v.versus) { const sb = $("quick-speed-cycle"); if (sb) sb.innerHTML = `${icon("speed")}<span>×${v.speed}</span>`; updateWavePreview(); return; } // the shared wave timer owns the button
     { const sb0 = $("quick-speed-cycle"); if (sb0) sb0.style.display = ""; }
     if (b) { if (b._h !== label) { b.innerHTML = label; b._h = label; } b.classList.toggle("disabled", pl.phase === "endboss"); b.classList.toggle("boss", pl.phase === "prep"); }
     const sb = $("quick-speed-cycle"); if (sb) sb.innerHTML = `${icon("speed")}<span>×${v.speed}</span>`;
     updateWavePreview();
   }
 
+  // what your defence is missing against these creeps: flyers with no anti-air, stealth with no eyes
+  function defenceWarnings(v, types) {
+    if (!v.state.x) return [];
+    let fly = false, stealth = false;
+    for (const t of types) { const d = v.state.bal.enemies[t]; const tr = (d && d.x && d.x.t) || {}; if (tr.fly) fly = true; if (tr.invisible || tr.cloakCycle || tr.cloakAura) stealth = true; }
+    if (!fly && !stealth) return [];
+    const corrs = v.versus ? [v.player.corridors[0]] : v.field.corridors;
+    let air = 0, det = 0, n = 0;
+    for (const c of corrs) if (c) for (const tw of c.towers) {
+      n++; let a = tw.def.archetype;
+      for (const mid of tw.mutations) { const mm = tw.def.mutations.find((x) => x.id === mid); if (mm && mm.mods.archetype) a = mm.mods.archetype; }
+      if (a !== "splash" && a !== "melee" && a !== "support") air++;
+      if (tw.def.element === "light" || tw.level >= 7 || a === "support") det++;
+    }
+    const out = [];
+    if (fly && air === 0) out.push({ text: "🪽 No anti-air!", tip: "Flyers ignore the maze. Splash and blade towers can't hit them — build single-target, beam or chain towers near the middle." });
+    else if (fly && air < n * 0.35) out.push({ text: "🪽 Little anti-air", tip: "Only a few of your towers can hit flyers." });
+    if (stealth && det === 0) out.push({ text: "👁 No detection!", tip: "Invisible creeps need a Light tower, a support tower or any tower at level 7+. Your builder's lantern sees a few tiles — Inspire a tower to park it there. Once seen, a creep stays marked for a moment." });
+    return out;
+  }
   // ---- next-wave preview (display-only; mirrors deterministic generateWave) --
   function updateWavePreview() {
     const wp = $("wave-preview"); if (!wp) return;
     const v = getView(), pl = v.field;
     let html = "";
-    if (pl.phase === "build" && (v.state.mode === "endless" || pl.wave < pl.totalWaves)) {
+    if (pl.phase === "build" && (v.state.mode === "endless" || pl.wave < pl.totalWaves) || (v.versus && pl.alive)) {
       const next = pl.wave + 1;
-      const isBoss = next % DB.CONFIG.bossEvery === 0;
+      const isBoss = opts.isBossWave ? opts.isBossWave(v.state, pl, next) : next % DB.CONFIG.bossEvery === 0;
       const agg = {};
       const groups = (v.state.x && opts.previewWave) ? opts.previewWave(v.state, pl, next) : generateWave(next, pl.corridorCount, DB.CONFIG.bossEvery);
       for (const g of groups) agg[g.type] = (agg[g.type] || 0) + g.count;
@@ -267,6 +313,7 @@ export function createUI(opts) {
       });
       html = `<span class="wprev-label${isBoss ? " boss" : ""}">${isBoss ? "⚠ Boss Wave " + next : "Next"}</span> ${parts.join("")}`;
       if (affix) html += ` <span class="wprev-affix" title="${affix.desc}">${affix.icon} ${affix.name}</span>`;
+      for (const w of defenceWarnings(v, Object.keys(agg))) html += ` <span class="wprev-warn" title="${w.tip}">${w.text}</span>`;
     } else if (pl.phase === "prep") {
       const bossT = v.state.challenge ? v.state.challenge.def.boss : "endboss";
       html = `<span class="wprev-label boss">⚠ Final</span> <span class="wprev-item boss"><img src="${ethumb(bossT)}" alt="">1× ${(DB.ENEMIES[bossT] && DB.ENEMIES[bossT].name) || "End Boss"}</span>`;
@@ -337,8 +384,8 @@ export function createUI(opts) {
     const stage = tw.level >= 10 ? 3 : tw.level >= 7 ? 2 : tw.level >= 4 ? 1 : 0;
     let arche = def.archetype;
     for (const mid of tw.mutations) { const m = def.mutations.find((x) => x.id === mid); if (m && m.mods.archetype) arche = m.mods.archetype; }
-    const air = arche !== "splash" && arche !== "melee";
-    const det = def.element === "light" || tw.level >= 7 || arche === "support";
+    const tg = towerTags(def, arche, tw.level);
+    const air = tg.air, det = tg.det;
     const stars = [0, 1, 2, 3, 4].map((i) => `<i class="${i < tw.expert ? "on" : ""}">★</i>`).join("");
     const head = sheetHead({
       color: el.color,
@@ -354,8 +401,9 @@ export function createUI(opts) {
     chips += chip(`⏱ <b>${r2(cur.rate)}</b>/s`, "", ` title="Attacks per second"`);
     if (def.status) chips += chip(`${DB.STATUSES[def.status].icon} ${DB.STATUSES[def.status].name}`);
     if (v.state.x) {
-      chips += chip(`🪽 ${air ? "Air" : "No air"}`, air ? "" : "no");
-      chips += chip(`👁 ${det ? "Stealth" : "Lv 7"}`, det ? "" : "no", ` title="${det ? "Detects stealth" : "Detects stealth from level 7"}"`);
+      if (arche !== "support") chips += chip(`${tg.dt.icon} ${tg.dt.name}`, "dt", ` style="--dc:${tg.dt.color}" title="${tg.dt.desc}"`);
+      chips += chip(`🪽 ${air ? "Hits air" : "Ground only"}`, air ? "" : "no");
+      chips += chip(`👁 ${det ? "Sees stealth" : "Sees stealth at Lv 7"}`, det ? "good" : "no", ` title="${det ? "Reveals invisible creeps in its range" : "Light towers, support towers and any tower at level 7+ detect stealth"}"`);
       if (tw.bState) chips += chip(`🔨 ${tw.bState === 1 ? "Waiting for builder" : "Building " + Math.round((1 - tw.bT / (tw.bMax || 1)) * 100) + "%"}`, "warn");
       if (tw.upT > 0) chips += chip("⬆ Upgrading…", "warn");
       if (tw.stunT > 0) chips += chip("💫 Stunned", "warn");
@@ -368,8 +416,8 @@ export function createUI(opts) {
     const peek = `<div class="xp-row"><span class="stars" title="Expertise">${stars}</span><div class="exp-bar"><div style="width:${expPct * 100}%"></div></div><span class="xp-n">${tw.expert < 5 ? tw.kills + "/" + expNeed : "MAX"}</span></div><div class="chips">${chips}</div>`;
     let more = `${def.desc ? `<p class="sh-desc">${def.desc}</p>` : ""}
       <div class="tp-target"><span class="tt-lbl">Target</span>${["first", "last", "strong", "weak"].map((m) => `<button class="tm-btn ${(tw.targetMode || "first") === m ? "sel" : ""}" data-tm="${m}">${m[0].toUpperCase() + m.slice(1)}</button>`).join("")}</div>
-      <div class="tp-stats">${statRow("Damage", r0(cur.dmg), nxt && r0(nxt.dmg))}${statRow("Range", r1(cur.range), nxt && r1(nxt.range))}${statRow("Attack speed", r2(cur.rate), nxt && r2(nxt.rate))}${statRow("Kills", tw.kills)}${tw.dmgDone ? statRow("Damage dealt", Math.round(tw.dmgDone / 65536)) : ""}${statRow("Sell refund", "+" + sellRefund(def, tw.level))}</div>
-      ${towerSynergyHtml(def)}`;
+      <div class="tp-stats">${statRow("Damage", r0(cur.dmg), nxt && r0(nxt.dmg))}${statRow("Range", r1(cur.range), nxt && r1(nxt.range))}${statRow("Attack speed", r2(cur.rate), nxt && r2(nxt.rate))}${statRow("Kills", tw.kills)}${tw.dmgDone ? statRow("Damage dealt", Math.round(tw.dmgDone / 65536)) : ""}${statRow("Sell refund", "+" + sellRefund(def, tw.level, tw))}</div>
+      ${towerSynergyHtml(def, v)}`;
     if (maxed) {
       more += `<div class="tp-mut-head">Mutations ${slots ? `(${tw.mutations.length}/${slots})` : "(locked — raise Mastery)"}</div><div class="tp-muts">`;
       def.mutations.forEach((m) => { const have = tw.mutations.includes(m.id); more += `<button class="mut-card ${have ? "have" : ""}" data-mut="${m.id}"><div class="mut-name">${m.name}</div><div class="mut-desc">${m.desc}</div></button>`; });
@@ -409,24 +457,27 @@ export function createUI(opts) {
     const sub = `${sigil(oid, "xs")} ${oel.name}${e.loopCount ? " · loop " + (e.loopCount + 1) : ""}${e.sentBy != null && v.versus ? " · from " + (v.seatName ? v.seatName(e.sentBy) : "NPC " + e.sentBy) : ""}`;
     const head = sheetHead({ title: `${name} ${tags.join("")}`, sub, color: oel.color,
       right: `<button class="sh-btn ${following ? "on" : ""}" data-follow>${following ? "📍 Following" : "📍 Follow"}</button>` });
-    const hp = Math.max(0, toI(e.hp)), mhp = Math.max(1, toI(e.maxHp));
+    const hpR = (x) => Math.round(opts.hpReal ? opts.hpReal(v.state, x) : toI(x));
+    const hp = Math.max(0, hpR(e.hp)), mhp = Math.max(1, hpR(e.maxHp));
     let bars = `<div class="hp-bar"><div style="width:${Math.min(100, (hp / mhp) * 100)}%"></div><span>${hp} / ${mhp}</span></div>`;
-    if (e.shieldHp > 0) bars += `<div class="sh-bar"><div style="width:${Math.min(100, (toI(e.shieldHp) / Math.max(1, toI(e.maxHp) / 2)) * 100)}%"></div><span>🛡 ${toI(e.shieldHp)}</span></div>`;
+    if (e.shieldHp > 0) bars += `<div class="sh-bar"><div style="width:${Math.min(100, (e.shieldHp / Math.max(1, e.maxHp / 2)) * 100)}%"></div><span>🛡 ${hpR(e.shieldHp)}</span></div>`;
     const tips = {};
     let chips = "";
     for (const s of stk) chips += chip(`${s.icon} ${s.name}`, "st", ` style="--sc:${s.color}"`);
-    if (e.hidden) { chips += chip("👁 Hidden", "warn", ` data-tip="hidden"`); tips.hidden = "Your towers can't see it — build Light towers or reach level 7 to detect stealth."; }
+    if (e.hidden) { chips += chip("👁 Hidden", "warn", ` data-tip="hidden"`); tips.hidden = "Your towers can't see it — Light towers, support towers, any tower at level 7+ and your builder's lantern reveal stealth. Once seen, it stays marked for 2.5 s."; }
+    else if (e.byBuilder) chips += chip("🏮 Spotted by your builder", "good");
     if (e.invulnT > 0) chips += chip("✨ Invulnerable", "warn");
+    const cls = e.cls || (m && m.armorClass) || "medium";
+    { const ac = ARMOR_CLASSES[cls];
+      if (ac) { chips += chip(`🛡 ${ac.name}`, "ac", ` style="color:${ac.color}" data-tip="ac"`); tips.ac = `<b>${ac.name} armour</b> — ${R.armorClassText(cls)}. Its armour value ${toI(e.armor)} cuts damage by ${R.armorReductionPct(toI(e.armor) + toI(e.auraArmor || 0))}%.`; } }
     if (m) {
-      const ac = ARMOR_CLASSES[m.armorClass];
-      if (ac) { chips += chip(ac.name, "ac", ` style="color:${ac.color}" data-tip="ac"`); tips.ac = `<b>${ac.name} armour</b> — its armour class (damage types will care about it).`; }
       traitList(m.traits).forEach(([i, n, d], k) => { chips += chip(`${i} ${n}`, "", ` data-tip="t${k}"`); tips["t" + k] = `<b>${n}</b> — ${d}`; });
     }
     if (affix) tips.affix = `<b>${affix.name}</b> — ${affix.desc}`;
     const tip = _epTip && tips[_epTip] ? `<div class="tip-line">${tips[_epTip]}</div>` : "";
     const peek = `${bars}<div class="chips">${chips || "<span class='chip no'>No special traits</span>"}</div>${tip}`;
     const adapts = Object.keys(e.adapt || {}).map((k) => { const a = ADAPT_INFO[k] || { icon: "↻", name: k }; const n = e.adapt[k]; return chip(`${a.icon} ${a.name}${n > 1 ? " ×" + n : ""}`, "gold"); });
-    const more = `${m ? `<p class="sh-desc">${m.desc}</p>` : ""}<div class="tp-stats">${statRow("Armor", toI(e.armor) + (e.auraArmor ? " +" + toI(e.auraArmor) : ""))}${statRow("Reward", e.reward)}${statRow("Loops", e.loopCount)}</div>${adapts.length ? `<div class="tp-mut-head">↻ Loop adaptations</div><div class="chips">${adapts.join("")}</div>` : ""}`;
+    const more = `${m ? `<p class="sh-desc">${m.desc}</p>` : ""}<div class="tp-stats">${statRow("Armour", toI(e.armor) + (e.auraArmor ? " +" + toI(e.auraArmor) : "") + (v.state.x ? ` (−${R.armorReductionPct(toI(e.armor) + toI(e.auraArmor || 0))}% damage)` : ""))}${statRow("Reward", e.reward)}${statRow("Loops", e.loopCount)}</div>${adapts.length ? `<div class="tp-mut-head">↻ Loop adaptations</div><div class="chips">${adapts.join("")}</div>` : ""}`;
     return sheetHTML(head, peek, more);
   }
   function openEnemyPanel(e) {
@@ -513,11 +564,12 @@ export function createUI(opts) {
   let _wvTip = null;
   function waveGroups(v, pl, n) {
     const groups = (v.state.x && opts.previewWave) ? opts.previewWave(v.state, pl, n) : generateWave(n, pl.corridorCount, DB.CONFIG.bossEvery);
-    const affix = waveAffix(v.state.seedBase, n, DB.CONFIG.bossEvery);
+    const boss = opts.isBossWave ? opts.isBossWave(v.state, pl, n) : n % DB.CONFIG.bossEvery === 0;
+    const affix = v.state.x && boss ? null : waveAffix(v.state.seedBase, n, DB.CONFIG.bossEvery);
     const agg = {};
     for (const g of groups) agg[g.type] = (agg[g.type] || 0) + g.count;
     for (const t in agg) if (affix && affix.countMult) agg[t] = Math.max(1, Math.round(agg[t] * affix.countMult));
-    return { agg, affix, boss: n % DB.CONFIG.bossEvery === 0 };
+    return { agg, affix, boss };
   }
   const mobIcons = (t) => { const m = MOB_BY_ID[t], tr = m ? m.traits : {}; return (tr.fly ? "🪽" : "") + (tr.invisible || tr.cloakCycle ? "👁" : ""); };
   function mobChip(t, n, key) {
@@ -526,9 +578,9 @@ export function createUI(opts) {
   }
   function mobTip(t) {
     const d = DB.ENEMIES[t] || { name: t }, m = MOB_BY_ID[t];
-    if (!m) return `<b>${d.name}</b> — ♥ ${d.hp}${d.armor ? " · 🛡 " + d.armor : ""}${d.speed ? " · speed " + d.speed : ""}`;
+    if (!m) { const cls = R.CLASSIC_ARMOR_CLASS[t]; const ac = cls && ARMOR_CLASSES[cls]; return `<b>${d.name}</b> — ♥ ${d.hp}${d.armor ? " · 🛡 " + d.armor : ""}${ac ? ` · <span style="color:${ac.color}">${ac.name}</span> <span class="dim">(${R.armorClassText(cls)})</span>` : ""}`; }
     const ac = ARMOR_CLASSES[m.armorClass];
-    return `<b>${m.name}</b> — ♥ ${m.hp}${ac ? ` · <span style="color:${ac.color}">${ac.name}</span>` : ""}<br>${traitList(m.traits).map(([i, nm, ds]) => `${i} <b>${nm}</b>: ${ds}`).join("<br>")}${traitList(m.traits).length ? "<br>" : ""}<span class="dim">${m.desc}</span>`;
+    return `<b>${m.name}</b> — ♥ ${m.hp}${m.armor ? " · 🛡 " + m.armor : ""}${ac ? ` · <span style="color:${ac.color}">${ac.name}</span> <span class="dim">(${R.armorClassText(m.armorClass)})</span>` : ""}<br>${traitList(m.traits).map(([i, nm, ds]) => `${i} <b>${nm}</b>: ${ds}`).join("<br>")}${traitList(m.traits).length ? "<br>" : ""}<span class="dim">${m.desc}</span>`;
   }
   function waveCardHTML() {
     const v = getView(), pl = v.field;
@@ -549,7 +601,8 @@ export function createUI(opts) {
       const last = v.state.mode === "endless" ? pl.wave + 3 : Math.min(pl.totalWaves, pl.wave + 3);
       for (let n = pl.wave + 1; n <= last; n++) {
         const w = waveGroups(v, pl, n);
-        body += `<div class="wv-sec${w.boss ? " boss" : ""}"><div class="wv-h">${n === pl.wave + 1 ? "Next · " : ""}Wave ${n}${w.boss ? " · ⚠ Boss" : ""}${w.affix ? ` <span class="tag-b gold" title="${w.affix.desc}">${w.affix.icon} ${w.affix.name}</span>` : ""}</div>${w.affix ? `<div class="sh-hint">${w.affix.desc}</div>` : ""}<div class="chips">${Object.keys(w.agg).map((t) => { tipFor[n + t] = t; return mobChip(t, w.agg[t], n + t); }).join("")}</div></div>`;
+        const warns = defenceWarnings(v, Object.keys(w.agg));
+        body += `<div class="wv-sec${w.boss ? " boss" : ""}"><div class="wv-h">${n === pl.wave + 1 ? "Next · " : ""}Wave ${n}${w.boss ? " · ⚠ Boss" : ""}${w.affix ? ` <span class="tag-b gold" title="${w.affix.desc}">${w.affix.icon} ${w.affix.name}</span>` : ""}</div>${w.affix ? `<div class="sh-hint">${w.affix.desc}</div>` : ""}${warns.map((x) => `<div class="wv-warn">${x.text} <span>${x.tip}</span></div>`).join("")}<div class="chips">${Object.keys(w.agg).map((t) => { tipFor[n + t] = t; return mobChip(t, w.agg[t], n + t); }).join("")}</div></div>`;
       }
     }
     const tip = _wvTip && tipFor[_wvTip] ? `<div class="tip-line">${mobTip(tipFor[_wvTip])}</div>` : "";
@@ -576,12 +629,18 @@ export function createUI(opts) {
   }
 
   function twSig(t) { return (t.bState ? Math.floor((t.bT || 0) / 32768) : 0) + "/" + t.level + "/" + t.expert + "/" + t.kills + "/" + t.mutations.length + "/" + (t.targetMode || "first") + "/" + (t.bState || 0) + (t.upT > 0 ? "u" : "") + (t.stunT > 0 ? "s" : "") + (t.jamT > 0 ? "j" : "") + (t.curseT > 0 ? "c" : "") + (t.confused ? "f" : ""); }
-  function towerSynergyHtml(def) {
-    const { setsUp, triggers } = synergiesForTower(def);
-    if (!setsUp.length && !triggers.length) return "";
-    let h = `<div class="tp-syn"><div class="tp-syn-head">${icon("flask", "xs")} Synergies</div>`;
-    for (const s of setsUp) h += `<div class="tp-syn-row">${s.status.icon}+${sigil(s.el.id, "xs")} <b style="color:${s.syn.color}">${s.syn.name}</b> — hit ${s.status.name} enemies with ${s.el.name}: ${synergyEffectText(s.syn)}</div>`;
-    for (const s of triggers) h += `<div class="tp-syn-row">${s.status.icon}+${sigil(s.el.id, "xs")} <b style="color:${s.syn.color}">${s.syn.name}</b> — this tower triggers it on ${s.status.name} enemies: ${synergyEffectText(s.syn)}</div>`;
+  function towerSynergyHtml(def, v) {
+    if (!v || !v.state || !v.state.x) return "";
+    const run = (v.player && v.player.buildable) || [];
+    const rows = [];
+    for (const e of DB.ELEMENT_ORDER) {
+      if (e === def.element) continue;
+      const syn = R.synergyFor(def.element, e); if (!syn) continue;
+      rows.push({ syn, e, live: run.includes(e) });
+    }
+    rows.sort((a, b) => (b.live ? 1 : 0) - (a.live ? 1 : 0));
+    let h = `<div class="tp-syn"><div class="tp-syn-head">${icon("flask", "xs")} Reactions <span class="dim">· its attacks set them off on creeps carrying another element's status</span></div>`;
+    for (const r of rows.slice(0, rows.some((x) => x.live) ? 7 : 3)) h += `<div class="tp-syn-row${r.live ? " live" : ""}">${sigil(def.element, "xs")}+${sigil(r.e, "xs")} <b style="color:${r.syn.color}">${r.syn.icon} ${r.syn.name}</b> — ${r.syn.text}${r.live ? "" : ` <span class="dim">(not in this run)</span>`}</div>`;
     return h + `</div>`;
   }
   function towerBadges(tw, def) {
@@ -600,15 +659,18 @@ export function createUI(opts) {
     return h + `</div>`;
   }
   function statRow(label, val, next) { return `<div class="stat-row"><span>${label}</span><span>${val}${(next != null && String(next) !== String(val)) ? ` <em>→ ${next}</em>` : ""}</span></div>`; }
-  function sellRefund(def, level) {
+  function sellRefund(def, level, tw) {
+    if (tw && opts.sellValue) return opts.sellValue(tw);
     const S = DB.SCALING;
     let invested = def.cost;
     for (let l = 1; l < level; l++) invested += Math.round(def.cost * S.upgradeCostBase * Math.pow(S.costGrowth, l - 1));
     return Math.round(invested * DB.CONFIG.sellRefund);
   }
-  function towerView(def, level, expert) {
-    const S = DB.SCALING, C = DB.CONFIG;
-    const dmg = def.damage * Math.pow(1 + S.damagePerLevel, level - 1) * (1 + (C.expertDamageBonus[expert] || 0));
+  function towerView(def0, level, expert) {
+    const v = getView(); const X = !!(v && v.state && v.state.x);
+    const def = X ? R.towerX(def0) : def0;
+    const S = X ? R.TUNE.scaling : DB.SCALING, C = DB.CONFIG;
+    const dmg = def.damage * Math.pow(1 + S.damagePerLevel, level - 1) * (1 + (C.expertDamageBonus[expert] || 0)) * (X ? R.TUNE.towerDamage : 1);
     const rate = def.fireRate * Math.pow(1 + S.fireRatePerLevel, level - 1);
     const range = def.range + S.rangePerLevel * (level - 1);
     return { dmg, rate, range };
@@ -639,7 +701,7 @@ export function createUI(opts) {
     const ELS = ["fire", "ice", "nature", "storm", "light", "darkness", "mech", "abnormal"];
     const list = (DB.MOBS_EXPANDED || []).map((id) => MOB_BY_ID[id]).filter((m) => _bstFilter === "all" || m.family === _bstFilter || (_bstFilter === "el" && ELS.includes(m.family)));
     mo.innerHTML = `<div class="modal wide glass"><button class="panel-close" id="bst-close">${icon("close")}</button><h2>Bestiary</h2>
-      <p class="dim">The ${DB.MOBS_EXPANDED.length} creeps of the Expanded rules. They join regular waves from the wave shown, and all but the Treasure Goblin can be sent in Vs matches. Armour classes will matter once damage types arrive.</p>
+      <p class="dim">The ${DB.MOBS_EXPANDED.length} creeps of Skyhold. They join waves from the wave shown, and all but the Treasure Goblin can be sent in Vs matches. Each armour class takes more from some damage types: Light from Physical, Medium from Blast, Heavy from Magic, Fortified from Blast, Ethereal from Magic.</p>
       <div class="bst-filter">${fams.map(([k, n]) => `<button class="seg ${k === _bstFilter ? "sel" : ""}" data-bf="${k}">${n}</button>`).join("")}</div>
       <div class="bst-grid">${list.map((m) => { const ac = ARMOR_CLASSES[m.armorClass]; return `<div class="bst-card"><img src="${ethumb(m.id)}" alt=""><b>${m.name}${m.pack > 1 ? " ×" + m.pack : ""}</b><div class="meta"><span style="color:${ac.color}">${ac.name}</span><span>♥ ${m.hp} · W${m.minWave}${m.tier ? " · T" + SEND_TIERS[m.tier].name : ""}</span></div><div class="tr-list" style="justify-content:flex-start;margin:0">${traitList(m.traits).slice(0, 4).map(([i, n, d]) => `<span class="tr-tag" title="${d}">${i} ${n}</span>`).join("")}</div><span class="dim">${m.desc}</span></div>`; }).join("")}</div></div>`;
     mo.classList.add("show");
@@ -662,7 +724,7 @@ export function createUI(opts) {
     const st = getView().state;
     if (st.x) {
       for (const t in DB.SENDS_EXPANDED) { const lvl = (pl.sendLevels && pl.sendLevels[t]) || 1; const sk = pl.sendStock && pl.sendStock[t]; sig += t + lvl + (pl.gold >= DB.sendCostX(t, lvl) ? "y" : "n") + (sk ? sk.n + ":" + Math.floor(sk.t / 15) : "-"); }
-      return sig + "|" + _sendTier + "|" + Math.floor(st.tick / 30) + "|" + (pl.income || 0);
+      return sig + "|" + _sendTier + "|" + Math.floor(st.tick / 30) + "|" + (pl.income || 0) + "|" + (opts.sendLoad ? Math.round(opts.sendLoad(st, (getView().me + 1) % st.players.length) * 20) : 0);
     }
     for (const t in DB.SENDS) {
       const lvl = (pl.sendLevels && pl.sendLevels[t]) || 1;
@@ -706,6 +768,16 @@ export function createUI(opts) {
     p.querySelectorAll("[data-up]").forEach((b) => b.onclick = () => cmd.upgradeSend(b.dataset.up));
   }
 
+  // how full your target's corridor is with your sends (a corridor holds only so much sent health)
+  function sendTargetHTML(v) {
+    if (!opts.sendLoad) return "";
+    const st = v.state; let t = null;
+    for (let i = 1; i < st.players.length; i++) { const p = st.players[(v.me + i) % st.players.length]; if (p.alive) { t = p; break; } }
+    if (!t) return "";
+    const load = Math.min(1, opts.sendLoad(st, t.id));
+    const name = v.seatName ? v.seatName(t.id) : "NPC " + t.id;
+    return `<div class="sp-load"><span>Target: <b>${name}</b></span><div class="sp-lbar"><div style="width:${Math.round(load * 100)}%;background:${load > 0.85 ? "#ff6a6a" : "#ff5fa2"}"></div></div><span class="dim">${load > 0.85 ? "full — wait" : Math.round(load * 100) + "% full"}</span></div>`;
+  }
   function renderSendPanelX(p, v, pl) {
     const st = v.state, bal = opts.bal, mods = st.x;
     const tiers = bal.sendTiers || {};
@@ -720,7 +792,8 @@ export function createUI(opts) {
     };
     let html = `<button class="panel-close" id="sp-close">${icon("close")}</button>
       <div class="panel-head">${icon("swords")} Send Mobs <span class="cur">${icon("coins", "gold xs")} Income +${pl.income || 0}/${mods.turbo ? "2.5" : "5"}s</span></div>
-      <p class="sp-note">Sends march into the NEXT corridor.${mods.lifeSteal ? " Every life they take is yours." : ""} Each send raises your income. Stronger tiers unlock over time${mods.sendStock ? " and recharge from a limited stock" : ""}.</p>
+      <p class="sp-note">Sends march into the NEXT corridor.${mods.lifeSteal ? " Every life they take is yours." : ""} A send that gets through takes one life and is gone. Each send raises your income. Stronger tiers unlock over time${mods.sendStock ? " and recharge from a limited stock" : ""}.</p>
+      ${sendTargetHTML(v)}
       <div class="sp-tiers">${[1, 2, 3, 4].map((k) => { const T = tiers[k]; const lock = mods.sendStock && T && now < T.unlockTicks; return `<button class="sp-tier ${k === _sendTier ? "sel" : ""} ${lock ? "locked" : ""}" data-tier="${k}">Tier ${SEND_TIERS[k].name}<small>${lock ? "🔒 " + fmt(T.unlockTicks - now) : (mods.sendStock ? "stock " + SEND_TIERS[k].stock : "open")}</small></button>`; }).join("")}</div>
       <div class="sp-rows scroll">`;
     const T = tiers[_sendTier];
@@ -804,150 +877,139 @@ export function createUI(opts) {
     bb.classList.add("show");
   }
 
-  // ---- setup screen (Circle's wording) ---------------------------------------
-  const SETUP_DESCS = {
-    mode: {
-      single: "One corridor, 10 waves. A short, focused run.",
-      loop: "Corridors form a ring — enemies that survive a corridor move on to the next and loop back around until destroyed. 10 waves per corridor.",
-      endless: "No final wave. Survive and climb as long as you can.",
-    },
-    gamemode: {
-      solo: "Play alone on your own battlefield.",
-      versus: "Offline battle royale: you own ONE corridor in a ring of 3–8. NPC rivals hold the rest. Leaked mobs cost a life and march into the next corridor. Send mobs to bury your neighbor. Last one standing wins.",
-      coop: "Defend one shared battlefield and life pool together. Multiplayer is coming to Skyhold soon.",
-      competitive: "Separate battlefields — spend resources to send extra enemies at your rival. Multiplayer is coming to Skyhold soon.",
-    },
-    econ: {
-      shared: "One gold pool pays for every tower, across all corridors.",
-      elemental: "Each element earns and spends its own essence — kills pay out in the corridor's element.",
-    },
-    status: {
-      standard: "Enemies carry one status effect at a time — a new one replaces the old.",
-      advanced: "Status effects from different towers stack and combine; enemies lock their statuses after each full loop.",
-    },
-    ruleset: {
-      expanded: "Skyhold's rules: 72 new creeps with traits join the waves (flyers, stealth, healers, summoners, tower-jammers…), towers are raised by a builder, and Vs matches get send tiers, stock and life steal.",
-      classic: "Circle Tower Wars, exactly: the original five creeps, instant towers and Circle's send economy.",
-    },
-    difficulty: {
-      easy: "Easy NPCs: slower, smaller mazes, −25% income, only tier I–II sends.",
-      normal: "Normal NPCs: Circle's bots with every send up to tier III.",
-      hard: "Hard NPCs: +25% income, quicker builds, and sends picked to exploit your defence.",
-      insane: "Insane NPCs: +50% income and a head start in gold. They read your maze and punish it.",
-    },
-    pacing: {
-      manual: "Take your time between waves. You can still toggle ⟳ Auto in-game, and calling a wave early while enemies remain pays a gold bonus.",
-      auto: "The next wave starts automatically 5 seconds after the last one is cleared. The final End Boss always waits for you.",
-    },
+  // ---- setup screen --------------------------------------------------------------
+  // Every choice explains itself right where it is made; the run estimate updates live.
+  const MODE_DESC = {
+    single: () => "One corridor, 10 waves — a bossy little sprint. Pick an element and a partner: together they set off reactions.",
+    loop: (n) => `${n} corridors in a ring, ${R.wavesFor("loop", n)} waves. A creep that escapes a corridor costs a life and roams on to the next. Every corridor can build all of your elements.`,
+    endless: (n) => `${n === 1 ? "One corridor" : n + " corridors"}, no last wave — climb as high as you can. Endless waves count toward Mastery 5.`,
   };
-  function updateSetupDescs(setup) {
-    const h = $("setup-hint"); if (!h) return;
-    const t = setup._lastTouched || "gamemode";
-    let txt = "";
-    if (t === "mode") txt = SETUP_DESCS.mode[setup.mode];
-    else if (t === "gamemode") txt = SETUP_DESCS.gamemode[setup.gameMode];
-    else if (t === "econ") txt = SETUP_DESCS.econ[setup.economy];
-    else if (t === "status") txt = SETUP_DESCS.status[setup.status];
-    else if (t === "pacing") txt = SETUP_DESCS.pacing[setup.pacing];
-    else if (t === "ruleset") txt = SETUP_DESCS.ruleset[setup.ruleset];
-    else if (t === "difficulty") txt = SETUP_DESCS.difficulty[setup.difficulty];
-    else if (t.indexOf("mod:") === 0) txt = MOD_DESCS[t.slice(4)] || "";
-    else if (t.indexOf("element:") === 0) {
-      const i = +t.split(":")[1];
-      const el = DB.ELEMENTS[setup.elements[i]];
-      if (el) txt = `Corridor ${i + 1} — ${el.name}. Tap another island in the world above to pick its element.`;
-    } else if (t === "corridors") {
-      txt = setup.gameMode === "versus"
-        ? `You + ${setup.corridors - 1} NPC rival${setup.corridors > 2 ? "s" : ""} in a ring — last one standing wins.`
-        : `${setup.corridors} corridors (${DB.SHAPE_NAMES[setup.corridors] || ""}) — ${setup.mode === "endless" ? "endless waves" : (setup.corridors * 10) + " waves"}.`;
-    }
-    h.textContent = txt || "";
-  }
   const MOD_DESCS = {
-    builders: "A builder per corridor walks to each new tower and raises it over a few seconds, Warcraft-style. Upgrades take a moment too. Off: towers appear instantly.",
-    lifeSteal: "Vs: every life your sends take from a rival is added to yours.",
+    builders: "A builder per corridor walks to each new tower and raises it over a few seconds. Its lantern also reveals invisible creeps close by. Off: towers appear instantly.",
+    lifeSteal: "Vs: every life your sends take from a rival is added to yours (up to 5 over your start).",
     sendStock: "Vs: tier II–IV sends unlock at 2:30, 6:00 and 11:00, and each send type recharges from a small stock.",
     turbo: "Vs: income pays out every 2.5 seconds instead of 5.",
     noFlyers: "No flying creeps in waves or sends.",
     noStealth: "No invisible or cloaking creeps.",
     noDisruptors: "No creeps that stun, slow, curse or confuse towers.",
-    randomLanes: "Vs: everyone, including you, gets a random element.",
-    doppel: "Vs: every NPC plays your element.",
+    randomLanes: "Vs: everyone, including you, gets random elements.",
+    doppel: "Vs: every NPC plays your elements.",
     anonymous: "Vs: rivals are hidden behind anonymous names.",
     goldMult: "Starting gold multiplier.",
     livesMult: "Starting lives multiplier.",
   };
+  function updateSetupDescs(setup) {
+    const h = $("setup-hint"); if (!h) return;
+    const t = setup._lastTouched || "";
+    h.textContent = t.indexOf("mod:") === 0 ? (MOD_DESCS[t.slice(4)] || "") : t === "econ" ? (setup.economy === "shared" ? "One gold pool pays for every tower." : "Each element earns and spends its own essence: kills pay out in the essence of the tower that made them.") : t === "pacing" ? (setup.pacing === "manual" ? "Take your time between waves. Calling a wave early while creeps remain pays a gold bonus." : "The next wave starts 5 seconds after the last one is cleared. The End Boss always waits for you.") : "";
+  }
   let _pvSel = null;
   function selectSetupNode(i, setup, avail) {
     const vs = setup.gameMode === "versus";
-    if (vs && i > 0) { setup._lastTouched = "gamemode"; updateSetupDescs(setup); toast("NPC rivals roll their elements when the match starts"); return; }
+    if (vs && i > 0) { toast("NPC rivals roll their elements when the match starts"); return; }
     _pvSel = i; setup._lastTouched = "element:" + i;
     renderSetup(setup, avail);
   }
+  function reactionLine(a, b) {
+    const s = R.synergyFor(a, b); if (!s) return "";
+    return `<div class="rx-line" style="--sc:${s.color}">${sigil(a, "xs")}<i>+</i>${sigil(b, "xs")}<i>→</i><b>${s.icon} ${s.name}</b><span>${s.text}</span></div>`;
+  }
+  function elementPills(sel, avail, attr, exclude) {
+    return DB.ELEMENT_ORDER.map((eid) => {
+      const el = DB.ELEMENTS[eid], ok = avail.includes(eid), off = eid === exclude;
+      return `<button class="elbtn${ok ? "" : " locked"}${off ? " off" : ""}${sel === eid ? " sel" : ""}" style="--ec:${el.color}" data-${attr}="${eid}">${ok ? sigil(eid, "sm") : icon("lock", "sm")}<span>${el.name}</span></button>`;
+    }).join("");
+  }
   function renderSetup(setup, availElements) {
     const vs = setup.gameMode === "versus";
-    if (vs && setup.corridors < 3) setup.corridors = 4;
+    const sheet = $("setup-sheet"); if (sheet) sheet.dataset.gm = vs ? "versus" : "solo";
+    const multi = !vs && setup.mode !== "single";
+    if (multi && setup.corridors < 3) setup.corridors = 4;
     updateSetupDescs(setup);
+    document.querySelectorAll("[data-mode]").forEach((b) => b.classList.toggle("sel", b.dataset.mode === setup.mode));
     document.querySelectorAll("[data-pacing]").forEach((b) => b.classList.toggle("sel", b.dataset.pacing === setup.pacing));
-    document.querySelectorAll("[data-mode]").forEach((b) => { b.classList.toggle("sel", !vs && b.dataset.mode === setup.mode); b.classList.toggle("disabled", vs); });
-    if (setup.mode === "single" && !vs) setup.corridors = 1;
-    const singleLocked = setup.mode === "single" && !vs;
-    const optsN = DB.CORRIDOR_OPTIONS.filter((n) => (vs ? n >= 3 : n > 1));
-    const cnt = $("corr-count"); if (cnt) cnt.textContent = singleLocked ? 1 : setup.corridors;
+    document.querySelectorAll("[data-econ]").forEach((b) => b.classList.toggle("sel", b.dataset.econ === setup.economy));
+    document.querySelectorAll("[data-sdiff]").forEach((b) => b.classList.toggle("sel", b.dataset.sdiff === setup.difficulty));
+    document.querySelectorAll("[data-diff]").forEach((b) => b.classList.toggle("sel", b.dataset.diff === setup.npc));
+    const rc = $("row-corridors"); if (rc) rc.style.display = multi ? "" : "none";
+    const optsN = DB.CORRIDOR_OPTIONS.filter((n) => n > 1);
+    setText("corr-count", setup.corridors);
     const ci = optsN.indexOf(setup.corridors);
-    const bm = $("corr-minus"), bp = $("corr-plus");
-    if (bm) bm.classList.toggle("disabled", singleLocked || ci <= 0);
-    if (bp) bp.classList.toggle("disabled", singleLocked || ci >= optsN.length - 1);
-    const shape = $("shape-name"); if (shape) shape.textContent = singleLocked ? "Single Lane" : (vs ? ("You + " + (setup.corridors - 1) + " NPCs") : (DB.SHAPE_NAMES[setup.corridors] || ""));
-    const pvh = $("pv-hint"); if (pvh) pvh.textContent = vs ? "Tap your island to pick its element — NPCs roll theirs" : "Tap an island in the world to change its element";
-    document.querySelectorAll("[data-econ]").forEach((b) => { b.classList.toggle("sel", vs ? b.dataset.econ === "shared" : b.dataset.econ === setup.economy); b.classList.toggle("disabled", vs); });
-    document.querySelectorAll("[data-status]").forEach((b) => b.classList.toggle("sel", b.dataset.status === setup.status));
-    // match rules
-    const X = setup.ruleset !== "classic";
-    document.querySelectorAll("[data-ruleset]").forEach((b) => b.classList.toggle("sel", b.dataset.ruleset === setup.ruleset));
-    const rd = $("row-diff"); if (rd) rd.style.display = vs && X ? "" : "none";
-    document.querySelectorAll("[data-diff]").forEach((b) => b.classList.toggle("sel", b.dataset.diff === setup.difficulty));
+    $("corr-minus").classList.toggle("disabled", ci <= 0); $("corr-plus").classList.toggle("disabled", ci >= optsN.length - 1);
+    setText("shape-name", DB.SHAPE_NAMES[setup.corridors] || "");
+    const dm = $("desc-mode"); if (dm) dm.textContent = MODE_DESC[setup.mode](multi ? setup.corridors : 1);
+    setText("seats-count", setup.seats - 1);
+    setText("seats-note", setup.seats - 1 === 1 ? "NPC rival" : "NPC rivals");
+    $("seats-minus").classList.toggle("disabled", setup.seats <= 3); $("seats-plus").classList.toggle("disabled", setup.seats >= 8);
+    setText("diff-lbl", vs ? "NPCs" : "Difficulty");
+    const dd = $("desc-diff");
+    if (dd) dd.textContent = vs ? ((opts.npcLevels && opts.npcLevels[setup.npc] || {}).desc || "") : (R.SOLO_DIFFICULTY[setup.difficulty] || {}).desc || "";
+    const pvh = $("pv-hint"); if (pvh) pvh.textContent = vs ? "Your island is the first — NPCs roll theirs" : multi ? "Tap an island to choose its element" : "Your corridor floats above the Vortex";
+    // run length
+    const est = $("run-est");
+    if (est) {
+      let t;
+      if (vs) t = `⏱ Usually 6–14 min · waves every 32 s until one seat is left`;
+      else if (setup.mode === "endless") t = "⏱ Open-ended · bank progress with Save in the pause menu";
+      else { const m = R.estimateRunMinutes(setup.mode, multi ? setup.corridors : 1); t = `⏱ About ${Math.round(m)} min at ×1 · ${Math.max(1, Math.round(m / 3))} min at ×3 · ${Math.max(1, Math.round(m / 5))} min at ×5`; }
+      est.textContent = t;
+    }
     document.querySelectorAll("[data-mod]").forEach((b) => {
       const k = b.dataset.mod, vsOnly = b.classList.contains("vs");
       b.style.display = vsOnly && !vs ? "none" : "";
-      b.classList.toggle("off-rule", !X);
       if (k === "goldMult") b.textContent = "💰 Gold ×" + setup.mods.goldMult;
       else if (k === "livesMult") b.textContent = "❤ Lives ×" + setup.mods.livesMult;
       b.classList.toggle("on", k === "goldMult" || k === "livesMult" ? setup.mods[k] !== 1 : !!setup.mods[k]);
     });
     const skp = $("skin-picker");
     if (skp && opts.getSkins) {
-      const cur = opts.getSkin();
-      skp.innerHTML = `<span class="sk-lbl">🔨 Builder</span>` + opts.getSkins().map((k) => `<button class="skin-btn ${k.id === cur ? "sel" : ""} ${k.unlocked ? "" : "locked"}" data-skin="${k.id}" title="${k.desc}">${k.unlocked ? "" : "🔒 "}${k.name}</button>`).join("");
-      skp.style.display = X ? "" : "none";
-      skp.querySelectorAll("[data-skin]").forEach((b) => b.onclick = () => { const k = opts.getSkins().find((x) => x.id === b.dataset.skin); if (!k.unlocked) { toast("🔒 " + k.desc); return; } opts.setSkin(k.id); renderSetup(setup, availElements); });
+      const cur = opts.getSkins().find((k) => k.id === opts.getSkin()) || { name: "Elemental" };
+      skp.innerHTML = `<span class="sk-lbl">🔨 Builder</span><button class="skin-btn sel" id="skin-open">${cur.name} <i class="dim">· change</i></button>`;
+      $("skin-open").onclick = () => openWardrobe(() => renderSetup(setup, availElements));
     }
-    // element picker: pills for the corridor node selected in the 3D preview
+    // elements
     const picker = $("element-picker");
-    const n = vs ? 1 : (setup.mode === "single" ? 1 : setup.corridors);
+    const n = multi ? setup.corridors : 1;
     for (let i = 0; i < n; i++) if (!availElements.includes(setup.elements[i])) setup.elements[i] = availElements[i % availElements.length];
     if (picker) {
-      if (_pvSel != null && _pvSel >= n) _pvSel = null;
-      if (_pvSel == null) _pvSel = 0;
-      picker.innerHTML = "";
-      const head = document.createElement("div"); head.className = "ep-head2";
-      head.innerHTML = (vs ? "Your element" : "Corridor " + (_pvSel + 1) + " of " + n) + (n > 1 ? `<span class="pv-nav"><button class="seg" id="pv-prev">${icon("left")}</button><button class="seg" id="pv-next">${icon("right")}</button></span>` : "");
-      picker.appendChild(head);
-      const rowEl = document.createElement("div"); rowEl.className = "assign-opts";
-      DB.ELEMENT_ORDER.forEach((eid) => {
-        const el = DB.ELEMENTS[eid], ok = availElements.includes(eid);
-        const b = document.createElement("button"); b.className = "elbtn" + (ok ? "" : " locked"); b.style.setProperty("--ec", el.color);
-        b.innerHTML = `${ok ? sigil(eid, "sm") : icon("lock", "sm")}<span>${el.name}</span>`;
-        b.classList.toggle("sel", setup.elements[_pvSel] === eid);
-        b.onclick = () => { if (!ok) { toast(unlockHint(eid)); return; } setup.elements[_pvSel] = eid; setup._lastTouched = "element:" + _pvSel; renderSetup(setup, availElements); };
-        rowEl.appendChild(b);
-      });
-      picker.appendChild(rowEl);
+      let h = "";
+      if (multi) {
+        if (_pvSel == null || _pvSel >= n) _pvSel = 0;
+        h += `<div class="ep-head2">Corridor ${_pvSel + 1} of ${n}<span class="pv-nav"><button class="seg" id="pv-prev">${icon("left")}</button><button class="seg" id="pv-next">${icon("right")}</button></span></div>`;
+        h += `<div class="assign-opts">${elementPills(setup.elements[_pvSel], availElements, "pel")}</div>`;
+        const uniq = [...new Set(setup.elements.slice(0, n))];
+        const lines = []; for (let i = 0; i < uniq.length; i++) for (let j = i + 1; j < uniq.length; j++) lines.push(reactionLine(uniq[i], uniq[j]));
+        h += `<div class="rx-box"><div class="rx-head">${uniq.length} element${uniq.length > 1 ? "s" : ""} · ${lines.length} reaction${lines.length === 1 ? "" : "s"} in this run</div>${lines.slice(0, 3).join("")}${lines.length > 3 ? `<div class="rx-more">+${lines.length - 3} more — see Reactions in the pause menu</div>` : ""}${uniq.length === 1 ? `<div class="rx-more">Pick different elements for more corridors to unlock reactions.</div>` : ""}</div>`;
+      } else {
+        const a = setup.elements[0];
+        if (!availElements.includes(setup.partner) || setup.partner === a) setup.partner = availElements.find((e) => e !== a) || null;
+        h += `<div class="ep-head2">${vs ? "Your element" : "Element"}</div><div class="assign-opts">${elementPills(a, availElements, "pel")}</div>`;
+        h += `<div class="ep-head2">Partner <span class="dim">· its towers join yours</span></div><div class="assign-opts">${elementPills(setup.partner, availElements, "ppa", a)}</div>`;
+        if (setup.partner) h += `<div class="rx-box">${reactionLine(a, setup.partner)}</div>`;
+      }
+      picker.innerHTML = h;
+      picker.querySelectorAll("[data-pel]").forEach((b) => b.onclick = () => { const e = b.dataset.pel; if (!availElements.includes(e)) { toast(unlockHint(e)); return; } setup.elements[multi ? _pvSel : 0] = e; if (!multi && setup.partner === e) setup.partner = availElements.find((x) => x !== e) || null; setup._lastTouched = "element"; sfx("click"); renderSetup(setup, availElements); });
+      picker.querySelectorAll("[data-ppa]").forEach((b) => b.onclick = () => { const e = b.dataset.ppa; if (!availElements.includes(e)) { toast(unlockHint(e)); return; } if (e === setup.elements[0]) return; setup.partner = e; sfx("click"); renderSetup(setup, availElements); });
       const pp = $("pv-prev"), pn = $("pv-next");
       if (pp) pp.onclick = () => selectSetupNode((_pvSel - 1 + n) % n, setup, availElements);
       if (pn) pn.onclick = () => selectSetupNode((_pvSel + 1) % n, setup, availElements);
     }
-    if (opts.onSetupPreview) opts.onSetupPreview(setup, _pvSel);
+    if (opts.onSetupPreview) opts.onSetupPreview(setup, _pvSel || 0);
+  }
+
+  // ---- wardrobe: builder skins, grouped -----------------------------------------------
+  function openWardrobe(after) {
+    const m = $("wardrobe-modal"); if (!m || !opts.getSkins) return;
+    const skins = opts.getSkins(), cur = opts.getSkin();
+    const sw = (k) => { const c = opts.skinSwatch ? opts.skinSwatch(k.id) : { c1: "#888", gl: "#fff" }; return `<i class="sw" style="--c1:${c.c1};--gl:${c.gl}"></i>`; };
+    const group = (title, list, note) => list.length ? `<div class="wd-group"><div class="wd-head">${title}<span class="dim">${list.filter((k) => k.unlocked).length}/${list.length}</span></div>${note ? `<p class="dim wd-note">${note}</p>` : ""}<div class="wd-grid">${list.map((k) => `<button class="wd-skin${k.id === cur ? " sel" : ""}${k.unlocked ? "" : " locked"}" data-skin="${k.id}" title="${k.desc}">${sw(k)}<b>${k.unlocked ? "" : "🔒 "}${k.name}</b><span>${k.unlocked ? (k.id === cur ? "Equipped" : "Tap to equip") : k.desc}</span></button>`).join("")}</div></div>` : "";
+    m.innerHTML = `<div class="modal wide glass"><button class="panel-close" id="wd-close">${icon("close")}</button><h2>Builders</h2>
+      ${group("Classics", skins.filter((k) => k.family === "general"))}
+      ${group("Sealbreakers", skins.filter((k) => k.family === "seal"), "Beat the Sealed One — the optional bonus round after the last wave — with that element in your run.")}
+      ${group("Challenge looks", skins.filter((k) => k.family === "challenge"), "Only from Challenges: beat one with an element to earn its look in that element.")}</div>`;
+    m.classList.add("show");
+    $("wd-close").onclick = () => m.classList.remove("show");
+    m.querySelectorAll("[data-skin]").forEach((b) => b.onclick = () => { const k = skins.find((x) => x.id === b.dataset.skin); if (!k.unlocked) { toast("🔒 " + k.desc); return; } opts.setSkin(k.id); sfx("click"); openWardrobe(after); if (after) after(); });
   }
 
   // ---- mastery screen + synergy codex ------------------------------------------
@@ -961,7 +1023,7 @@ export function createUI(opts) {
       const lvl = (meta.mastery && meta.mastery[eid]) || 0;
       const wins = (meta.elementWins && meta.elementWins[eid]) || 0;
       const locked = !avail.includes(eid);
-      const nextReq = lvl >= 5 ? "MAX" : lvl === 4 ? "Reach Wave 100" : `Win ${DB.MASTERY.winsRequired[lvl + 1]} runs`;
+      const nextReq = lvl >= 5 ? "MAX" : lvl === 4 ? "Reach Endless wave 50" : `Win ${DB.MASTERY.winsRequired[lvl + 1]} runs`;
       const slots = DB.unlockedTowerSlots(lvl);
       const towers = DB.TOWERS.filter((t) => t.element === eid);
       html += `<div class="mastery-card ${locked ? "locked" : ""}" style="--ec:${el.color}">
@@ -973,20 +1035,26 @@ export function createUI(opts) {
         <div class="mc-wins">Wins with element: ${wins}</div></div>`;
     });
     html += `</div>`;
-    html += `<h2 class="codex-head">${icon("flask")} Synergy Codex</h2>
-      <p class="dim codex-note">Hit an enemy carrying a status with a tower of the listed element to trigger the combo.</p>
-      <div class="codex-list">`;
-    for (const key in DB.SYNERGIES) {
-      const [st, el] = key.split("|");
-      const s = DB.STATUSES[st], E = DB.ELEMENTS[el], syn = DB.SYNERGIES[key];
-      if (!s || !E) continue;
-      html += `<div class="codex-row">
-        <span class="cx-combo">${s.icon} ${s.name} <span class="dim">+</span> ${sigil(el, "xs")} ${E.name}</span>
-        <span class="cx-name" style="color:${syn.color}">${syn.name}</span>
-        <span class="cx-eff">${synergyEffectText(syn)}</span></div>`;
-    }
-    html += `</div></div>`;
+    html += codexHTML();
+    html += `</div>`;
     m.innerHTML = html; m.classList.add("show");
+    $("ms-close").onclick = () => m.classList.remove("show");
+  }
+  // ---- reactions codex: every element pair, one reaction each ---------------------------
+  function codexHTML() {
+    const v = getView(); const run = v && v.state && v.player ? (v.player.buildable || v.player.elements) : [];
+    let h = `<h2 class="codex-head">${icon("flask")} Element Reactions</h2>
+      <p class="dim codex-note">Every pair of elements has one reaction. A creep carrying a status from one element (🔥 Burning, ❄ Chilled…) that is <b>attacked</b> by a tower of the other element reacts: the status is used up and the effect fires. Auras set statuses up; attacks set reactions off. Each creep can react once per second. "Power" is the attacking tower's damage per second.</p><div class="codex-list">`;
+    for (const s of R.SYNERGIES_X) {
+      const live = run.includes(s.a) && run.includes(s.b);
+      h += `<div class="codex-row${live ? " live" : ""}"><span class="cx-combo">${sigil(s.a, "xs")} ${DB.ELEMENTS[s.a].name} <span class="dim">+</span> ${sigil(s.b, "xs")} ${DB.ELEMENTS[s.b].name}</span><span class="cx-name" style="color:${s.color}">${s.icon} ${s.name}</span><span class="cx-eff">${s.text}</span>${live ? `<span class="cx-live">in this run</span>` : ""}</div>`;
+    }
+    return h + `</div>`;
+  }
+  function openCodex() {
+    const m = $("mastery-screen"); if (!m) return;
+    m.innerHTML = `<div class="modal wide glass"><button class="panel-close" id="ms-close">${icon("close")}</button>${codexHTML()}</div>`;
+    m.classList.add("show");
     $("ms-close").onclick = () => m.classList.remove("show");
   }
   function unlockHint(eid) {
@@ -995,7 +1063,7 @@ export function createUI(opts) {
     return "";
   }
 
-  return { openBestiary, toast, setText, closeAllPanels, closeRing, updateTopBar, updateEnemyOverview, updateWavePanel, updateWavePreview, updateBossBar, toggleSendPanel, openBuildRing, openTowerRing, openTowerPanel, openEnemyPanel, openBuilderPanel, toggleWavePanel, trackRing, positionPortrait, pickTower, endPick, get picking() { return _pick ? _pick.kind : null; }, get ringAnchor() { return _ring ? _ring.anchor : null; }, bindSheets, renderSetup, updateSetupDescs, selectSetupNode, openMastery, refreshPanels, get ringOpen() { return !!_ring; } };
+  return { openBestiary, toast, setText, closeAllPanels, closeRing, updateTopBar, updateEnemyOverview, updateWavePanel, updateWavePreview, updateBossBar, toggleSendPanel, openBuildRing, openTowerRing, openTowerPanel, openEnemyPanel, openBuilderPanel, toggleWavePanel, trackRing, positionPortrait, pickTower, endPick, get picking() { return _pick ? _pick.kind : null; }, get ringAnchor() { return _ring ? _ring.anchor : null; }, bindSheets, renderSetup, updateSetupDescs, selectSetupNode, openMastery, openWardrobe, openCodex, refreshPanels, get ringOpen() { return !!_ring; } };
 }
 
 export default { createUI };

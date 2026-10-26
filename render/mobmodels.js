@@ -15,6 +15,7 @@
    enemy renderer and the thumbnail rig use them unchanged.
    These are first-pass placeholders: replace any one by editing its spec. */
 import { TAU, shade, mix } from "./kit.js";
+import { SKIN_SPECS } from "../content/skins.js";
 
 // ---------------------------------------------------------------------------
 // extras: small builders that decorate a part. (P, o, a) — o = spec, a = anchor {x,y,z,s}
@@ -425,6 +426,8 @@ export const BUILDER_SPECS = {
   skin_eclipse: { c1: "#1a1428", c2: "#f2e8c6", eye: "#c77dff", gl: "#c77dff", headX: ["halo"], haloC: "#c77dff", tool: "#ffd23d" },
   skin_champion: { c1: "#a3262a", c2: "#d9b84a", eye: "#ffe066", gl: "#ffd23d", headX: ["crown"], tool: "#ffd23d", wings: true },
 };
+// every unlockable skin (Sealbreakers, challenge looks per element) from content/skins.js
+for (const k in SKIN_SPECS) if (!BUILDER_SPECS[k]) BUILDER_SPECS[k] = SKIN_SPECS[k];
 export function builderModel(id) {
   const o = BUILDER_SPECS[id] || BUILDER_SPECS.fire;
   const s = 0.7, c1 = o.c1, c2 = o.c2;

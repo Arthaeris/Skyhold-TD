@@ -620,7 +620,8 @@ export function buildCorridorIsland(DB, element, grid, seed = 1) {
 
   // obstacles (grid cells == 1): Circle's two obstacle variants per element, chosen by (r + c) % 2
   const OB = OBSTACLES[element] || OBSTACLES.fire;
-  const ob = (fn, x, z, rr) => { props.push(x, 0, z, 0, 0, 0, 1.2); glow.push(x, 0, z, 0, 0, 0, 1.2); fn(props, glow, 0, 0, rr); props.pop(); glow.pop(); };
+  // obstacles are drawn smaller than Circle's 1.2 so creeps stand out against them
+  const ob = (fn, x, z, rr) => { props.push(x, 0, z, 0, 0, 0, 0.82); glow.push(x, 0, z, 0, 0, 0, 0.82); fn(props, glow, 0, 0, rr); props.pop(); glow.pop(); };
   if (grid) {
     for (let rr = 0; rr < ROWS; rr++) for (let c = 0; c < COLS; c++) if (grid[rr * COLS + c] === 1) ob(OB[(rr + c) % 2], ox + c + 0.5, oz + rr + 0.5, r);
   } else {

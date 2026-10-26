@@ -42,11 +42,16 @@
 import * as fx from "./fx.js";
 import * as rng from "./rng.js";
 import * as pf from "./pathfind.js";
-import { generateWave, generateWaveExpanded, generateChallengeWave, enemyScale, totalWaves, waveAffix } from "./waves.js";
+import { generateWave, generateWaveExpanded, generateChallengeWave, generateWaveX, generateChallengeWaveX, enemyScale, totalWaves, waveAffix } from "./waves.js";
 
 const F = fx.fromFloat;
 const HALF = fx.HALF;                  // 0.5 in fixed
 export const SIM_HZ = 30;
+// [Skyhold rules] creep health is kept in units of 16 HP so it never overflows 16.16 fixed point
+// (Circle's HP wrapped negative above ~32,767). Damage converts to these units as it lands.
+export const HPS = 16;
+/** Real HP of a creep's hp/maxHp/shield value (whichever ruleset made it). */
+export function hpReal(state, v) { return state && state.x ? fx.toFloat(v) * HPS : fx.toFloat(v); }
 
 // Grid cell codes (see pathfind.js): 0 free, 1 obstacle, 2 tower.
 const CELL_FREE = 0, CELL_OBSTACLE = 1, CELL_TOWER = 2;
@@ -110,7 +115,7 @@ export function createState(bal, cfg) {
       incomeTick: 0,
       sentCount: 0,                        // total enemies sent (for rising cost §8.3)
       wave: 0,
-      totalWaves: totalWaves(cfg.mode, pc.corridorCount),
+      totalWaves: cfg.ruleset === "expanded" && bal.rx ? xTotalWaves(bal.rx, cfg.mode, pc.corridorCount) : totalWaves(cfg.mode, pc.corridorCount),
       phase: "build",                      // build | wave | prep | endboss | victory | defeat
       alive: true,
       waveActive: false,
@@ -249,14 +254,15 @@ function grant(state, pl, amount, element) {
   if (pl.log) pl.log.goldEarned += amount; // [X]
 }
 
-function upgradeCost(state, def, level) {
+export function upgradeCost(state, def, level) {
   // round(cost * upgradeCostBase * costGrowth^(level-1)) — done in fixed, then to int
-  const base = fx.mul(fx.fromInt(def.cost), state.bal.scaling.upgradeCostBase);
+  const S = state.x ? state.bal.rx.scaling : state.bal.scaling; // [X] Skyhold's upgrade curve
+  const base = fx.mul(fx.fromInt(def.cost), S.upgradeCostBase);
   let growth = fx.ONE;
-  for (let l = 1; l < level; l++) growth = fx.mul(growth, state.bal.scaling.costGrowth);
+  for (let l = 1; l < level; l++) growth = fx.mul(growth, S.costGrowth);
   return fx.round(fx.mul(base, growth));
 }
-function totalInvested(state, tw) {
+export function totalInvested(state, tw) {
   let c = tw.def.cost;
   for (let l = 1; l < tw.level; l++) c += upgradeCost(state, tw.def, l);
   return c;
@@ -265,10 +271,11 @@ function totalInvested(state, tw) {
 function cmdBuild(state, pl, cmd) {
   const corr = fieldOwner(state, pl).corridors[cmd.corridorId];
   if (!corr) return;
-  const def = state.bal.towers[cmd.towerType];
+  const def = (state.x && state.bal.towersX ? state.bal.towersX : state.bal.towers)[cmd.towerType]; // [X] Skyhold's tower numbers
   if (!def) return;
   if (def.slot >= unlockedTowerSlots(cmd.masteryLevel || 5)) return;
   if (state.challenge && state.challenge.hard && state.challenge.def.hard.maxSlots && def.slot >= state.challenge.def.hard.maxSlots) { state.events.push({ kind: "reject", player: pl.id, reason: "rule" }); return; } // [X]
+  if (state.x && pl.buildable && !pl.buildable.includes(def.element)) { state.events.push({ kind: "reject", player: pl.id, reason: "element" }); return; } // [X] only your run's elements
   if (!canAfford(state, pl, def.cost, def.element)) { state.events.push({ kind: "reject", player: pl.id, reason: "funds" }); return; }
   const spot = findValidSpot(state, corr, cmd.gx, cmd.gy);
   if (!spot) { state.events.push({ kind: "reject", player: pl.id, reason: "noRoom" }); return; }
@@ -311,6 +318,7 @@ function cmdMutate(state, pl, cmd) {
   if (tw.mutations.includes(cmd.mutId)) return;
   if (!tw.def.mutations.find(m => m.id === cmd.mutId)) return;
   tw.mutations.push(cmd.mutId);
+  tw.dt = null; // [X] damage type may change with the archetype
 }
 
 // Per-tower targeting priority (display-independent, deterministic).
@@ -348,7 +356,7 @@ function queueWaveFor(state, fp) {
     state.events.push({ kind: "earlyBonus", player: fp.id, bonus: eb });
   }
   fp.wave++;
-  const affix = waveAffix(state.seedBase, fp.wave, state.bal.bossEvery);
+  const affix = state.x ? (xIsBossWave(state, fp, fp.wave) ? null : waveAffix(state.seedBase, fp.wave, state.bal.bossEvery)) : waveAffix(state.seedBase, fp.wave, state.bal.bossEvery);
   const entries = state.x ? xWaveEntries(state, fp) : generateWave(fp.wave, fp.corridorCount, state.bal.bossEvery);
   let originRot = 0;
   for (const group of entries) {
@@ -358,13 +366,13 @@ function queueWaveFor(state, fp) {
         ? rng.nextInt(state.seedSim, fp.corridorCount)
         : (originRot++ % fp.corridorCount);
       const atTick = state.tick + fx.toInt(fx.mul(group.delay + fx.mul(fx.fromInt(k), group.gap), fx.fromInt(SIM_HZ)));
-      fp.spawnQueue.push({ type: group.type, origin, atTick, sent: false, wave: fp.wave });
+      fp.spawnQueue.push(group.hpMult ? { type: group.type, origin, atTick, sent: false, wave: fp.wave, hpMult: group.hpMult } : { type: group.type, origin, atTick, sent: false, wave: fp.wave });
       fp.corridors[origin].spawnedTotal++;
     }
   }
   fp.waveActive = true;
   fp.phase = "wave";
-  state.events.push({ kind: "wave", player: fp.id, wave: fp.wave, boss: (fp.wave % state.bal.bossEvery === 0), affix: affix ? affix.id : null });
+  state.events.push({ kind: "wave", player: fp.id, wave: fp.wave, boss: state.x ? xIsBossWave(state, fp, fp.wave) : (fp.wave % state.bal.bossEvery === 0), affix: affix ? affix.id : null });
 }
 
 // Next living player after `id` in ring order (versus send/leak direction).
@@ -392,9 +400,12 @@ function cmdSendEnemy(state, pl, cmd) {
   if (state.x && !xSendAllowed(state, pl, type, send)) return; // [X] rules, tier unlocks and stock
   if (!canAfford(state, pl, cost, pl.elements[0])) { state.events.push({ kind: "reject", player: pl.id, reason: "funds" }); return; }
   // cap on concurrent sent enemies per target (§8.3)
+  if (state.x) { if (!xSendFits(state, target, type, lvl, send)) { state.events.push({ kind: "reject", player: pl.id, reason: "full" }); return; } } // [X] a health budget, not a head count
+  else {
   let activeSent = 0;
   for (const e of state.enemies) if (e.owner === target.id && e.sent) activeSent++;
   if (activeSent >= comp.maxActiveSentPerTarget) return;
+  }
 
   spend(state, pl, cost, pl.elements[0]);
   pl.sentCount += send.count;
@@ -502,16 +513,16 @@ function updateSpawns(state) {
     for (const s of pl.spawnQueue) {
       // spawn with the wave the enemy was queued FOR (matters when waves
       // overlap via early calls), falling back to the field's current wave
-      if (state.tick >= s.atTick) spawnEnemy(state, pl, s.type, s.origin, s.wave || pl.wave, !!s.sent, s.sendLevel || 1, s.sentBy);
+      if (state.tick >= s.atTick) spawnEnemy(state, pl, s.type, s.origin, s.wave || pl.wave, !!s.sent, s.sendLevel || 1, s.sentBy, s.hpMult);
       else remaining.push(s);
     }
     pl.spawnQueue = remaining;
   }
 }
 
-function spawnEnemy(state, pl, type, origin, wave, sent, sendLevel, sentBy) {
+function spawnEnemy(state, pl, type, origin, wave, sent, sendLevel, sentBy, hpMult) {
   const def = state.bal.enemies[type]; if (!def) return;
-  if (state.x) return xSpawnEnemy(state, pl, def, type, origin, wave, sent, sendLevel, sentBy); // [X]
+  if (state.x) return xSpawnEnemy(state, pl, def, type, origin, wave, sent, sendLevel, sentBy, hpMult); // [X]
   const sc = enemyScale(Math.max(1, wave));
   const corr = pl.corridors[origin];
   let maxHp = fx.mul(def.hp, sc.hp);
@@ -557,7 +568,10 @@ function updateEnemies(state, dt) {
   const G = state.grid;
   for (let i = state.enemies.length - 1; i >= 0; i--) {
     const e = state.enemies[i];
-    if (!e.alive) continue;
+    // A creep can die from ANOTHER creep's status this tick (shock arcs, molten splash). Circle spliced it
+    // out mid-loop, which could leave i past the end and crash the game; skip the hole instead.
+    // (The Skyhold rules never splice here: dead creeps are swept out after the loop.)
+    if (!e || !e.alive) continue;
     const pl = state.players[e.owner];
     const corr = e.corr;
 
@@ -575,25 +589,33 @@ function updateEnemies(state, dt) {
         case "stun": stunned = true; break;
         case "amp": dmgTakenMult = fx.mul(dmgTakenMult, d.value); break;
         case "shred": shred += d.value; break;
-        case "custom": stunned = handleCustom(state, e, st, dt, stunned); break;
+        case "custom": stunned = handleCustom(state, e, st, dt, stunned); if (state.x && X_CUSTOM_AMP[key]) dmgTakenMult = fx.mul(dmgTakenMult, X_CUSTOM_AMP[key]); break;
       }
+    }
+    if (state.x) { // [X] synergy aftermath: stun, slow, exposed, armour break, burn
+      if (e.syStunT > 0) { e.syStunT -= dt; stunned = true; }
+      if (e.sySlowT > 0) { e.sySlowT -= dt; moveMult = fx.mul(moveMult, e.sySlowV); }
+      if (e.syExpT > 0) { e.syExpT -= dt; dmgTakenMult = fx.mul(dmgTakenMult, e.syExpV); }
+      if (e.syShT > 0) e.syShT -= dt;
+      if (e.syCd > 0) e.syCd -= dt;
+      if (e.syDotT > 0) { e.syDotT -= dt; if (e.alive) xDamageEnemy(state, e, fx.mul(e.syDotDps, dt), e.syDotTw || null, true, "synergy"); if (!e.alive) continue; }
     }
     e.dmgTakenMult = dmgTakenMult;
     e.shred = shred;
 
     if (dotDps > 0) damageEnemy(state, e, fx.mul(dotDps, dt), null, true);
-    if (!e.alive) { removeEnemy(state, e, i); continue; }
+    if (!e.alive) { if (!state.x) removeEnemy(state, e, i); continue; }
 
     // [X] traits: regen, pulses, abilities; may hold the creep still (shell)
     if (e.tr) {
       e.dmgTakenMult = fx.mul(e.dmgTakenMult, e.auraDmg || fx.ONE);
       if (xEnemyTick(state, e, dt)) stunned = true;
-      if (!e.alive) { if (state.enemies[i] === e) removeEnemy(state, e, i); continue; }
+      if (!e.alive) { if (!state.x && state.enemies[i] === e) removeEnemy(state, e, i); continue; }
     }
 
     if (!stunned) {
       // speed (tiles/sec, fixed) = baseSpeed * enemyBaseSpeed * moveMult * speedBuff
-      let speed = fx.mul(e.baseSpeed, state.bal.enemyBaseSpeed);
+      let speed = fx.mul(e.baseSpeed, state.x ? state.bal.rx.enemySpeed : state.bal.enemyBaseSpeed);
       speed = fx.mul(speed, moveMult);
       speed = fx.mul(speed, e.speedBuff);
       if (e.tr) { speed = fx.mul(speed, xSpeedMult(state, e)); if (e.fly) moveFly(state, e, corr, fx.mul(speed, dt)); else moveAlongFlow(state, e, corr, fx.mul(speed, dt)); xAfterMove(state, e, corr); }
@@ -605,7 +627,10 @@ function updateEnemies(state, dt) {
     const tc = fx.clamp(fx.floorInt(e.fx), 0, G.cols - 1), tr = fx.clamp(fx.floorInt(e.fy), 0, G.rows - 1);
     if (tr <= corr.exit.r && Math.abs(tc - corr.exit.c) <= 1) transferEnemy(state, e);
   }
+  if (state.x && state.xDirty) { state.enemies = state.enemies.filter((e) => e.alive); state.xDirty = false; }
 }
+// [X] custom statuses Circle only describes: they make the creep take a little more damage
+const X_CUSTOM_AMP = { conductive: F(1.15), purified: F(1.1), marked: F(1.2), corrupted: F(1.15) };
 
 function moveAlongFlow(state, e, corr, stepFx) {
   const G = state.grid;
@@ -630,8 +655,19 @@ function moveAlongFlow(state, e, corr, stepFx) {
 
 function transferEnemy(state, e) {
   if (state.gameMode === "versus") { transferEnemyVersus(state, e); return; }
+  if (state.x && !e.alive) return;
   const pl = state.players[e.owner];
   const from = e.corridorIndex;
+  // [X] Loop with 2+ corridors: escaping its home corridor already costs a life (then it roams on,
+  // and costs again each time it comes all the way round). Each corridor has to hold its own.
+  if (state.x && pl.corridorCount > 1 && !e.breached && from === e.originIndex) {
+    e.breached = true;
+    if (e.tr && e.tr.treasure) { removeEnemy(state, e); state.events.push({ kind: "escape", player: pl.id, type: e.type }); return; }
+    xRecordLeak(state, pl, e, false);
+    loseLife(state, pl, xLifeCost(state, e));
+    state.events.push({ kind: "breach", player: pl.id, type: e.type, corridor: from });
+    if (!pl.alive) return;
+  }
   const next = (from + 1) % pl.corridorCount;
   e.transitions++;
   e.corridorIndex = next;
@@ -652,11 +688,14 @@ function transferEnemy(state, e) {
 // to the NEXT living corridor. Dead corridors are skipped entirely.
 function transferEnemyVersus(state, e) {
   const owner = state.players[e.owner];
+  if (state.x && e.tr && e.tr.treasure) { removeEnemy(state, e); state.events.push({ kind: "escape", player: e.owner, type: e.type }); return; } // [X] treasure just runs off
   if (state.x) xRecordLeak(state, owner, e, true); // [X] leak report + life steal
-  loseLife(state, owner, state.bal.loopLifeLoss);
+  loseLife(state, owner, state.x ? xLifeCost(state, e) : state.bal.loopLifeLoss);
   state.events.push({ kind: "leak", player: e.owner, type: e.type });
   const next = nextAliveAfter(state, e.owner);
-  if (!next || state.finished) { // nobody left to travel to — remove the mob
+  // [X] a SENT creep that gets through has done its job: it takes its life and is gone (no chain-steamroll)
+  if (!next || state.finished || (state.x && e.sent && state.bal.rx.send.leakRemoves)) { // nobody left to travel to — remove the mob
+    if (state.x) { removeEnemy(state, e); return; }
     e.alive = false;
     const idx = state.enemies.indexOf(e);
     if (idx >= 0) state.enemies.splice(idx, 1);
@@ -679,8 +718,9 @@ function transferEnemyVersus(state, e) {
 
 function onLoopComplete(state, pl, e) {
   e.loopCount++;
+  if (state.x && e.tr && e.tr.treasure) { removeEnemy(state, e); state.events.push({ kind: "escape", player: pl.id, type: e.type }); return; } // [X] treasure escapes: no life lost, no gold either
   if (state.x) xRecordLeak(state, pl, e, false); // [X]
-  loseLife(state, pl, state.bal.loopLifeLoss);
+  loseLife(state, pl, state.x ? xLifeCost(state, e) : state.bal.loopLifeLoss);
   if (pl.lives <= 0) return;
   applyAdaptation(state, e);
   if (state.statusMode === "advanced") e.statusLocked = true;
@@ -747,6 +787,7 @@ function aoeAround(state, e, radius, dmg) {
 
 function removeEnemy(state, e, idxHint) {
   e.alive = false;
+  if (state.x) { state.xDirty = true; return; } // [X] swept out after the enemy pass (never mid-loop)
   const i = (idxHint != null && state.enemies[idxHint] === e) ? idxHint : state.enemies.indexOf(e);
   if (i >= 0) state.enemies.splice(i, 1);
 }
@@ -794,8 +835,8 @@ function killEnemy(state, e, tower) {
   const tag = e.statuses["tagged"];
   if (tag) r = Math.round(r * (tag.def.value / fx.ONE));
   if (e.sent) r = fx.round(fx.mul(fx.fromInt(r), state.bal.competitive.sentBountyMult));
-  if (state.challenge && state.challenge.hard && state.challenge.def.hard.noKillGold) r = 0; // [X]
-  grantReward(state, creditPl, e, r);
+  if (state.challenge && state.challenge.hard) { const h = state.challenge.def.hard; if (h.noKillGold) r = 0; else if (h.killGoldMult) r = Math.round(r * h.killGoldMult); } // [X]
+  grantReward(state, creditPl, e, r, tower);
   if (e.tr || state.x) xOnKill(state, e, creditPl); // [X] death effects + stats
 
   if (tower) { tower.kills++; checkExpert(state, tower); }
@@ -809,13 +850,15 @@ function killEnemy(state, e, tower) {
   removeEnemy(state, e);
 }
 
-function grantReward(state, pl, e, amount) {
+function grantReward(state, pl, e, amount, tower) {
+  if (state.x && pl.incomeMult && pl.incomeMult !== fx.ONE) amount = fx.round(fx.mul(fx.fromInt(amount), pl.incomeMult)); // [X] NPC difficulty: bounty edge too
   if (state.economy === "shared") pl.gold += amount;
-  else { const el = pl.elements[e.originIndex]; pl.essence[el] = (pl.essence[el] || 0) + amount; }
+  else { const el = (state.x && tower) ? tower.def.element : pl.elements[e.originIndex]; pl.essence[el] = (pl.essence[el] || 0) + amount; } // [X] essence of the element that made the kill
   if (pl.log) pl.log.goldEarned += amount; // [X]
 }
 function grantAll(state, pl, amount) {
   if (state.economy === "shared") pl.gold += amount;
+  else if (state.x) { const els = pl.buildable || pl.elements; for (const el of els) pl.essence[el] += Math.round(amount / els.length); } // [X] split across your elements
   else for (const el of pl.elements) pl.essence[el] += Math.round(amount / pl.corridorCount);
   if (pl.log) pl.log.goldEarned += amount; // [X]
 }
@@ -834,6 +877,7 @@ function applyStatus(state, e, statusId, durationOverride, tower) {
   if (e.tr && xStatusBlocked(e, statusId, def)) return; // [X] immunities
   const dur = fx.mul(durationOverride || def.duration, e.boss ? F(0.3) : fx.ONE);
   const incomingElement = def.element;
+  if (state.x) { xApplyStatus(state, e, def, statusId, dur); return; } // [X] one status per element; reactions fire on attacks
 
   for (let i = 0; i < e.statusKeys.length; i++) {
     const k = e.statusKeys[i];
@@ -889,8 +933,8 @@ function fireSynergy(state, e, syn, tower) {
 // ---------------------------------------------------------------------------
 // TOWERS — stats + combat
 // ---------------------------------------------------------------------------
-function towerStats(state, tw) {
-  const d = tw.def, lvl = tw.level, S = state.bal.scaling;
+export function towerStats(state, tw) {
+  const d = tw.def, lvl = tw.level, S = state.x ? state.bal.rx.scaling : state.bal.scaling;
   let damage = d.damage, fireRate = d.fireRate, range = d.range;
   // compounding per-level via repeated fixed mul (deterministic)
   for (let l = 1; l < lvl; l++) {
@@ -913,6 +957,7 @@ function towerStats(state, tw) {
     if (mods.archetype) archetype = mods.archetype;
   }
   damage = fx.mul(damage, fx.ONE + state.bal.expertDamageBonus[tw.expert]);
+  if (state.x) damage = fx.mul(damage, state.bal.rx.towerDamage); // [X]
   damage = fx.mul(damage, tw.ampBuff || fx.ONE);
   fireRate = fx.mul(fireRate, tw.hasteBuff || fx.ONE);
   return { damage, fireRate, range, splash, chainCount, chainRange, pierce, archetype, mods: collectMods(d, tw) };
@@ -1045,6 +1090,7 @@ function fireTower(state, pl, corr, tw, st) {
 }
 
 function maybeStatus(state, e, tw, st, statusId) {
+  if (state.x) { xOnAttackHit(state, e, tw, st, statusId); return; } // [X]
   const chance = st.mods.statusChance || tw.def.statusChance || 0;
   if (statusId && rng.chance(state.seedSim, chance)) applyStatus(state, e, statusId, st.mods.statusDuration || tw.def.statusDuration, tw);
   if (st.mods.addStatus) applyStatus(state, e, st.mods.addStatus, null, tw);
@@ -1149,13 +1195,14 @@ function checkWaveState(state, pl) {
     pl.waveActive = false;
     if (pl.phase === "endboss") return;
     pl.phase = "build";
-    const bonus = 40 + pl.wave * 12;
+    const bonus = state.x ? Math.round((state.bal.rx.waveClearBonus[0] + pl.wave * state.bal.rx.waveClearBonus[1]) * (1 + state.bal.rx.startPerCorridor * Math.max(0, pl.corridorCount - 1))) : 40 + pl.wave * 12;
     if (state.gameMode === "coop") { for (const p of state.players) grantAll(state, p, bonus); }
     else grantAll(state, pl, bonus);
     pl.stats.score += pl.wave * 100;
     state.events.push({ kind: "waveClear", player: pl.id, wave: pl.wave, bonus, autosave: true });
     if (state.mode !== "endless" && pl.wave >= pl.totalWaves) {
       pl.phase = "prep";
+      if (state.x && !state.challenge) state.events.push({ kind: "wavesCleared", player: pl.id }); // [X] every wave held: that's the win; the End Boss is a bonus
       state.events.push({ kind: "prep", player: pl.id });
     }
   }
@@ -1223,14 +1270,20 @@ function xMods(m) {
     lifeSteal: m.lifeSteal !== false, sendStock: m.sendStock !== false, builders: m.builders !== false,
     noFlyers: !!m.noFlyers, noDisruptors: !!m.noDisruptors, noStealth: !!m.noStealth, turbo: !!m.turbo,
     goldMult: F(m.goldMult || 1), livesMult: F(m.livesMult || 1),
+    difficulty: m.difficulty || "normal", // solo enemy scaling (content/rules.js SOLO_DIFFICULTY)
     // online Vs: waves start on a shared timer (seconds), nobody calls them
     autoWave: m.autoWave ? (m.autoWave * SIM_HZ) | 0 : 0, firstWave: ((m.firstWave || 30) * SIM_HZ) | 0,
   };
 }
 function xInitPlayer(state, pl, pc) {
   const m = state.x;
-  pl.gold = fx.round(fx.mul(fx.fromInt(state.bal.startGold), m.goldMult)) + (pc.goldBonus | 0);
-  for (const e of state.bal.elementOrder) pl.essence[e] = fx.round(fx.mul(fx.fromInt(state.bal.startEssence), m.goldMult)) + (pc.goldBonus | 0);
+  const RX = state.bal.rx;
+  // more corridors to hold means more to start with (each corridor needs its own first towers)
+  const start = RX ? Math.round(RX.startGold * (1 + RX.startPerCorridor * Math.max(0, (pc.corridorCount | 0) - 1))) : state.bal.startGold;
+  pl.gold = fx.round(fx.mul(fx.fromInt(start), m.goldMult)) + (pc.goldBonus | 0);
+  pl.buildable = []; for (const e of pc.elements) if (!pl.buildable.includes(e)) pl.buildable.push(e); // every element of the run can be built in every corridor
+  // essence: the same total, split across your elements (Circle gave every element a flat 320)
+  for (const e of state.bal.elementOrder) pl.essence[e] = RX ? (pl.buildable.includes(e) ? fx.round(fx.mul(fx.fromInt(Math.round(start / pl.buildable.length)), m.goldMult)) + (pc.goldBonus | 0) : 0) : fx.round(fx.mul(fx.fromInt(state.bal.startEssence), m.goldMult)) + (pc.goldBonus | 0);
   pl.lives = pl.maxLives = Math.max(1, fx.round(fx.mul(fx.fromInt(state.bal.startLives), m.livesMult)));
   pl.incomeMult = F(pc.incomeMult || 1);
   pl.sendStock = {};
@@ -1345,12 +1398,18 @@ function xPreStep(state, dt) {
     const t = e.tr;
     let inv = !!t.invisible || e.cloaked;
     if (t.cloakCycle) { const per = t.cloakCycle.every; if (per > 0 && (e.cloakT % per) >= per - t.cloakCycle.dur) inv = true; }
-    if (!inv) continue;
+    if (!inv) { e.revealT = 0; continue; }
     e.hidden = true;
     for (const tw of e.corr.towers) {
       if (tw.bState || !xDetects(state, tw)) continue;
       if (inRange(tw, e.fx, e.fy, towerStats(state, tw).range)) { e.hidden = false; break; }
     }
+    // the builder's lantern: it sees stealthed creeps close to it
+    const b = e.corr.builder;
+    if (e.hidden && b && state.bal.rx && fx.dist2(b.x, b.y, e.fx, e.fy) <= sq(state.bal.rx.builderDetect)) { e.hidden = false; e.byBuilder = true; } else e.byBuilder = false;
+    // a creep that was seen stays marked for a moment, so the towers further down can still shoot it
+    if (!e.hidden) e.revealT = state.bal.rx.revealLinger || 0;
+    else if (e.revealT > 0) { e.revealT -= dt; e.hidden = false; }
   }
 }
 function xPostStep(state, dt) {
@@ -1378,11 +1437,22 @@ function xPostStep(state, dt) {
 
 // ---- waves & sends -----------------------------------------------------------
 function xWaveEntries(state, fp) {
-  if (state.challenge) return generateChallengeWave(state.seedBase, fp.wave, state.challenge.def, state.bal.roster);
+  const RX = state.bal.rx;
+  if (state.challenge) return generateChallengeWaveX(state.seedBase, fp.wave, state.challenge.def, state.bal.roster, RX.waveTune);
   const m = state.x;
   const filter = (r) => !(m.noFlyers && r.fly) && !(m.noDisruptors && r.disrupt) && !(m.noStealth && r.stealth);
-  return generateWaveExpanded(state.seedBase, fp.wave, fp.corridorCount, state.bal.bossEvery, { roster: state.bal.roster, filter });
+  return generateWaveX(state.seedBase, fp.wave, fp.corridorCount, { roster: state.bal.roster, filter, final: state.mode !== "endless" && fp.wave === fp.totalWaves, tune: RX.waveTune });
 }
+/** The exact groups a wave will spawn (for the UI's previews). */
+export function previewWaveX(state, fp, wave) {
+  if (!state.x) return null;
+  const RX = state.bal.rx;
+  if (state.challenge) return generateChallengeWaveX(state.seedBase, wave, state.challenge.def, state.bal.roster, RX.waveTune);
+  const m = state.x;
+  const filter = (r) => !(m.noFlyers && r.fly) && !(m.noDisruptors && r.disrupt) && !(m.noStealth && r.stealth);
+  return generateWaveX(state.seedBase, wave, fp.corridorCount, { roster: state.bal.roster, filter, final: state.mode !== "endless" && wave === fp.totalWaves, tune: RX.waveTune });
+}
+export function isBossWaveX(state, fp, w) { return state.x ? xIsBossWave(state, fp, w) : w % state.bal.bossEvery === 0; }
 function xDisruptT(t) { return !!(t.jamPass || t.corrodeAura || t.chillAura || t.chillFly || t.confuseAura || t.boulder || t.rootTower || t.curseTower || t.deathTowerSlow || t.deathStun || t.shredObstacle); }
 function xForbidden(state, type) {
   const d = state.bal.enemies[type]; const x = d && d.x; if (!x) return false;
@@ -1400,6 +1470,37 @@ function xSendAllowed(state, pl, type, send) {
   if (xStock(pl, type, T).n <= 0) { state.events.push({ kind: "reject", player: pl.id, reason: "stock" }); return false; }
   return true;
 }
+// Vs: waves start a little softer than solo, then escalate once the match runs long, so it always ends
+function xVsRamp(state) {
+  // compounding: +rampPerMin per minute after rampAfter (plain multiplications, so every engine agrees)
+  const V = state.bal.rx.vs, m = state.tick / (SIM_HZ * 60) - V.rampAfter;
+  if (m <= 0) return 1;
+  const n = Math.floor(m); let v = 1;
+  for (let k = 0; k < n; k++) v *= 1 + V.rampPerMin;
+  return v * (1 + V.rampPerMin * (m - n));
+}
+function xVsWaveHp(state) { return F(state.bal.rx.vs.waveHp * xVsRamp(state)); }
+// Vs: every corridor can hold a limited amount of SENT creep health at once (grows with the wave).
+// Spamming one neighbour hits the ceiling; the stock waits for the next window.
+function xSendFits(state, target, type, lvl, send) {
+  const R = state.bal.rx.send, def = state.bal.enemies[type]; if (!def) return false;
+  const capU = Math.trunc((R.capBaseHp + R.capPerWaveHp * Math.max(1, target.wave)) * xVsRamp(state) / HPS);
+  let cur = 0;
+  for (const e of state.enemies) if (e.alive && e.sent && e.owner === target.id) cur += fx.toInt(e.hp);
+  for (const q of target.spawnQueue) if (q.sent) { const d = state.bal.enemies[q.type]; if (d) cur += fx.toInt(xMulHp(xMulHp(Math.trunc(d.hp / HPS), xHpScale(state, target, Math.max(1, target.wave))), (state.bal.sendsX[q.type] || send).hpMult[Math.min(q.sendLevel || 1, 5) - 1])); }
+  const one = fx.toInt(xMulHp(xMulHp(Math.trunc(def.hp / HPS), xHpScale(state, target, Math.max(1, target.wave))), send.hpMult[lvl - 1])) * send.count;
+  return cur === 0 || cur + one <= capU;
+}
+/** How full a Vs target's corridor is with sent creeps (0..1+), for the send panel. */
+export function sendLoad(state, targetId) {
+  if (!state.x) return 0;
+  const target = state.players[targetId]; if (!target) return 0;
+  const R = state.bal.rx.send;
+  const capU = Math.trunc((R.capBaseHp + R.capPerWaveHp * Math.max(1, target.wave)) * xVsRamp(state) / HPS);
+  let cur = 0;
+  for (const e of state.enemies) if (e.alive && e.sent && e.owner === targetId) cur += fx.toInt(e.hp);
+  return cur / Math.max(1, capU);
+}
 function xOnSend(state, pl, type, send) {
   if (state.x.sendStock && state.bal.sendTiers && state.bal.sendTiers[send.tier]) xStock(pl, type, state.bal.sendTiers[send.tier]).n--;
   pl.log.sent[type] = (pl.log.sent[type] || 0) + send.count;
@@ -1407,14 +1508,25 @@ function xOnSend(state, pl, type, send) {
 
 // ---- spawning -----------------------------------------------------------------
 function xMulHp(a, b) { return Math.min(MAXHP, Math.trunc((a * b) / fx.ONE)); }
-function xSpawnEnemy(state, pl, def, type, origin, wave, sent, sendLevel, sentBy) {
+function xSpawnEnemy(state, pl, def, type, origin, wave, sent, sendLevel, sentBy, hpMult) {
   const X = def.x, t = (X && X.t) || NO_T;
   const corr = pl.corridors[origin]; if (!corr) return null;
+  const RX = state.bal.rx;
   const chBoss = !!(X && X.family === "challenge" && def.end);
   const sc = enemyScale(Math.max(1, wave));
-  let maxHp = chBoss ? def.hp : xMulHp(def.hp, sc.hp);
-  let armor = def.armor, baseSpeed = def.speed;
-  let reward = Math.round(def.reward * (sc.reward / fx.ONE));
+  const D = RX.difficulty[state.x.difficulty] || RX.difficulty.normal;
+  // health lives in HPS units (16 HP each) so nothing overflows; see hpReal()
+  const base = Math.trunc(def.hp / HPS);
+  let maxHp = chBoss ? xChBossHp(state, pl, type, D) : xMulHp(base, xHpScale(state, pl, wave));
+  if (def.end && !chBoss) maxHp = xEndBossHp(state, pl);
+  else if (!sent) maxHp = xMulHp(maxHp, state.gameMode === "versus" ? xVsWaveHp(state) : D.hp);
+  if (hpMult) maxHp = xMulHp(maxHp, hpMult);
+  let armor = def.end && !chBoss ? RX.endBoss.armor : def.armor;
+  // speeds are compressed toward 1 (slow creeps got much faster, fast ones a little), then grow with the wave
+  const spd = RX.speedFloor + fx.mul(fx.ONE - RX.speedFloor, def.speed);
+  let baseSpeed = fx.mul(spd, fx.ONE + fx.min(RX.waveSpeedMax, fx.mul(RX.waveSpeedGrowth, fx.fromInt(Math.max(0, wave - 1)))));
+  if (!sent) baseSpeed = fx.mul(baseSpeed, D.speed);
+  let reward = Math.round(def.reward * (sc.reward / fx.ONE) * RX.waveGold);
   const affix = (!def.boss && !sent && !(X && X.minion)) ? waveAffix(state.seedBase, wave, state.bal.bossEvery) : null;
   if (affix) {
     if (affix.hpMult) maxHp = xMulHp(maxHp, F(affix.hpMult));
@@ -1428,6 +1540,7 @@ function xSpawnEnemy(state, pl, def, type, origin, wave, sent, sendLevel, sentBy
     reward = Math.round(reward * (send.rewardMult[li] / fx.ONE));
   }
   if (chBoss && state.challenge && state.challenge.hard) maxHp = xMulHp(maxHp, F(state.challenge.def.hard.bossHpMult || 1));
+  if (maxHp < 1) maxHp = 1;
   const e = {
     id: state.nextId++, type, def,
     owner: pl.id, originIndex: origin, corridorIndex: origin, corr,
@@ -1445,8 +1558,10 @@ function xSpawnEnemy(state, pl, def, type, origin, wave, sent, sendLevel, sentBy
     shieldHp: t.shield ? fx.mul(maxHp, t.shield.pct) : 0, shieldDelay: 0,
     tm: {}, fl: {}, once: {}, inCorrT: 0, cloakT: 0,
     invulnT: 0, shellT: 0, stoneT: 0, hitArmorT: 0, charge: 0, enrageT: 0, enrageMult: fx.ONE, dupCd: 0, dupN: 0, thrIdx: 0, divIdx: 0,
-    auraArmor: 0, auraSpeed: fx.ONE, auraDmg: fx.ONE, hidden: false, cloaked: false, adaptEl: null,
-    baseResist: t.resist || null,
+    auraArmor: 0, auraSpeed: fx.ONE, auraDmg: fx.ONE, hidden: false, revealT: 0, cloaked: false, adaptEl: null,
+    baseResist: t.resist || null, cls: def.cls || "medium",
+    // synergy aftermath (see xSynergy)
+    syCd: 0, syStunT: 0, sySlowT: 0, sySlowV: fx.ONE, syExpT: 0, syExpV: fx.ONE, syShT: 0, syShV: 0, syDotT: 0, syDotDps: 0, syDotTw: null,
   };
   if (t.resist) for (const k in t.resist) e.resist[k] = t.resist[k];
   if (t.midSpawn) {
@@ -1456,6 +1571,38 @@ function xSpawnEnemy(state, pl, def, type, origin, wave, sent, sendLevel, sentBy
   state.enemies.push(e);
   if (t.escort) xQueueMinions(state, e, t.escort.into, t.escort.n);
   return e;
+}
+// wave health scale: Circle's curve (tunable), plus a little per extra corridor
+function xHpScale(state, pl, wave) {
+  const RX = state.bal.rx, W = RX.waveHp;
+  const k = RX._hpTab || (RX._hpTab = {});
+  const T = pl.totalWaves || 0;
+  const key = wave + "|" + pl.corridorCount + "|" + T;
+  if (k[key] == null) {
+    // long runs (big loops) stretch the same curve over more waves, so wave 30 of 30 is as tough as wave 20 of 20
+    const S = RX.hpStretchFrom || 0;
+    const w = S > 1 && T > S && T < 1e6 ? 1 + ((wave - 1) * (S - 1)) / (T - 1) : wave;
+    const big = RX.hpByCorridors[pl.corridorCount] || 1;
+    k[key] = F((1 + (w - 1) * W.lin + (w / 12) * (w / 12) * W.quad) * (1 + RX.hpPerCorridor * Math.max(0, pl.corridorCount - 1)) * big);
+  }
+  return k[key];
+}
+// the Sealed One: a multiple of the final wave's Warlord, a bit more with more corridors, then difficulty
+function xEndBossHp(state, pl) {
+  const RX = state.bal.rx;
+  const D = RX.difficulty[state.x.difficulty] || RX.difficulty.normal;
+  const warlord = state.bal.enemies.boss;
+  const fin = Math.max(1, pl.totalWaves > 1e6 ? pl.wave : pl.totalWaves);
+  let hp = xMulHp(Math.trunc(warlord.hp / HPS), xHpScale(state, pl, fin));
+  hp = xMulHp(hp, F(RX.endBoss.hpMult * (1 + RX.endBoss.perCorridor * Math.max(0, pl.corridorCount - 1))));
+  hp = xMulHp(hp, D.hp);
+  return xMulHp(hp, D.endHp);
+}
+function xChBossHp(state, pl, type, D) {
+  // a challenge boss is sized like a wave-10 Warlord, times its own factor and the difficulty
+  const warlord = state.bal.enemies.boss;
+  const hp = xMulHp(Math.trunc(warlord.hp / HPS), xHpScale(state, pl, Math.max(1, pl.totalWaves)));
+  return xMulHp(hp, state.bal.rx.chBoss[type] || fx.ONE); // difficulty is applied by the caller
 }
 function xMidSpawnPos(state, corr) {
   const G = state.grid;
@@ -1467,8 +1614,11 @@ function xMidSpawnPos(state, corr) {
   return null;
 }
 function xQueueMinions(state, e, into, n, extra) {
+  // a boss's brood is born weaker than the wave around it (there is a lot of it)
+  const w = e.def.boss ? Math.max(1, Math.trunc(((e.wave || 1) * 2) / 5)) : (e.wave || 1);
   state.xSpawn.push({ type: into, n, owner: e.owner, corr: e.corr, ci: e.corridorIndex, oi: e.originIndex, tr: e.transitions, lc: e.loopCount,
-    x: e.fx, y: e.fy, wave: e.wave || 1, sentBy: e.sentBy, sent: e.sent, extra: extra || null });
+    // (gate: a challenge boss calls its brood in at the gate, so it meets the whole maze)
+    x: e.fx, y: e.fy, wave: w, gate: !!(e.def.boss && e.def.end), sentBy: e.sentBy, sent: e.sent, extra: extra || null });
 }
 const MINION_OFF = [[0, 0], [F(0.35), 0], [-F(0.35), 0], [0, F(0.35)], [0, -F(0.35)], [F(0.3), F(0.3)], [-F(0.3), -F(0.3)], [F(0.3), -F(0.3)], [-F(0.3), F(0.3)]];
 function xSpawnMinions(state, m) {
@@ -1476,6 +1626,14 @@ function xSpawnMinions(state, m) {
   const def = state.bal.enemies[m.type]; if (!def || !pl.corridors[m.oi]) return;
   const G = state.grid;
   for (let k = 0; k < m.n; k++) {
+    if (m.gate) {
+      const e = xSpawnEnemy(state, pl, def, m.type, m.ci, m.wave, m.sent, 1, m.sentBy);
+      if (!e) continue;
+      e.originIndex = m.oi; e.transitions = m.tr; e.loopCount = m.lc;
+      const off = MINION_OFF[k % MINION_OFF.length]; e.fx += off[0]; e.fy += off[1];
+      state.events.push({ kind: "minion", player: m.owner, enemy: e.id, type: m.type });
+      continue;
+    }
     const e = xSpawnEnemy(state, pl, def, m.type, m.oi, m.wave, m.sent, 1, m.sentBy);
     if (!e) continue;
     e.corr = m.corr; e.corridorIndex = m.ci; e.originIndex = m.oi; e.transitions = m.tr; e.loopCount = m.lc;
@@ -1646,40 +1804,63 @@ function xStatusBlocked(e, id, def) {
 }
 
 // ---- damage, death, leaks ---------------------------------------------------------
+// damage type of a tower's attacks (Physical / Blast / Magic / Chaos), cached until it mutates
+function xDmgType(state, tw) {
+  if (tw.dt) return tw.dt;
+  const T = state.bal.rx.towerType;
+  let key = tw.def.id;
+  for (const mid of tw.mutations) if (T[tw.def.id + ":" + mid]) key = tw.def.id + ":" + mid;
+  return (tw.dt = T[key] || "physical");
+}
 function xDamageEnemy(state, e, raw, tower, isDot, kind) {
   const t = e.tr;
+  if (!e.alive) return;
   if (e.invulnT > 0 || e.shellT > 0) return;
   if (!kind) kind = isDot ? "dot" : "single";
-  if (!isDot && t.evasion && kind !== "aura" && rng.chance(state.seedSim, t.evasion)) { state.events.push({ kind: "dodge", player: e.owner, enemy: e.id }); return; }
+  const pure = kind === "synergy" || kind === "execute";
+  if (!isDot && !pure && t.evasion && kind !== "aura" && rng.chance(state.seedSim, t.evasion)) { state.events.push({ kind: "dodge", player: e.owner, enemy: e.id }); return; }
   if (kind === "chainb" && t.chainImmune) return;
   let dmg = raw;
-  let armor = e.armor + (e.auraArmor || 0);
-  if (e.stoneT > 0 && t.stoneForm) armor += t.stoneForm.armor;
-  if (e.hitArmorT > 0 && t.armorWhenHit) armor = fx.mul(armor, t.armorWhenHit.mult);
-  armor = fx.max(0, armor - (e.shred || 0));
-  if (!isDot) dmg = fx.max(fx.mul(dmg, F(0.15)), dmg - armor);
-  dmg = fx.mul(dmg, e.dmgTakenMult || fx.ONE);
-  const phys = kind === "single" || kind === "splash" || kind === "melee";
-  if (kind === "splash" && t.splashResist) dmg = fx.mul(dmg, t.splashResist);
-  if (phys && t.physResist) dmg = fx.mul(dmg, t.physResist);
-  if (!phys && t.magicResist) dmg = fx.mul(dmg, t.magicResist);
-  if ((kind === "beam" || kind === "chain" || kind === "chainb") && t.beamResist) dmg = fx.mul(dmg, t.beamResist);
-  if (tower) {
-    const el = tower.def.element;
-    const r = e.resist[el] || 0;
-    if (r) dmg = fx.mul(dmg, fx.ONE - r);
-    if (t.adaptiveResist) {
-      if (e.adaptEl && e.adaptEl !== el) e.resist[e.adaptEl] = (e.baseResist && e.baseResist[e.adaptEl]) || 0;
-      e.resist[el] = fx.max((e.baseResist && e.baseResist[el]) || 0, t.adaptiveResist);
-      e.adaptEl = el;
+  if (!pure) {
+    const RX = state.bal.rx;
+    // armour is a percentage: × K / (K + armour). Shred removes flat armour, synergies a share of it.
+    if (!isDot) {
+      let armor = e.armor + (e.auraArmor || 0);
+      if (e.stoneT > 0 && t.stoneForm) armor += t.stoneForm.armor;
+      if (e.hitArmorT > 0 && t.armorWhenHit) armor = fx.mul(armor, t.armorWhenHit.mult);
+      armor = fx.max(0, armor - (e.shred || 0));
+      if (e.syShT > 0) armor = fx.mul(armor, fx.ONE - e.syShV);
+      if (armor > 0) dmg = fx.mul(dmg, fx.div(RX.armorK, RX.armorK + armor));
     }
-  }
-  if (dmg <= 0) return;
-  if (t.shield) e.shieldDelay = t.shield.delay;
-  if (e.shieldHp > 0) { const a = fx.min(e.shieldHp, dmg); e.shieldHp -= a; dmg -= a; if (dmg <= 0) return; }
+    // damage type vs armour class
+    const type = isDot || kind === "aura" ? "magic" : tower ? xDmgType(state, tower) : "physical";
+    const row = RX.armorTable[e.cls] || RX.armorTable.medium;
+    dmg = fx.mul(dmg, row[type]);
+    dmg = fx.mul(dmg, e.dmgTakenMult || fx.ONE);
+    const phys = type === "physical";
+    if (kind === "splash" && t.splashResist) dmg = fx.mul(dmg, t.splashResist);
+    if (phys && t.physResist) dmg = fx.mul(dmg, t.physResist);
+    if (!phys && type !== "blast" && t.magicResist) dmg = fx.mul(dmg, t.magicResist);
+    if ((kind === "beam" || kind === "chain" || kind === "chainb") && t.beamResist) dmg = fx.mul(dmg, t.beamResist);
+    if (tower) {
+      const el = tower.def.element;
+      const r = e.resist[el] || 0;
+      if (r) dmg = fx.mul(dmg, fx.ONE - r);
+      if (t.adaptiveResist) {
+        if (e.adaptEl && e.adaptEl !== el) e.resist[e.adaptEl] = (e.baseResist && e.baseResist[e.adaptEl]) || 0;
+        e.resist[el] = fx.max((e.baseResist && e.baseResist[el]) || 0, t.adaptiveResist);
+        e.adaptEl = el;
+      }
+    }
+  } else if (e.syExpT > 0) dmg = fx.mul(dmg, e.syExpV); // reactions still hit harder on an Exposed creep
+  // into health units (16 HP each); a hit always does something
+  dmg = kind === "execute" ? raw : Math.trunc(dmg / HPS);
+  if (dmg <= 0) { if (raw > 0) dmg = 1; else return; }
+  if (t.shield && !pure) e.shieldDelay = t.shield.delay;
+  if (e.shieldHp > 0 && kind !== "execute") { const a = fx.min(e.shieldHp, dmg); e.shieldHp -= a; dmg -= a; if (dmg <= 0) return; }
   e.hp -= dmg;
-  if (tower) tower.dmgDone = (tower.dmgDone || 0) + dmg;
-  if (!isDot) {
+  if (tower) tower.dmgDone = (tower.dmgDone || 0) + dmg * HPS;
+  if (!isDot && !pure) {
     if (t.armorWhenHit) e.hitArmorT = t.armorWhenHit.dur;
     if (t.chargeOnHit) e.charge = fx.min(t.chargeOnHit.max, e.charge + t.chargeOnHit.per);
   }
@@ -1696,13 +1877,110 @@ function xDamageEnemy(state, e, raw, tower, isDot, kind) {
     e.invulnT = t.divineShield.dur; state.events.push({ kind: "form", style: "divine", player: e.owner, enemy: e.id });
   }
   if (t.escape && !e.once.escape && frac < t.escape.at) { e.once.escape = 1; xJump(state, e, t.escape.tiles, "escape"); }
-  if (t.duplicate && !isDot && e.dupCd <= 0 && e.dupN < t.duplicate.max && dmg > fx.mul(e.maxHp, t.duplicate.at)) {
+  if (t.duplicate && !isDot && !pure && e.dupCd <= 0 && e.dupN < t.duplicate.max && dmg > fx.mul(e.maxHp, t.duplicate.at)) {
     e.dupCd = t.duplicate.cd; e.dupN++;
-    e.hp = fx.max(fx.ONE, e.hp >> 1);
+    e.hp = fx.max(1, e.hp >> 1);
     xQueueMinions(state, e, e.type, 1, { hp: e.hp, maxHp: e.maxHp, dupN: t.duplicate.max, reward: e.reward >> 1 });
     state.events.push({ kind: "form", style: "glitch", player: e.owner, enemy: e.id });
   }
 }
+// kill outright (Harvest, Mutagen, Eclipse): ignores shields and armour
+function xExecute(state, e, tower) { if (e.alive && !(e.invulnT > 0) && !(e.shellT > 0)) xDamageEnemy(state, e, e.hp + e.shieldHp + 1, tower, false, "execute"); }
+// ---- run structure ---------------------------------------------------------------
+function xTotalWaves(RX, mode, n) {
+  if (mode === "endless") return 0x7fffffff;
+  if (mode === "single") return 10;
+  return RX.waves[n] || 20;
+}
+// a Warlord every 5th wave, and on the final wave
+function xIsBossWave(state, fp, w) {
+  if (state.challenge) return false;
+  return w % state.bal.rx.bossEvery === 0 || (state.mode !== "endless" && w === fp.totalWaves);
+}
+// lives a creep costs when it completes a loop (or gets through in Vs)
+function xLifeCost(state, e) { const RX = state.bal.rx; return e.end ? RX.endLifeLoss : e.boss ? RX.bossLifeLoss : state.bal.loopLifeLoss; }
+
+// ---- statuses and element reactions ----------------------------------------------
+// one status per element: a new one replaces any older status of the same element; other elements stay
+function xApplyStatus(state, e, def, statusId, dur) {
+  if (!def.adaptive && def.element) {
+    for (let i = e.statusKeys.length - 1; i >= 0; i--) {
+      const k = e.statusKeys[i]; if (k === statusId) continue;
+      const ex = state.bal.statuses[k];
+      if (ex && !ex.adaptive && ex.element === def.element) { delete e.statuses[k]; e.statusKeys.splice(i, 1); }
+    }
+  }
+  addStatus(e, def, statusId, dur);
+}
+// every attack hit (projectile, splash, beam, chain, blade): react first, then maybe apply this tower's status
+function xOnAttackHit(state, e, tw, st, statusId) {
+  if (!e.alive || !tw) return;
+  xTryReact(state, e, tw, st);
+  if (!e.alive) return;
+  const chance = st.mods.statusChance || tw.def.statusChance || 0;
+  if (statusId && rng.chance(state.seedSim, chance)) applyStatus(state, e, statusId, st.mods.statusDuration || tw.def.statusDuration, tw);
+  if (st.mods.addStatus) applyStatus(state, e, st.mods.addStatus, null, tw);
+  if (st.mods.curseBoost && e.statuses.cursed) e.statuses.cursed.curseBoost = F(2); // Hex / Black Hole
+  if (st.mods.executeBoost && !e.boss && fx.div(e.hp, e.maxHp) < F(0.18)) xExecute(state, e, tw); // Harvest
+}
+function xTryReact(state, e, tw, st) {
+  if (e.syCd > 0 || !e.statusKeys.length) return;
+  const elB = tw.def.element, S = state.bal.statuses, SY = state.bal.rx.synergies;
+  for (const k of e.statusKeys) {
+    const d = S[k];
+    if (!d || d.adaptive || !d.element || d.element === elB) continue;
+    const syn = SY[d.element + "|" + elB];
+    if (syn) { xSynergy(state, e, syn, d.element, tw, st); return; }
+  }
+}
+function xNeighbours(state, e, r, n) {
+  const R2 = sq(r), out = [];
+  for (const o of state.enemies) {
+    if (o === e || !o.alive || o.owner !== e.owner || o.corr !== e.corr) continue;
+    const d = fx.dist2(e.fx, e.fy, o.fx, o.fy);
+    if (d <= R2) out.push({ o, d });
+  }
+  out.sort((a, b) => a.d - b.d || a.o.id - b.o.id);
+  return (n ? out.slice(0, n) : out).map((x) => x.o);
+}
+function xExpose(e, v, dur) { const val = e.boss ? fx.ONE + fx.mul(v - fx.ONE, F(0.6)) : v; if (!(e.syExpT > 0) || val >= e.syExpV) e.syExpV = val; e.syExpT = fx.max(e.syExpT, dur); }
+function xSynergy(state, e, syn, elA, tw, st) {
+  const RX = state.bal.rx, S = state.bal.statuses;
+  const pl = state.players[e.owner];
+  const wave = Math.max(1, pl.wave | 0);
+  // "power": the tower's damage per second, with a floor that grows with the wave
+  let P = fx.mul(st.damage, fx.max(fx.ONE, st.fireRate));
+  const floor = F(10) + fx.mul(F(4), fx.fromInt(wave));
+  if (P < floor) P = floor;
+  e.syCd = RX.synergyCd;
+  const elB = tw.def.element;
+  const spreadKeys = syn.spread ? e.statusKeys.filter((k) => { const d = S[k]; return d && !d.adaptive && (d.element === elA || d.element === elB); }) : null;
+  for (let i = e.statusKeys.length - 1; i >= 0; i--) { const d = S[e.statusKeys[i]]; if (d && !d.adaptive && d.element === elA) { delete e.statuses[e.statusKeys[i]]; e.statusKeys.splice(i, 1); } }
+  state.events.push({ kind: "synergy", player: e.owner, id: syn.id, name: syn.name, corridor: e.corridorIndex, enemy: e.id, a: elA, b: elB, tower: tw.id, owner: tw.owner });
+  if (pl.log) pl.log.syn = (pl.log.syn || 0) + 1;
+  if (syn.stun) e.syStunT = fx.max(e.syStunT, e.boss ? fx.mul(syn.stun, F(0.35)) : syn.stun);
+  if (syn.slow) { e.sySlowT = syn.dur; e.sySlowV = e.boss ? fx.ONE - ((fx.ONE - syn.slow) >> 1) : syn.slow; }
+  if (syn.expose) xExpose(e, syn.expose, syn.dur);
+  if (syn.shred) { e.syShT = syn.dur; e.syShV = syn.shred; }
+  if (syn.dot) { e.syDotT = syn.dur; e.syDotDps = fx.div(fx.mul(P, syn.dot), syn.dur); e.syDotTw = tw; }
+  if (syn.spread) for (const o of xNeighbours(state, e, F(2.5), syn.spread)) {
+    for (const k of spreadKeys) applyStatusRaw(state, o, k);
+    if (syn.expose) xExpose(o, syn.expose, syn.dur);
+  }
+  if (syn.gold) {
+    const owner = state.players[tw.owner] || pl;
+    const g = fx.round(fx.mul(syn.gold, fx.fromInt(4) + fx.mul(F(0.8), fx.fromInt(wave))));
+    grantReward(state, owner, e, g, tw);
+    state.events.push({ kind: "bounty", player: owner.id, enemy: e.id, gold: g });
+  }
+  const hits = [];
+  if (syn.execute) { if (!e.boss && fx.div(e.hp, e.maxHp) < syn.execute) hits.push([e, -1]); else hits.push([e, fx.mul(P, F(1.5))]); }
+  if (syn.burst) hits.push([e, fx.mul(P, syn.burst)]);
+  if (syn.blast) { hits.push([e, fx.mul(P, syn.blast)]); for (const o of xNeighbours(state, e, syn.r, 0)) hits.push([o, fx.mul(P, syn.blast)]); }
+  if (syn.chain) { const ids = [e.id]; for (const o of xNeighbours(state, e, F(3.5), syn.chain)) { hits.push([o, fx.mul(P, syn.mult)]); ids.push(o.id); } state.events.push({ kind: "zap", style: "chain", player: e.owner, corridor: e.corr.index, tower: tw.id, element: elB, targets: ids }); }
+  for (const [o, d] of hits) { if (!o.alive) continue; if (d < 0) xExecute(state, o, tw); else xDamageEnemy(state, o, d, tw, false, "synergy"); }
+}
+
 function xTryRevive(state, e) {
   const t = e.tr;
   if (!t.revive || e.once.revive) return false;
@@ -1743,7 +2021,7 @@ function xRecordLeak(state, pl, e, versus) {
   const s = state.players[e.sentBy];
   if (!s || !s.alive) return;
   const n = state.bal.loopLifeLoss;
-  s.lives = Math.min(s.maxLives + 20, s.lives + n);
+  s.lives = Math.min(s.maxLives + 5, s.lives + n); // [X] a little over the start, no runaway
   s.log.livesStolen += n;
   pl.log.stolenBy[e.sentBy] = (pl.log.stolenBy[e.sentBy] || 0) + n;
   state.events.push({ kind: "steal", from: pl.id, to: s.id, n, type: e.type });

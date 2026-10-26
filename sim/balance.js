@@ -87,7 +87,12 @@ export function buildBalance(DB) {
   }
 
   for (const t of DB.TOWERS) {
-    bal.towers[t.id] = {
+    bal.towers[t.id] = convertTower(t);
+  }
+  // [Skyhold rules] the same towers with Skyhold's damage numbers (content/rules.js TOWER_X)
+  if (DB.RULES) { bal.towersX = {}; for (const t of DB.TOWERS) bal.towersX[t.id] = convertTower(DB.RULES.towerX(t)); }
+  function convertTower(t) {
+    return {
       id: t.id, element: t.element, archetype: t.archetype,
       slot: t.slot != null ? t.slot : 0,
       cost: t.cost,
@@ -129,7 +134,7 @@ export function buildBalance(DB) {
   for (const k in DB.ENEMIES) {
     const x = bal.enemies[k].x;
     if (!x || x.minion || x.family === "challenge") continue;
-    bal.roster.push({ id: k, minWave: x.minWave, hp: DB.ENEMIES[k].hp, pack: x.pack || 1, elite: x.elite, treasure: !!x.t.treasure,
+    bal.roster.push({ id: k, minWave: x.minWave, hp: DB.ENEMIES[k].hp, speed: DB.ENEMIES[k].speed || 1, pack: x.pack || 1, elite: x.elite, treasure: !!x.t.treasure,
       fly: !!x.t.fly, stealth: !!(x.t.invisible || x.t.cloakCycle || x.t.cloakAura), disrupt: isDisruptorTraits(x.t) });
   }
   if (DB.SENDS_EXPANDED) bal.sendsX = normalizeSendCatalog(DB, DB.SENDS_EXPANDED);
@@ -138,8 +143,57 @@ export function buildBalance(DB) {
     for (const t in DB.SEND_TIERS) { const T = DB.SEND_TIERS[t]; bal.sendTiers[t] = { unlockTicks: T.unlockAt * 30, stock: T.stock, rechargeTicks: T.recharge * 30 }; }
   }
   if (DB.CHALLENGES) bal.challenges = Object.fromEntries(DB.CHALLENGES.map((c) => [c.id, c]));
+  if (DB.RULES) bal.rx = buildSkyholdRules(DB, bal);
 
   return bal;
+}
+
+// [Skyhold rules] damage types, armour classes, synergies, run length and tuning, baked to fixed point
+function buildSkyholdRules(DB, bal) {
+  const R = DB.RULES, T = R.TUNE;
+  const rx = {
+    armorK: F(R.ARMOR_K),
+    enemySpeed: F(T.enemySpeed), speedFloor: F(T.speedFloor), waveSpeedGrowth: F(T.waveSpeedGrowth), waveSpeedMax: F(T.waveSpeedMax),
+    towerDamage: F(T.towerDamage),
+    scaling: { damagePerLevel: F(T.scaling.damagePerLevel), fireRatePerLevel: F(T.scaling.fireRatePerLevel), rangePerLevel: F(T.scaling.rangePerLevel), upgradeCostBase: F(T.scaling.upgradeCostBase), costGrowth: F(T.scaling.costGrowth) },
+    hpPerCorridor: T.hpPerCorridor, hpStretchFrom: T.hpStretchFrom || 0, hpByCorridors: T.hpByCorridors || {}, countPerCorridor: T.countPerCorridor, waveHp: T.waveHp, waveGold: T.waveGold,
+    waveClearBonus: T.waveClearBonus.slice(), bossLifeLoss: T.bossLifeLoss, endLifeLoss: T.endLifeLoss,
+    bossHpMinor: T.bossHpMinor, endBoss: { hpMult: T.endBoss.hpMult, armor: F(T.endBoss.armor), perCorridor: T.endBoss.perCorridor },
+    chBoss: Object.fromEntries(Object.entries(T.challengeBoss || {}).map(([k, v]) => [k, F(v)])),
+    builderDetect: F(T.builderDetect), revealLinger: F(T.revealLinger || 0), startGold: T.startGold, startPerCorridor: T.startPerCorridor, minGap: F(T.minGap),
+    bossEvery: R.BOSS_EVERY_X, synergyCd: F(R.SYNERGY_COOLDOWN),
+    difficulty: {}, towerType: {}, armorTable: {}, synergies: {}, send: R.SEND_RULES, waves: Object.assign({}, R.WAVES_BY_CORRIDORS), vs: Object.assign({}, T.vs),
+    waveTune: { countPerCorridor: T.countPerCorridor, minGap: T.minGap, bossEvery: R.BOSS_EVERY_X, bossHpMinor: T.bossHpMinor, bossHpMajor: T.bossHpMajor, waveCount: T.waveCount },
+  };
+  for (const k in R.SOLO_DIFFICULTY) { const d = R.SOLO_DIFFICULTY[k]; rx.difficulty[k] = { hp: F(d.hp), speed: F(d.speed), endHp: F(d.endHp) }; }
+  const TYPES = ["physical", "blast", "magic", "chaos"];
+  for (const cls in R.ARMOR_TABLE) { rx.armorTable[cls] = {}; for (const t of TYPES) rx.armorTable[cls][t] = F(R.ARMOR_TABLE[cls][t]); }
+  for (const t of DB.TOWERS) {
+    rx.towerType[t.id] = R.towerDamageType(t);
+    // mutations that change the archetype change the damage type with it
+    for (const m of t.mutations || []) if (m.mods && m.mods.archetype) rx.towerType[t.id + ":" + m.id] = R.towerDamageType(t, m.mods.archetype);
+  }
+  for (const k in bal.enemies) {
+    const e = bal.enemies[k];
+    e.cls = (e.x && e.x.armorClass) || R.CLASSIC_ARMOR_CLASS[k] || "medium";
+    if (e.boss && e.x && e.x.family === "challenge" && e.end) e.cls = "boss";
+  }
+  for (const s of R.SYNERGIES_X) {
+    const f = s.fx, o = { id: s.id, name: s.name, a: s.a, b: s.b };
+    if (f.burst) o.burst = F(f.burst);
+    if (f.blast) { o.blast = F(f.blast); o.r = F(f.r || 2); }
+    if (f.chain) { o.chain = f.chain | 0; o.mult = F(f.mult || 1); }
+    if (f.stun) o.stun = F(f.stun);
+    if (f.slow) { o.slow = F(f.slow); o.dur = F(f.dur || 3); }
+    if (f.expose) { o.expose = F(f.expose); o.dur = F(f.dur || 5); }
+    if (f.shred) { o.shred = F(f.shred); o.dur = F(f.dur || 5); }
+    if (f.dot) { o.dot = F(f.dot); o.dur = F(f.dur || 4); }
+    if (f.spread) o.spread = f.spread | 0;
+    if (f.execute) o.execute = F(f.execute);
+    if (f.gold) o.gold = F(f.gold);
+    rx.synergies[s.a + "|" + s.b] = o; rx.synergies[s.b + "|" + s.a] = o;
+  }
+  return rx;
 }
 
 function convertMods(mods) {

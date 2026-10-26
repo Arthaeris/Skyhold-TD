@@ -12,7 +12,7 @@
  *
  * armorClass is recorded for the planned armour/damage-type pass. Today it only
  * matters through the explicit traits below:
- *   - ethereal mobs carry physResist
+ *   - the armour class sets which damage types hurt it most (content/rules.js)
  *   - fortified mobs have high armour
  *
  * TRAIT KEYS (all optional):
@@ -87,17 +87,19 @@
 const M = (id, name, family, armorClass, hp, speed, armor, pack, tier, minWave, traits, desc, extra = {}) =>
   ({ id, name, family, armorClass, hp, speed, armor, pack, tier, minWave, traits: traits || {}, desc, ...extra });
 
+import * as RULES from "./rules.js";
+
 export const MOBS = [
   // ---- swarms ----
-  M("gnasher_rats", "Gnasher Rats", "swarm", "light", 16, 1.35, 1, 6, 1, 2, {}, "Cheap, fast-breeding flood."),
-  M("ember_wisps", "Ember Wisps", "swarm", "unarmored", 14, 1.5, 0, 5, 1, 3, { evasion: 0.15, resist: { fire: 0.3 } }, "Flickering embers that dodge 15% of hits."),
+  M("gnasher_rats", "Gnasher Rats", "swarm", "light", 16, 1.35, 1, 6, 1, 4, {}, "Cheap, fast-breeding flood."),
+  M("ember_wisps", "Ember Wisps", "swarm", "unarmored", 14, 1.5, 0, 5, 1, 5, { evasion: 0.15, resist: { fire: 0.3 } }, "Flickering embers that dodge 15% of hits."),
   M("bone_crawlers", "Bone Crawlers", "swarm", "medium", 34, 0.9, 3, 4, 2, 5, { splashResist: 0.5 }, "Bony crawlers that shrug off half of all splash."),
   M("spore_mites", "Spore Mites", "swarm", "unarmored", 10, 1.2, 0, 8, 2, 6, { deathTowerSlow: { r: 1.6, mult: 0.7, dur: 2 } }, "Tiny mites. Their death puffs slow nearby towers."),
   // ---- runners ----
-  M("shadow_hound", "Shadow Hound", "runner", "light", 50, 2.0, 1, 1, 1, 3, { sprintBelow: { at: 0.5, mult: 1.6 } }, "Very fast. Sprints once wounded."),
-  M("wind_courier", "Wind Courier", "runner", "unarmored", 30, 2.4, 0, 1, 1, 4, { slowImmuneFor: 4 }, "The fastest thing alive. Shrugs off slows at first."),
+  M("shadow_hound", "Shadow Hound", "runner", "light", 50, 2.0, 1, 1, 1, 4, { sprintBelow: { at: 0.5, mult: 1.6 } }, "Very fast. Sprints once wounded."),
+  M("wind_courier", "Wind Courier", "runner", "unarmored", 30, 2.4, 0, 1, 1, 6, { slowImmuneFor: 4 }, "The fastest thing alive. Shrugs off slows at first."),
   M("cinder_lizard", "Cinder Lizard", "runner", "medium", 70, 1.7, 2, 1, 2, 7, { dash: { every: 4, tiles: 3 }, resist: { fire: 0.4 } }, "Dashes 3 tiles forward every few seconds."),
-  M("phantom_stag", "Phantom Stag", "runner", "ethereal", 60, 1.9, 0, 1, 2, 9, { physResist: 0.5 }, "A spectral stag. Physical hits pass half through it."),
+  M("phantom_stag", "Phantom Stag", "runner", "ethereal", 60, 1.9, 0, 1, 2, 9, {}, "A spectral stag. Physical hits pass half through it."),
   // ---- brutes ----
   M("stone_ogre", "Stone Ogre", "brute", "heavy", 320, 0.65, 8, 1, 2, 8, {}, "Lots of HP, lots of armour, nothing fancy."),
   M("ironhide_boar", "Ironhide Boar", "brute", "heavy", 240, 0.85, 6, 1, 2, 10, { chargeOnHit: { per: 0.03, max: 0.7 } }, "Charges faster every time it is hit."),
@@ -110,7 +112,7 @@ export const MOBS = [
   M("wyvern", "Wyvern", "flyer", "heavy", 600, 0.7, 8, 1, 3, 16, { fly: true }, "Slow, heavily armoured flyer."),
   // ---- stealth ----
   M("shade_stalker", "Shade Stalker", "stealth", "light", 90, 1.2, 1, 1, 2, 10, { invisible: true }, "Permanently invisible. Needs a detecting tower."),
-  M("veil_wraith", "Veil Wraith", "stealth", "ethereal", 110, 1.1, 0, 1, 3, 14, { invisible: true, cloakAura: 1.6, physResist: 0.5 }, "Invisible, and cloaks the creeps next to it."),
+  M("veil_wraith", "Veil Wraith", "stealth", "ethereal", 110, 1.1, 0, 1, 3, 14, { invisible: true, cloakAura: 1.6 }, "Invisible, and cloaks the creeps next to it."),
   // ---- tower disruptors ----
   M("siege_ram", "Siege Ram", "disruptor", "heavy", 300, 0.8, 8, 1, 3, 12, { jamPass: { r: 2.6, mult: 0.6, dur: 4 } }, "Every tower it passes loses fire rate for a while."),
   M("rust_beetle", "Rust Beetle", "disruptor", "medium", 160, 0.9, 5, 1, 2, 10, { corrodeAura: { r: 3, mult: 0.7 } }, "Corrodes towers in range: their damage drops while it lives."),
@@ -134,8 +136,8 @@ export const MOBS = [
   M("brood_mother", "Brood Mother", "summoner", "heavy", 300, 0.65, 5, 1, 3, 14, { spawner: { every: 3, into: "spiderling", n: 2 } }, "Lays spiderlings every few seconds."),
   M("hive_queen", "Hive Queen", "summoner", "heavy", 380, 0.6, 6, 1, 3, 16, { escort: { into: "hive_drone", n: 4 }, enrageOnDeath: { r: 6, mult: 1.6 } }, "Escorted by drones that go berserk if she dies."),
   // ---- tricksters ----
-  M("blink_imp", "Blink Imp", "trickster", "light", 70, 1.1, 1, 1, 1, 5, { blink: { every: 3.5, tiles: 4 } }, "Teleports 4 tiles ahead every few seconds."),
-  M("phase_walker", "Phase Walker", "trickster", "ethereal", 120, 1.0, 0, 1, 2, 11, { phaseWall: true, physResist: 0.5 }, "Steps through one tower wall per corridor."),
+  M("blink_imp", "Blink Imp", "trickster", "light", 70, 1.1, 1, 1, 1, 6, { blink: { every: 3.5, tiles: 4 } }, "Teleports 4 tiles ahead every few seconds."),
+  M("phase_walker", "Phase Walker", "trickster", "ethereal", 120, 1.0, 0, 1, 2, 11, { phaseWall: true }, "Steps through one tower wall per corridor."),
   M("escape_artist", "Escape Artist", "trickster", "light", 110, 1.2, 1, 1, 2, 9, { escape: { at: 0.3, tiles: 6 } }, "At 30% HP it opens a portal and warps 6 tiles ahead."),
   // ---- fire ----
   M("magma_elemental", "Magma Elemental", "fire", "heavy", 320, 0.65, 6, 1, 3, 12, { immune: ["burning", "molten"], split: { into: "cinderling", n: 2 }, resist: { fire: 0.5 } }, "Immune to burning. Splits into two cinderlings.", { element: "fire" }),
@@ -155,14 +157,14 @@ export const MOBS = [
   // ---- storm ----
   M("thunder_lizard", "Thunder Lizard", "storm", "medium", 150, 1.1, 3, 1, 2, 10, { chainImmune: true, immune: ["shocked"], blink: { every: 5, tiles: 3 }, resist: { storm: 0.5 } }, "Chain-lightning immune. Once charged, it blinks forward.", { element: "storm" }),
   M("tempest_elemental", "Tempest Elemental", "storm", "light", 100, 1.4, 1, 1, 2, 11, { fly: true, flyerSpeedAura: { r: 3, mult: 1.3 }, resist: { storm: 0.4 } }, "Flyer that speeds up nearby flyers.", { element: "storm" }),
-  M("cloud_djinn", "Cloud Djinn", "storm", "ethereal", 150, 1.1, 0, 1, 3, 15, { fly: true, physResist: 0.5, cloakCycle: { every: 6, dur: 2 } }, "Ethereal flyer that vanishes into clouds every 6s.", { element: "storm" }),
+  M("cloud_djinn", "Cloud Djinn", "storm", "ethereal", 150, 1.1, 0, 1, 3, 15, { fly: true, cloakCycle: { every: 6, dur: 2 } }, "Ethereal flyer that vanishes into clouds every 6s.", { element: "storm" }),
   // ---- light ----
   M("radiant_paladin", "Radiant Paladin", "light", "heavy", 300, 0.8, 8, 1, 3, 13, { divineShield: { at: [0.5], dur: 3 }, resist: { light: 0.4 } }, "Divine shield: invulnerable for 3s at half health.", { element: "light" }),
   M("sun_priest", "Sun Priest", "light", "light", 100, 0.95, 1, 1, 2, 9, { healWounded: { every: 2.5, r: 3, pct: 0.15 } }, "Heals the most wounded creep nearby.", { element: "light" }),
   M("prism_golem", "Prism Golem", "light", "fortified", 380, 0.65, 10, 1, 3, 14, { beamResist: 0.5, resist: { light: 0.5 } }, "Halves damage from beam and lightning towers.", { element: "light" }),
   // ---- darkness & undead ----
   M("ghoul", "Ghoul", "darkness", "light", 90, 1.6, 1, 1, 1, 6, { feast: { r: 2.5, pct: 0.2 } }, "Heals by feeding on creeps that die near it.", { element: "darkness" }),
-  M("banshee", "Banshee", "darkness", "ethereal", 130, 1.0, 0, 1, 3, 13, { physResist: 0.5, curseTower: { every: 6, r: 4, mult: 0.6, dur: 5 } }, "Curses a tower in range, cutting its damage.", { element: "darkness" }),
+  M("banshee", "Banshee", "darkness", "ethereal", 130, 1.0, 0, 1, 3, 13, { curseTower: { every: 6, r: 4, mult: 0.6, dur: 5 } }, "Curses a tower in range, cutting its damage.", { element: "darkness" }),
   M("death_revenant", "Death Revenant", "darkness", "heavy", 260, 0.75, 7, 1, 3, 15, { revive: { hp: 1.0 } }, "Reanimates once at full health.", { element: "darkness" }),
   M("abomination", "Abomination", "darkness", "heavy", 700, 0.55, 6, 1, 4, 18, { cloakAura: 2.2 }, "Huge. Its plague cloud hides the creeps around it.", { element: "darkness" }),
   // ---- mech ----
@@ -171,9 +173,9 @@ export const MOBS = [
   M("steam_tank", "Steam Tank", "mech", "fortified", 560, 0.45, 14, 1, 4, 18, { cloakAura: 2.0 }, "Very slow. Vents steam that hides nearby creeps.", { element: "mech", mech: true }),
   M("repair_drone", "Repair Drone", "mech", "light", 70, 1.2, 1, 1, 2, 10, { fly: true, repairAura: { every: 2, r: 3, pct: 0.06 } }, "Flyer that repairs mech creeps.", { element: "mech", mech: true }),
   // ---- abnormal ----
-  M("void_walker", "Void Walker", "abnormal", "ethereal", 140, 1.0, 0, 1, 2, 11, { physResist: 0.5, voidJump: { every: 4, min: 3, max: 7 } }, "Teleports between random points ahead.", { element: "abnormal" }),
+  M("void_walker", "Void Walker", "abnormal", "ethereal", 140, 1.0, 0, 1, 2, 11, { voidJump: { every: 4, min: 3, max: 7 } }, "Teleports between random points ahead.", { element: "abnormal" }),
   M("mind_flayer", "Mind Flayer", "abnormal", "medium", 170, 0.85, 3, 1, 3, 14, { confuseAura: 3 }, "Confuses towers in range: they fire at random targets.", { element: "abnormal" }),
-  M("glitch_wraith", "Glitch Wraith", "abnormal", "ethereal", 160, 1.0, 0, 1, 3, 13, { physResist: 0.5, duplicate: { at: 0.15, cd: 2, max: 2 } }, "Splits a copy off itself when hit hard.", { element: "abnormal" }),
+  M("glitch_wraith", "Glitch Wraith", "abnormal", "ethereal", 160, 1.0, 0, 1, 3, 13, { duplicate: { at: 0.15, cd: 2, max: 2 } }, "Splits a copy off itself when hit hard.", { element: "abnormal" }),
   M("rift_horror", "Rift Horror", "abnormal", "heavy", 420, 0.6, 6, 1, 4, 17, { devour: { r: 0.9, maxRadius: 0.3 } }, "Devours small creeps it touches and grows stronger.", { element: "abnormal" }),
   // ---- elites ----
   M("ogre_warchief", "Ogre Warchief", "elite", "heavy", 1400, 0.6, 12, 1, 4, 20, { warAura: { r: 3, armor: 3, dmg: 0.8 } }, "Elite. Armour and damage-reduction aura.", { elite: true }),
@@ -196,10 +198,10 @@ export const MINIONS = [
 
 // challenge bosses (the final enemy of a challenge; `end` = victory on death)
 export const CHALLENGE_BOSSES = [
-  M("rat_king", "The Rat King", "challenge", "medium", 9000, 0.5, 6, 1, 0, 0, { spawner: { every: 2, into: "gnasher_rats", n: 3 }, split: { into: "rat_prince", n: 3 } }, "Crowned in filth. Breeds as it walks, and its heirs rise when it falls.", { boss: true, end: true }),
-  M("mirewyrm", "The Mirewyrm", "challenge", "heavy", 14000, 0.55, 8, 1, 0, 0, { fly: true, regen: 0.004, chillFly: { r: 3, mult: 0.65, dur: 4 }, spawner: { every: 4, into: "bat_swarm", n: 2 } }, "A swamp dragon. It chills every tower it passes over.", { boss: true, end: true }),
-  M("clockwork_colossus", "The Clockwork Colossus", "challenge", "fortified", 22000, 0.4, 18, 1, 0, 0, { boulder: { every: 4, r: 7, stun: 2.5 }, spawner: { every: 3, into: "clockwork_spiders", n: 2 }, immune: ["poisoned", "cursed"] }, "A walking foundry. It stuns towers and deploys spiders.", { boss: true, end: true, mech: true }),
-  M("eclipse_herald", "The Eclipse Herald", "challenge", "ethereal", 16000, 0.5, 4, 1, 0, 0, { physResist: 0.6, cloakCycle: { every: 5, dur: 2.5 }, divineShield: { at: [0.5, 0.25], dur: 3 }, healAura: { every: 4, r: 3, pct: 0.05 } }, "Half light, half shadow. It fades from sight and shields itself.", { boss: true, end: true }),
+  M("rat_king", "The Rat King", "challenge", "medium", 9000, 0.5, 6, 1, 0, 0, { spawner: { every: 6, into: "gnasher_rats", n: 2 } }, "Crowned in filth. Breeds rats as it walks.", { boss: true, end: true }),
+  M("mirewyrm", "The Mirewyrm", "challenge", "heavy", 14000, 0.55, 8, 1, 0, 0, { fly: true, regen: 0.004, chillFly: { r: 3, mult: 0.65, dur: 4 }, spawner: { every: 7, into: "bat_swarm", n: 2 } }, "A swamp dragon. It chills every tower it passes over.", { boss: true, end: true }),
+  M("clockwork_colossus", "The Clockwork Colossus", "challenge", "fortified", 22000, 0.4, 18, 1, 0, 0, { boulder: { every: 4, r: 7, stun: 2.5 }, spawner: { every: 6, into: "clockwork_spiders", n: 2 }, immune: ["poisoned", "cursed"] }, "A walking foundry. It stuns towers and deploys spiders.", { boss: true, end: true, mech: true }),
+  M("eclipse_herald", "The Eclipse Herald", "challenge", "ethereal", 16000, 0.5, 4, 1, 0, 0, { cloakCycle: { every: 5, dur: 2.5 }, divineShield: { at: [0.5, 0.25], dur: 3 }, healAura: { every: 5, r: 3, pct: 0.02 } }, "Half light, half shadow. It fades from sight and shields itself.", { boss: true, end: true }),
 ];
 
 // ---------------------------------------------------------------------------
@@ -209,26 +211,26 @@ export const CHALLENGE_BOSSES = [
 // ---------------------------------------------------------------------------
 export const CHALLENGES = [
   { id: "burrow", name: "The Rat King's Burrow", boss: "rat_king", desc: "Ten waves of vermin, then the King himself.", pool: ["gnasher_rats", "spore_mites", "bone_crawlers", "shadow_hound", "ghoul", "hatchling_sac"],
-    hard: { label: "Half starting gold, boss +60% HP", startGoldMult: 0.5, bossHpMult: 1.6 }, reward: "skin_ratcatcher" },
+    hint: "Swarms and packs: area damage wins — splash, chain lightning or blades. Bone Crawlers shrug off splash, so keep a few single-target towers too.",
+    waves: { base: 160, per: 110, cap0: 6, capPer: 1.2 },
+    hard: { label: "30% less starting gold, boss +40% HP", startGoldMult: 0.7, bossHpMult: 1.4 }, reward: "burrow" },
   { id: "mire", name: "Wings over the Mire", boss: "mirewyrm", desc: "The sky darkens with wings. Bring anti-air.", pool: ["bat_swarm", "storm_harpy", "gargoyle", "wyvern", "tempest_elemental", "frost_wyrm"],
-    hard: { label: "Only your first three tower types", maxSlots: 3, bossHpMult: 1.3 }, reward: "skin_skywarden" },
+    hint: "Flyers ignore the maze and fly straight down the middle. Splash and blades can't touch them — line the middle with single-target, beam and chain towers.",
+    waves: { base: 140, per: 100, cap0: 5, capPer: 0.8 },
+    hard: { label: "Only your first three tower types, boss +60% HP", maxSlots: 3, bossHpMult: 1.6 }, reward: "mire" },
   { id: "foundry", name: "The Iron Foundry", boss: "clockwork_colossus", desc: "Gears, steam and a walking furnace.", pool: ["clockwork_spiders", "goblin_shredder", "steam_tank", "repair_drone", "rust_beetle", "wrecker_golem"],
-    hard: { label: "No selling towers", noSell: true, bossHpMult: 1.3 }, reward: "skin_tinker" },
+    hint: "Armour everywhere: Blast cracks Fortified plates, Magic melts Heavy hulls. Boulders stun one tower at a time, so spread your damage out.",
+    waves: { base: 130, per: 90, cap0: 5, capPer: 0.9 },
+    hard: { label: "No selling towers, 10% less starting gold, boss +50% HP", noSell: true, startGoldMult: 0.9, bossHpMult: 1.5 }, reward: "foundry" },
   { id: "eclipse", name: "The Eclipse", boss: "eclipse_herald", desc: "Things that hide, things that shine.", pool: ["shade_stalker", "veil_wraith", "radiant_paladin", "sun_priest", "banshee", "cloud_djinn"],
-    hard: { label: "Kills give no gold", noKillGold: true, bossHpMult: 1.3 }, reward: "skin_eclipse" },
+    hint: "Half of them are invisible: Light towers, support towers, any tower at level 7 and your builder's lantern reveal them. Spirits take +50% from Magic.",
+    waves: { base: 100, per: 75, cap0: 4, capPer: 0.7 },
+    hard: { label: "Kills give half gold, boss +15% HP", killGoldMult: 0.5, bossHpMult: 1.15 }, reward: "eclipse" },
 ];
 
-// builder skins (cosmetic). "element" is the default, a builder in your corridor's element.
-export const BUILDER_SKINS = [
-  { id: "element", name: "Elemental", desc: "A builder in your corridor's element.", unlock: null },
-  { id: "skin_veteran", name: "Veteran", desc: "Play 10 matches.", unlock: { played: 10 } },
-  { id: "skin_gilded", name: "Gilded", desc: "Win 5 matches.", unlock: { wins: 5 } },
-  { id: "skin_ratcatcher", name: "Ratcatcher", desc: "Beat The Rat King's Burrow.", unlock: { challenge: "burrow" } },
-  { id: "skin_skywarden", name: "Skywarden", desc: "Beat Wings over the Mire.", unlock: { challenge: "mire" } },
-  { id: "skin_tinker", name: "Tinker", desc: "Beat The Iron Foundry.", unlock: { challenge: "foundry" } },
-  { id: "skin_eclipse", name: "Eclipsed", desc: "Beat The Eclipse.", unlock: { challenge: "eclipse" } },
-  { id: "skin_champion", name: "Champion", desc: "Beat every challenge on Hard.", unlock: { allHard: true } },
-];
+// builder skins (cosmetic) live in content/skins.js
+export { BUILDER_SKINS } from "./skins.js";
+import { BUILDER_SKINS as _SKINS } from "./skins.js";
 
 // send tiers: unlock time (seconds into the match), stock and recharge
 export const SEND_TIERS = {
@@ -244,6 +246,7 @@ export const ARMOR_CLASSES = {
   unarmored: { name: "Unarmored", color: "#c9c2b0" }, light: { name: "Light", color: "#9fd8ff" },
   medium: { name: "Medium", color: "#ffd27a" }, heavy: { name: "Heavy", color: "#ff9a6a" },
   fortified: { name: "Fortified", color: "#c0a0ff" }, ethereal: { name: "Ethereal", color: "#7fffd0" },
+  boss: { name: "Boss", color: "#ff7a9a" },
 };
 
 // human-readable trait list for the UI
@@ -338,6 +341,7 @@ function sendBaseCost(m) {
 export function extendDB(DB) {
   if (DB._skyholdMobs) return DB;
   DB._skyholdMobs = true;
+  DB.RULES = RULES; // Skyhold's rules: damage types, armour, synergies, difficulty, tuning
   for (const m of ALL()) {
     if (DB.ENEMIES[m.id]) continue;
     const reward = m.reward != null ? m.reward : Math.max(1, Math.round(m.hp * 0.12 + m.armor * 0.4));
@@ -361,10 +365,10 @@ export function extendDB(DB) {
   DB.sendHpMultX = (type, lvl) => { const s = SX[type]; return s ? Math.pow(s.hpGrowth, lvl - 1) : 1; };
   DB.SEND_TIERS = SEND_TIERS;
   DB.CHALLENGES = CHALLENGES;
-  DB.BUILDER_SKINS = BUILDER_SKINS;
+  DB.BUILDER_SKINS = _SKINS;
   DB.ARMOR_CLASSES = ARMOR_CLASSES;
   DB.MOBS_EXPANDED = MOBS.map((m) => m.id);
   return DB;
 }
 
-export default { MOBS, MINIONS, CHALLENGE_BOSSES, CHALLENGES, BUILDER_SKINS, SEND_TIERS, ARMOR_CLASSES, extendDB, traitList, MOB_BY_ID };
+export default { MOBS, MINIONS, CHALLENGE_BOSSES, CHALLENGES, BUILDER_SKINS: _SKINS, SEND_TIERS, ARMOR_CLASSES, extendDB, traitList, MOB_BY_ID };

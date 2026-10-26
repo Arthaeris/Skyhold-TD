@@ -160,7 +160,7 @@ const SaveSystem = (function () {
     if (wins >= 3) lvl = 2;
     if (wins >= 10) lvl = 3;
     if (wins >= 20) lvl = 4;
-    if (wave >= 100 && lvl >= 4) lvl = 5; // Wave 100 -> Mastery 5 (Endless counts; no win required beyond L4)
+    if (wave >= 50 && lvl >= 4) lvl = 5; // Endless wave 50 -> Mastery 5 (Skyhold rules; Circle asked for wave 100)
     return lvl;
   }
 

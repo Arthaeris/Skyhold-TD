@@ -601,3 +601,125 @@ body[data-online="1"] #quick-auto-wave { display: none; }
 #toast { z-index: 40; }
 body[data-screen="menu"] #toast, body[data-screen="setup"] #toast { top: auto; bottom: 40%; }
 #send-panel.show { display: block; overflow-y: auto; padding-top: 12px; }
+
+/* =============================================================================
+ * Skyhold polish pass: toast feed, reaction pop-ups, streamlined setup, wardrobe,
+ * victory/bonus round, defeat reasons, wave warnings, tutorial spotlight.
+ * ===========================================================================*/
+
+/* toasts: a compact feed just above the dock, out of the way of the entrance and the action */
+body[data-screen="game"] #toast { top: auto; bottom: calc(var(--dock-h, 110px) + var(--pad-b) + 10px); left: var(--pad-l); transform: none; align-items: flex-start; width: min(78vw, 360px); gap: 5px; }
+body[data-screen="game"] .toast-msg { padding: 6px 11px; font-size: 12.5px; border-radius: 11px; text-align: left; background: rgba(12, 10, 36, 0.78); transform: translateX(-8px); }
+body[data-screen="game"] .toast-msg.show { transform: none; }
+body[data-screen="game"] .toast-msg.boss { font-size: 14px; }
+@media (min-width: 900px) { body[data-screen="game"] #toast { bottom: calc(var(--pad-b) + 16px); } }
+/* while a modal (end screen, bonus round, pause) is up, toasts move to the top edge so they never cover its buttons */
+body[data-screen="game"]:has(.modal-overlay.show) #toast { bottom: auto; top: calc(var(--pad-t) + 8px); left: 50%; transform: translateX(-50%); align-items: center; }
+
+/* floating reaction names where they happen */
+#world-pops { position: absolute; inset: 0; pointer-events: none; z-index: 2; overflow: hidden; }
+body:has(.modal-overlay.show) #world-pops { display: none; }
+#world-pops .pop { position: absolute; left: 0; top: 0; white-space: nowrap; font-weight: 900; font-size: 14px; letter-spacing: 0.02em; text-shadow: 0 1px 3px #000, 0 0 10px rgba(0, 0, 0, 0.8); will-change: transform, opacity; }
+#world-pops .pop.small { font-size: 12px; }
+
+/* ring bubbles: a little element badge when the run has two elements */
+.rad-item .ri-el { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; background: rgba(8, 8, 28, 0.9); border: 1px solid var(--ec); }
+.rad-item .ri-el svg { width: 13px; height: 13px; }
+
+/* setup */
+.mt-cards.two { grid-template-columns: 1fr 1fr; }
+.mt-cards.two .mt-card { flex-direction: row; justify-content: flex-start; gap: 10px; padding: 10px 12px; text-align: left; font-size: 14px; display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; }
+.mt-cards.two .mt-card svg.i { grid-row: span 2; width: 26px; height: 26px; }
+.mt-card small { font-size: 11px; font-weight: 700; color: var(--dim); }
+.opt-block { display: flex; flex-direction: column; gap: 4px; padding: 4px; border-radius: 14px; background: rgba(255, 255, 255, 0.025); }
+.opt-block .opt-row { background: none; }
+.opt-row.sub { padding-top: 0; }
+.opt-desc { margin: 0 10px 4px; font-size: 12px; line-height: 1.4; color: var(--ink-2); }
+.opt-desc:empty { display: none; }
+#setup-sheet[data-gm="solo"] .vs-only, #setup-sheet[data-gm="versus"] .solo-only { display: none !important; }
+.elbtn.off { opacity: 0.3; pointer-events: none; }
+.rx-box { display: grid; gap: 4px; margin-top: 6px; padding: 8px 10px; border-radius: 12px; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--g-line); }
+.rx-head { font-size: 11px; font-weight: 900; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dim); }
+.rx-line { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; font-size: 12px; line-height: 1.3; }
+.rx-line i { font-style: normal; color: var(--dim); }
+.rx-line b { color: var(--sc); font-weight: 900; }
+.rx-line span { color: var(--ink-2); flex-basis: 100%; padding-left: 2px; }
+.rx-more { font-size: 11.5px; color: var(--dim); }
+.run-est { text-align: center; font-size: 12.5px; font-weight: 800; color: #cfe6ff; padding: 4px 0; }
+.opt-more .opt-lbl i { font-style: normal; font-weight: 700; font-size: 11px; margin-left: 4px; }
+#skin-picker { display: flex; align-items: center; gap: 8px; padding: 0 6px; }
+
+/* wardrobe */
+.wd-group { margin-top: 10px; }
+.wd-head { display: flex; justify-content: space-between; font-weight: 900; font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 4px; }
+.wd-note { margin: 0 0 6px; font-size: 12px; }
+.wd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.wd-skin { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 8px; align-items: center; padding: 8px; border-radius: 12px; background: var(--g-card); border: 1px solid var(--g-line); text-align: left; }
+.wd-skin .sw { grid-row: span 2; width: 26px; height: 26px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, var(--gl) 0 25%, var(--c1) 26% 100%); box-shadow: 0 0 10px -2px var(--gl); }
+.wd-skin b { font-size: 12.5px; }
+.wd-skin span { font-size: 10.5px; color: var(--dim); line-height: 1.25; }
+.wd-skin.sel { border-color: var(--gold); box-shadow: 0 0 14px -4px var(--gold); }
+.wd-skin.locked { opacity: 0.55; }
+.wd-skin.locked .sw { filter: grayscale(1) brightness(0.6); }
+
+/* victory + bonus round */
+.modal.bonus { text-align: center; width: min(92vw, 440px); }
+.modal h1.win { color: #ffe68a; text-shadow: 0 0 24px rgba(255, 210, 61, 0.55); }
+.bonus-sub { color: var(--ink-2); margin: 0 0 10px; }
+.bonus-card { display: flex; gap: 10px; align-items: center; text-align: left; padding: 10px; border-radius: 14px; background: rgba(255, 46, 126, 0.09); border: 1px solid rgba(255, 46, 126, 0.4); margin: 10px 0; }
+.bonus-card img { width: 56px; height: 56px; }
+.bonus-card div { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; }
+.bonus-card em { font-style: normal; color: #ffe68a; font-weight: 900; }
+.end-actions { display: grid; gap: 8px; }
+.end-note { margin: 0 0 8px; color: var(--ink-2); text-align: center; }
+.end-note.gold { color: #ffe68a; font-weight: 800; }
+.end-why { margin: 8px 0; padding: 10px; border-radius: 14px; background: rgba(255, 140, 120, 0.08); border: 1px solid rgba(255, 140, 120, 0.35); text-align: left; display: grid; gap: 8px; }
+.why-row { display: flex; gap: 10px; align-items: flex-start; }
+.why-i { font-size: 20px; line-height: 1.2; }
+.why-row div { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; }
+.why-row span { color: var(--ink-2); line-height: 1.35; }
+
+/* wave warnings, tags */
+.wprev-warn { padding: 1px 7px; border-radius: 99px; background: rgba(255, 77, 109, 0.18); border: 1px solid rgba(255, 77, 109, 0.6); color: #ffc2cc; font-weight: 900; animation: warnPulse 1.6s ease-in-out infinite; }
+@keyframes warnPulse { 50% { box-shadow: 0 0 12px -2px rgba(255, 77, 109, 0.8); } }
+.wv-warn { font-size: 12px; font-weight: 900; color: #ffc2cc; padding: 4px 8px; border-radius: 9px; background: rgba(255, 77, 109, 0.12); margin: 2px 0 6px; }
+.wv-warn span { font-weight: 700; color: var(--ink-2); }
+.chip.dt { color: var(--dc); border-color: color-mix(in srgb, var(--dc) 55%, transparent); }
+.tp-syn-row.live b { text-shadow: 0 0 10px currentColor; }
+.codex-row.live { background: rgba(125, 107, 255, 0.14); border-radius: 10px; }
+.cx-live { font-size: 10px; font-weight: 900; color: #b7aaff; text-transform: uppercase; letter-spacing: 0.06em; }
+.sp-load { display: flex; align-items: center; gap: 8px; font-size: 12px; margin: 4px 0 8px; }
+.sp-lbar { flex: 1; height: 6px; border-radius: 99px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.sp-lbar div { height: 100%; border-radius: 99px; transition: width 0.3s; }
+
+/* challenges */
+.ch-pick { display: grid; gap: 6px; margin-bottom: 10px; }
+.ch-lbl { font-size: 11px; font-weight: 900; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dim); }
+.ch-lbl i { font-style: normal; text-transform: none; letter-spacing: 0; }
+.ch-hint { font-size: 12px; color: #cfe6ff; }
+.ch-skins { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.ch-skin { font-size: 10.5px; font-weight: 800; padding: 2px 7px; border-radius: 99px; background: rgba(255, 255, 255, 0.06); color: var(--dim); }
+.ch-skin.have { color: #9dffc0; background: rgba(95, 224, 122, 0.12); }
+
+/* menu: first-launch nudge */
+#btn-tutorial.pulse { border-color: rgba(255, 210, 61, 0.7); animation: tutPulse 1.8s ease-in-out infinite; }
+@keyframes tutPulse { 50% { box-shadow: 0 0 22px -4px rgba(255, 210, 61, 0.9); } }
+
+/* tutorial spotlight: everything outside the ring is dimmed and can't be pressed */
+#tutorial-layer { position: fixed; inset: 0; z-index: 60; display: none; pointer-events: none; }
+#tutorial-layer.show { display: block; }
+.tu-block { position: fixed; background: rgba(4, 4, 18, 0.66); pointer-events: auto; transition: all 0.18s ease-out; }
+.tu-cover { position: fixed; pointer-events: auto; }
+.tu-ring { position: fixed; border: 2px solid #ffe066; border-radius: 14px; pointer-events: none; box-shadow: 0 0 0 3px rgba(255, 224, 102, 0.25), 0 0 26px rgba(255, 210, 61, 0.65); animation: tuRing 1.6s ease-in-out infinite; transition: all 0.18s ease-out; }
+@keyframes tuRing { 50% { box-shadow: 0 0 0 6px rgba(255, 224, 102, 0.12), 0 0 36px rgba(255, 210, 61, 0.85); } }
+.tu-card { position: fixed; pointer-events: auto; padding: 14px 14px 10px; border-radius: 16px; background: linear-gradient(160deg, rgba(70, 60, 160, 0.35), rgba(12, 12, 40, 0.3) 60%), rgba(14, 14, 40, 0.96); border: 1px solid rgba(255, 224, 102, 0.35); box-shadow: var(--rim), var(--drop); }
+.tu-card.pop { animation: tuPop 0.22s ease-out; }
+@keyframes tuPop { from { opacity: 0; transform: translateY(6px) scale(0.98); } }
+.tu-title { margin: 6px 0 6px; font-family: var(--display); letter-spacing: 0.04em; font-size: 17px; color: #ffe68a; }
+.tu-text { margin: 0 0 10px; font-size: 13.5px; line-height: 1.45; color: var(--ink); }
+.tu-acts { display: flex; justify-content: space-between; gap: 8px; }
+.tu-card.wait .tu-acts { justify-content: flex-start; }
+.tu-prog { display: flex; gap: 4px; }
+.tu-prog i { flex: 1; height: 3px; border-radius: 99px; background: rgba(255, 255, 255, 0.12); }
+.tu-prog i.done { background: rgba(255, 224, 102, 0.55); }
+.tu-prog i.on { background: #ffe066; }

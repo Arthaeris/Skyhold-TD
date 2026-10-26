@@ -364,4 +364,7 @@ export function buildEnemyPreview(DB, id) {
 // model scale per type: the models are already sized relative to each other to match Circle's enemy
 // radii (Circle draws an enemy 4.4 × radius tiles across: imp ≈ 1.4, behemoth ≈ 2.2, warlord ≈ 3.1)
 const SCALE = { grunt: 0.9, runner: 0.85, swarm: 0.8, brute: 0.9, tank: 0.95, boss: 1.0, endboss: 1.0 };
-export function enemyScale(DB, type) { return SCALE[type] || (MOB_MODELS[type] ? 1 : 0.9); }
+// creeps are drawn a bit larger than their footprint so they read on a phone (renderer sets it per screen size)
+let VIS = 1.25;
+export function setEnemyVisScale(v) { VIS = v; }
+export function enemyScale(DB, type) { return (SCALE[type] || (MOB_MODELS[type] ? 1 : 0.9)) * VIS; }
