@@ -64,7 +64,7 @@ function flame(v, y0, k, seed, cols = FLAME_COLS, ember = 1, ox = 0, oz = 0) {
     return P[tip < 0.3 ? 5 : tip < 0.6 ? 6 : tip < 0.82 ? 7 : 8];
   }, ox - W, ox + W, y0, y0 + H, oz - W, oz + W);
   // rising embers
-  const E1 = v.pal("#ffb23a", 1.6, 0.05), E2 = v.pal("#ffe08a", 1.7, 0.03);
+  const E1 = v.pal(cols === FLAME_COLS ? "#ffb23a" : cols[3], 1.6, 0.05), E2 = v.pal(cols === FLAME_COLS ? "#ffe08a" : cols[2], 1.7, 0.03);
   for (let i = 0; i < Math.round(30 * k * ember); i++) {
     const y = y0 + Math.round((10 + R() * 30) * k), a = R() * TAU, d = (3 + R() * 8) * k + (y - y0) * 0.12;
     v.set(ox + Math.cos(a) * d, y, oz + Math.sin(a) * d, R() < 0.5 ? E1 : E2);
@@ -973,5 +973,316 @@ Object.assign(VOX_HEADS, {
     if (st >= 2) ring(24, 7, 56, false);
     centred(P.spin, s);
     return { fy: h + 2.8, sy: h + 2.8, spinRate: 1.4, bob: 0.15, muzzle: [0, h + 2.8, 0] };
+  },
+});
+
+// ===========================================================================
+// LIGHT and DARKNESS
+// ===========================================================================
+function lightPal(v) {
+  return {
+    MAR: v.pal("#efe4c2", 0, 0.05), MAR2: v.pal("#fbf1d6", 0, 0.04), MARD: v.pal("#d6c8a0", 0, 0.05), VEIN: v.pal("#c2b087", 0, 0.05), MOR: v.pal("#b8a77e", 0, 0.04),
+    GOLD: v.pal("#d9b84a", 0, 0.05), GOLDH: v.pal("#f4da7c", 0, 0.04), GOLDD: v.pal("#a8862e", 0, 0.05), SKY: v.pal("#7aa8e8", 0, 0.05),
+    SUN: v.pal("#ffe066", 1.55, 0.05), SUN2: v.pal("#ffc93a", 1.45, 0.05), HALO: v.pal("#fff3c0", 1.8, 0.03), WG: v.pal("#ffffff", 2.0, 0.02),
+    PR: v.pal("#ff7a7a", 1.6, 0.03), PG: v.pal("#7affb0", 1.6, 0.03), PB: v.pal("#7ab4ff", 1.6, 0.03),
+    GL1: v.pal("#fff8e4", 0, 0.03), GL2: v.pal("#f2e6c4", 0, 0.03), GL3: v.pal("#e2d2a6", 0, 0.03), GL4: v.pal("#cdbb8a", 0, 0.04),
+  };
+}
+const lightTones = (C) => [C.GL1, C.GL2, C.GL3, C.GL4, C.MAR2, C.HALO];
+function darkPal(v) {
+  return {
+    OB: v.pal("#17121f", 0, 0.08), OB2: v.pal("#221a30", 0, 0.08), OB3: v.pal("#30264a", 0, 0.07), OBH: v.pal("#463a66", 0, 0.06), VOID: v.pal("#08060c", 0, 0.04), MOR: v.pal("#0e0a14", 0, 0.04),
+    BONE: v.pal("#e6dcc8", 0, 0.05), BONE2: v.pal("#cfc2a8", 0, 0.05), BONED: v.pal("#a2967e", 0, 0.05), IRON: v.pal("#4a4458", 0, 0.05), IRONH: v.pal("#7a7490", 0, 0.04),
+    WOOD: v.pal("#3e2e2a", 0, 0.08), CLOTH: v.pal("#3a2e52", 0, 0.08), CLOTH2: v.pal("#4c3e6a", 0, 0.08), STEEL: v.pal("#c8c8d8", 0, 0.03), STEELD: v.pal("#8a8a9c", 0, 0.04),
+    VI: v.pal("#8b6cff", 1.45, 0.06), VI2: v.pal("#a98aff", 1.65, 0.05), VL: v.pal("#cbb9ff", 1.85, 0.03), VW: v.pal("#f0e8ff", 2.05, 0.02),
+  };
+}
+const darkTones = (C) => [C.OBH, C.OB3, C.OB2, C.OB, C.OBH, C.VI2];
+const VIOLET_FLAME = ["#ffffff", "#f0e8ff", "#cbb9ff", "#b49cff", "#9a7cff", "#a98aff", "#8b6cff", "#6a4ad8", "#4a2a9a"];
+// a fluted marble column with a gold base ring and capital
+function column(v, C, cx, cz, y0, y1, r) {
+  v.cyl(cx, y0, cz, r, y1, (x, y, z) => { const a = Math.atan2(z - cz, x - cx), d = Math.hypot(x - cx, z - cz); return d > r - 0.8 && (Math.round(a / (TAU / 12)) & 1) ? C.MARD : C.MAR; });
+  v.cyl(cx, y0, cz, r + 1, y0, C.GOLD); v.cyl(cx, y1, cz, r + 1, y1, C.GOLDH); v.cyl(cx, y1 + 1, cz, r + 1.6, y1 + 1, C.MAR2);
+}
+
+Object.assign(VOX_PLINTH, {
+  light(p, st) {
+    const v = vx(-18, 18, 0, 24, -18, 18), C = lightPal(v);
+    const top = st >= 1 ? 7 : 3;
+    const course = (half, y0, y1, isTop) => v.fill((x, y, z) => {
+      const ax = Math.abs(x), az = Math.abs(z), m = Math.max(ax, az);
+      if (m > half) return null;
+      if (m === half) { if (y === y1) return C.GOLD; const al = ax === half ? z : x; return mortar(al, y - y0, 2, 7) ? C.MOR : vnoise(al * 0.3, y * 0.5, x + z) > 0.62 ? C.VEIN : C.MAR; }
+      if (y < y1) return C.MARD;
+      if (!isTop) return m >= half - 1 ? C.MAR2 : C.MAR;
+      // polished tiles with a gold sunburst inlaid from the centre
+      const a = Math.atan2(z, x), d = Math.hypot(x, z);
+      if (d > 3 && d < half - 2 && Math.abs(((a / (TAU / 8)) % 1 + 1) % 1 - 0.5) > 0.5 - 0.25 / Math.max(1, d * 0.25)) return C.GOLD;
+      if (Math.abs(d - (half - 4)) < 0.5) return C.GOLDD;
+      return ((x + 40) % 4 === 0 || (z + 40) % 4 === 0) ? C.MARD : (Math.floor((x + 40) / 4) + Math.floor((z + 40) / 4)) & 1 ? C.MAR2 : C.MAR;
+    }, -half, half, y0, y1, -half, half);
+    course(17, 0, 3, st < 1);
+    if (st >= 1) course(13, 4, 7, true);
+    const ch = st >= 2 ? 12 : 7;
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      column(v, C, sx * 15, sz * 15, 4, 4 + ch, 1.3);
+      v.set(sx * 15, 6 + ch, sz * 15, C.SUN); if (st >= 3) v.set(sx * 15, 7 + ch, sz * 15, C.WG);
+    }
+    v.emit(p, 0, U / 2, 0, MERGE);
+    return (top + 1) * U;
+  },
+  darkness(p, st) {
+    const v = vx(-19, 19, 0, 26, -19, 19), C = darkPal(v);
+    const top = st >= 1 ? 7 : 3;
+    const crack = (x, z) => Math.abs(vnoise(x * 0.18, 8.3, z * 0.18) - 0.5) < 0.03;
+    const course = (half, y0, y1, isTop) => v.fill((x, y, z) => {
+      const ax = Math.abs(x), az = Math.abs(z), m = Math.max(ax, az);
+      if (m > half - (y === y1 && h3(x, y, z) < 0.25 ? 1 : 0)) return null;           // chipped, uneven edge
+      if (m >= half - 1 && y < y1) return h3(x, y, z) < 0.3 ? C.OB3 : (y - y0) % 2 === 1 && h3(x, 0, z) < 0.15 ? C.OBH : C.OB2;
+      if (y < y1) return C.OB;
+      if (isTop && crack(x, z) && m < half - 2) return C.VI;
+      if (isTop && Math.abs(Math.hypot(x, z) - 6.5) < 0.5) return C.VI;                  // a summoning circle
+      return m >= half - 1 ? C.OBH : vnoise(x * 0.4, 1, z * 0.4) > 0.58 ? C.OB3 : C.OB2;
+    }, -half, half, y0, y1, -half, half);
+    course(17, 0, 3, st < 1);
+    if (st >= 1) course(13, 4, 7, true);
+    const H = st >= 2 ? 15 : 9;
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      crystal(v, sx * 15, 4, sz * 15, 2.3, H, darkTones(C), { lean: [sx * 0.12, sz * 0.12] });
+      crystal(v, sx * 15 - sx * 3, 4, sz * 15 + sz, 1.3, Math.round(H * 0.55), darkTones(C), { lean: [-sx * 0.1, sz * 0.15] });
+      if (st >= 2) v.set(sx * 15 + sx, 4 + Math.round(H * 0.5), sz * 15 + sz * 2, C.VL);
+    }
+    v.emit(p, 0, U / 2, 0, MERGE);
+    return (top + 1) * U;
+  },
+});
+
+Object.assign(VOX_HEADS, {
+  // ===== LIGHT =============================================================
+  light_0(P, h, st) { // Beam Tower: a gold-ringed lens on a fluted marble column
+    const v = vx(-8, 8, 0, 20, -8, 8), C = lightPal(v);
+    v.box(-6, 0, -6, 6, 1, 6, (x, y) => (y === 1 ? C.MAR2 : C.MARD));
+    column(v, C, 0, 0, 2, 15, 3.6);
+    v.cyl(0, 17, 0, 6, 18, (x, y, z) => (Math.hypot(x, z) > 5 ? C.GOLDH : C.GOLD));
+    onTop(P.base, h, v);
+    const a = vx(-12, 12, -3, 18, -6, 6), A = lightPal(a), cy = 9;
+    // a gold fork carrying the lens
+    a.cyl(0, -2, 0, 2.5, 0, A.GOLD);
+    for (const s of [-1, 1]) a.path([[s * 2, 0, 0], [s * 8, 2, 0], [s * 8.5, cy, 0]], 1.2, 1.0, A.GOLD);
+    for (const s of [-1, 1]) a.cyl(s * 7, cy, 0, 1.4, s * 10, A.GOLDH, "x");
+    // the lens: a gold ring with a glowing glass disc, a white heart
+    a.fill((x, y, z) => {
+      const d = Math.hypot(x, y - cy);
+      if (z >= -2 && z <= 1 && d <= 7.5 && d > 6) return z === 1 && Math.round(Math.atan2(y - cy, x) / (TAU / 16)) % 2 === 0 ? A.GOLDH : A.GOLD;
+      if (z === 0 && d <= 6) return d < 1.6 ? A.WG : d < 3.4 ? A.HALO : d < 5 ? A.GL2 : A.GL3;
+      if (z === -1 && d <= 6) return A.GOLDD;
+      return null;
+    }, -8, 8, cy - 8, cy + 8, -2, 1);
+    if (st >= 1) for (let i = 0; i < 8; i++) { const t = (i / 8) * TAU; a.set(Math.cos(t) * 8.5, cy + Math.sin(t) * 8.5, -1, A.GOLDH); }
+    if (st >= 2) for (const s of [-1, 1]) a.path([[s * 8, cy + 6, -1], [s * 11, cy + 10, -2], [s * 10, cy + 14, -3]], 1.0, 0.5, A.GOLD);
+    if (st >= 3) a.set(0, cy + 10, 0, A.WG), a.box(0, cy + 8, 0, 0, cy + 9, 0, A.GOLDH);
+    centred(P.aim, a);
+    return { ay: h + 1.6, muzzle: [0, 0.7, 0.3] };
+  },
+
+  light_1(P, h, st) { // Prism Tower: a floating crystal prism scattering coloured light over gold-capped posts
+    const v = vx(-10, 10, 0, 18, -10, 10), C = lightPal(v);
+    v.fill((x, y, z) => { const m = Math.max(Math.abs(x), Math.abs(z)); const half = 7 - y; if (m > half) return null; return y === 4 - 0 || m === half ? (y % 2 ? C.MAR2 : C.MAR) : C.MARD; }, -7, 7, 0, 4, -7, 7);
+    v.cyl(0, 5, 0, 2, 5, C.GOLD); v.set(0, 6, 0, C.HALO);
+    for (const [x, z] of [[-6, -6], [6, 6], [-6, 6], [6, -6]]) { v.box(x, 0, z, x, 12, z, (xx, y) => (y % 4 === 0 ? C.GOLDH : C.GOLD)); v.box(x - 1, 13, z - 1, x + 1, 13, z + 1, C.GOLD); v.set(x, 14, z, [C.PR, C.PG, C.PB, C.SUN][(x > 0) + (z > 0) * 2]); }
+    onTop(P.base, h, v);
+    const f = vx(-11, 11, -12, 10, -11, 11), F = lightPal(f), r = 5 + st * 0.4;
+    bipyr(f, [0, 0, 0], r, r * 1.5, [f.pal("#fff2d0", 0, 0.03), f.pal("#ffc8d6", 0, 0.03), f.pal("#c4e4ff", 0, 0.03), f.pal("#c8ffdc", 0, 0.03), F.MAR2, F.HALO]);
+    f.cyl(0, 0, 0, 1.2, 0, F.WG);
+    for (const [c, a] of [[F.PR, 0], [F.PG, TAU / 3], [F.PB, (2 * TAU) / 3]]) f.cap([Math.cos(a) * r * 0.7, -r * 0.6, Math.sin(a) * r * 0.7], [Math.cos(a) * 10, -r * 1.3, Math.sin(a) * 10], 0.8, c, 0.5);
+    centred(P.float, f);
+    return { fy: h + 2.3 + st * 0.15, bob: 0.15, spinIn: "float", sy: 0, spinRate: 0.8, muzzle: [0, h + 2.3, 0] };
+  },
+
+  light_2(P, h, st) { // Sanctuary: a columned shrine with a stepped gold roof, a radiant orb over its altar
+    const v = vx(-14, 14, 0, 36, -14, 14), C = lightPal(v);
+    v.fill((x, y, z) => { const m = Math.max(Math.abs(x), Math.abs(z)); return m <= 12 ? (y === 1 ? (m === 12 ? C.GOLD : ((x + z) & 1 ? C.MAR2 : C.MAR)) : C.MARD) : null; }, -12, 12, 0, 1, -12, 12);
+    for (const [x, z] of [[-9, -9], [9, -9], [-9, 9], [9, 9]]) column(v, C, x, z, 2, 21, 1.8);
+    v.fill((x, y, z) => { const m = Math.max(Math.abs(x), Math.abs(z)); return m <= 12 ? (y === 24 ? C.GOLD : m === 12 && y === 23 && (x + z) % 3 === 0 ? C.GOLDH : C.MAR) : null; }, -12, 12, 23, 24, -12, 12);
+    v.fill((x, y, z) => { const m = Math.max(Math.abs(x), Math.abs(z)), half = 10 - (y - 25) * 2; return m <= half ? (m === half ? C.GOLDH : C.GOLD) : null; }, -10, 10, 25, 28, -10, 10);
+    v.box(-2, 29, -2, 2, 30, 2, C.MAR2); v.box(0, 31, 0, 0, 33, 0, C.GOLDH); v.set(0, 34, 0, C.SUN);
+    // the altar
+    v.box(-3, 2, -3, 3, 5, 3, (x, y, z) => (y === 5 ? C.GOLD : Math.abs(x) === 3 || Math.abs(z) === 3 ? C.MAR : C.MARD));
+    v.box(-2, 6, -2, 2, 6, 2, C.MAR2);
+    if (st >= 2) for (const [x, z] of [[0, -12], [0, 12], [-12, 0], [12, 0]]) v.box(x - (x ? 0 : 1), 22, z - (z ? 0 : 1), x + (x ? 0 : 1), 22, z + (z ? 0 : 1), C.SUN);
+    onTop(P.base, h, v);
+    const f = vx(-5, 5, -5, 5, -5, 5), F = lightPal(f), r = 3 + st * 0.3;
+    f.ell(0, 0, 0, r, r, r, (x, y, z) => (Math.hypot(x, y, z) < r - 1.2 ? F.WG : F.SUN));
+    centred(P.float, f);
+    return { fy: h + 1.2, bob: 0.08, spinIn: "float", sy: 0, spinRate: 1, muzzle: [0, h + 1.2, 0] };
+  },
+
+  light_3(P, h, st) { // Radiance Tower: a turning sun disc of gold rays on a marble pillar
+    const v = vx(-8, 8, 0, 28, -8, 8), C = lightPal(v);
+    v.box(-6, 0, -6, 6, 1, 6, (x, y) => (y === 1 ? C.GOLD : C.MARD));
+    column(v, C, 0, 0, 2, 23, 3.4);
+    v.cyl(0, 25, 0, 4, 25, C.GOLD); v.cyl(0, 26, 0, 2.5, 26, C.GOLDH);
+    onTop(P.base, h, v);
+    const s = vx(-16, 16, -16, 16, -2, 2), S = lightPal(s), n = 8 + st * 2;
+    s.fill((x, y, z) => {
+      const d = Math.hypot(x, y), a = Math.atan2(y, x);
+      if (d <= 6.5 && Math.abs(z) <= 1) return d < 2.5 ? S.WG : d < 5 ? (z === 0 ? S.HALO : S.SUN) : S.GOLDH;
+      if (z !== 0 || d < 6.5) return null;
+      const k = ((a / TAU) * n % 1 + 1) % 1, long = Math.round((a / TAU) * n - k) & 1, L = long ? 14 : 10.5;
+      const w = (1 - (d - 6.5) / (L - 6.5)) * 0.42;
+      return Math.abs(k - 0.5) < w && d <= L ? (d > L - 2 ? S.SUN : S.SUN2) : null;
+    }, -15, 15, -15, 15, -1, 1);
+    if (st >= 2) s.fill((x, y, z) => { const d = Math.hypot(x, y); return z === -1 && d > 6.5 && d < 8 ? S.GOLD : null; }, -9, 9, -9, 9, -1, -1);
+    centred(P.spin, s);
+    return { sy: h + 3.0, spinRate: 0.6, spinAxis: "z", muzzle: [0, h + 3.0, 0] };
+  },
+
+  light_4(P, h, st) { // Solar Spire: a stepped marble obelisk inlaid with suns, carrying a sun in a ring of gold blades
+    const H = Math.round((3.2 + st * 0.35) / U), v = vx(-9, 9, 0, H + 8, -9, 9), C = lightPal(v);
+    v.fill((x, y, z) => {
+      const tier = Math.min(3, Math.floor((y / H) * 4)), half = 7 - tier * 1.5, ax = Math.abs(x), az = Math.abs(z), m = Math.max(ax, az);
+      if (m > half) return null;
+      const yt = y - Math.round((tier * H) / 4), band = yt === 0 || y === H - 1;
+      if (band) return m >= half - 0.5 ? C.GOLD : C.MAR;
+      if (m >= half - 0.5) {
+        const al = ax >= az ? z : x, cy = Math.round(H / 8);
+        if (Math.hypot(al, yt - cy) < 1.6 && tier < 3) return C.SUN;                 // inlaid sun glyphs
+        if (Math.hypot(al, yt - cy) < 2.6 && tier < 3) return C.GOLDH;
+        return ax === az ? C.MARD : C.MAR;
+      }
+      return C.MARD;
+    }, -7, 7, 0, H - 1, -7, 7);
+    for (let y = H; y < H + 6; y++) { const half = Math.round(3 - (y - H) * 0.6); v.box(-half, y, -half, half, y, half, y === H + 5 ? C.SUN : C.GOLD); }
+    onTop(P.base, h, v);
+    const f = vx(-7, 7, -7, 7, -7, 7), F = lightPal(f), r = 4.5 + st * 0.3;
+    f.ell(0, 0, 0, r, r, r, (x, y, z) => { const d = Math.hypot(x, y, z); return d < r - 1.4 ? F.WG : vnoise(x * 0.6, y * 0.6, z * 0.6) > 0.55 ? F.SUN2 : F.SUN; });
+    centred(P.float, f);
+    const s = vx(-15, 15, -3, 3, -15, 15), S = lightPal(s), nb = 12;
+    for (let i = 0; i < nb; i++) { const a = (i / nb) * TAU; s.cap([Math.cos(a) * 9.5, 0, Math.sin(a) * 9.5], [Math.cos(a + 0.25) * 12.5, i % 2 ? 1 : -1, Math.sin(a + 0.25) * 12.5], 1.0, i % 3 === 0 ? S.GOLDH : S.GOLD, 0.5); }
+    centred(P.spin, s);
+    return { fy: H * U + h + 0.9, sy: H * U + h + 0.9, spinRate: 1.2, bob: 0.1, muzzle: [0, H * U + h + 0.9, 0] };
+  },
+
+  // ===== DARKNESS ==========================================================
+  darkness_0(P, h, st) { // Shadow Tower: a cracked obsidian obelisk with a great watching eye
+    const v = vx(-8, 8, 0, 24, -8, 8), C = darkPal(v);
+    v.fill((x, y, z) => {
+      const half = 6 - Math.floor(y / 8), ax = Math.abs(x), az = Math.abs(z), m = Math.max(ax, az);
+      if (m > half || (ax === half && az === half)) return null;
+      if (m === half && vnoise(x * 0.35 + z * 0.35, y * 0.3, 2) > 0.7) return C.VI;
+      return m === half ? (y % 8 === 7 ? C.OBH : h3(x, y, z) < 0.3 ? C.OB3 : C.OB2) : C.OB;
+    }, -6, 6, 0, 21, -6, 6);
+    onTop(P.base, h, v);
+    const a = vx(-12, 12, -9, 14, -9, 10), A = darkPal(a);
+    a.fill((x, y, z) => { const ax = Math.abs(x), ay = Math.abs(y), az = Math.abs(z); if (ax > 7 || ay > 7 || az > 7 || ax + ay > 11 || ax + az > 11 || ay + az > 11) return null; return h3(x, y, z) < 0.25 ? A.OB3 : A.OB2; });
+    // the eye: lids, a violet iris, a white slit pupil
+    a.fill((x, y, z) => {
+      const e = (x / 5.5) ** 2 + (y / 3.2) ** 2; if (e > 1) return null;
+      if (z === 7) return 0;
+      if (z !== 6) return null;
+      const d = Math.hypot(x, y);
+      return Math.abs(x) < 0.6 && Math.abs(y) < 2.4 ? A.VW : d < 2.8 ? A.VI2 : d < 3.6 ? A.VI : A.BONE;
+    }, -6, 6, -4, 4, 6, 7);
+    a.fill((x, y, z) => { const e = (x / 6.6) ** 2 + (y / 4.2) ** 2; return e <= 1 && e > 0.72 && z === 7 ? A.OBH : null; }, -7, 7, -5, 5, 7, 7);
+    for (let i = 0; i < 4; i++) { const t = (i / 3 - 0.5) * 1.4; a.cap([Math.sin(t) * 5, 6, -1], [Math.sin(t) * 8, 12 - Math.abs(t) * 2, -3], 1.3, A.OB3, 0.4); }
+    if (st >= 2) for (const s of [-1, 1]) a.path([[s * 6, 2, 0], [s * 10, 6, -1], [s * 11, 11, -3]], 1.4, 0.5, A.OBH);
+    if (st >= 3) a.set(0, 10, -1, A.VL);
+    centred(P.aim, a);
+    return { ay: h + 2.15, muzzle: [0, 0, 0.7] };
+  },
+
+  darkness_1(P, h, st) { // Curse Tower: a horned skull on a chained totem, burning with violet fire
+    const v = vx(-14, 14, 0, 34, -10, 12), C = darkPal(v);
+    v.fill((x, y, z) => { const m = Math.max(Math.abs(x), Math.abs(z)), half = y < 3 ? 6 : 4; if (m > half) return null; return y === 2 || y === 10 || y === 16 ? C.IRON : m === half ? ((y + x + z) % 5 === 0 ? C.OB3 : C.WOOD) : C.OB; }, -6, 6, 0, 18, -6, 6);
+    for (const s of [-1, 1]) v.path([[s * 4.5, 16, 4.5], [s * 7, 10, 3], [s * 5, 5, 5], [s * 4.5, 2, 4.5]], 0.7, 0.7, (x, y) => (y % 2 ? C.IRON : C.IRONH));
+    // the skull
+    const sy = 23;
+    v.ell(0, sy, 0, 6.5, 6, 6.5, (x, y, z) => (y > sy + 3 ? C.BONE : z > 3 ? C.BONE : C.BONE2));
+    v.box(-4, sy - 7, -2, 4, sy - 4, 5, (x, y, z) => (y === sy - 5 && z > 3 && (x & 1) ? C.BONED : C.BONE2));           // jaw
+    for (const s of [-1, 1]) { v.ell(s * 2.6, sy, 5.6, 1.7, 1.6, 1.6, 0); v.set(s * 2.6, sy, 4.6, C.VI2); v.set(s * 2.6, sy, 5, C.VL); }
+    v.box(-0.5, sy - 3, 6, 0.5, sy - 2, 6, 0);
+    for (let x = -3; x <= 3; x++) v.box(x, sy - 4, 5, x, sy - 4, 5, x & 1 ? C.BONE : C.BONED);
+    for (const s of [-1, 1]) v.path([[s * 5, sy + 3, -1], [s * 9, sy + 4, -3], [s * 11.5, sy + 1, -2.5], [s * 11, sy - 3, 0], [s * 9, sy - 4, 2]], 1.9, 0.6, (x, y, z) => ((Math.round(Math.hypot(x, y - sy)) & 1) ? C.BONED : C.BONE2));
+    if (st >= 2) for (const s of [-1, 1]) v.set(s * 9, sy - 5, 2, C.VI2);
+    onTop(P.base, h, v);
+    const f = vx(-13, 13, 0, 32, -13, 13);
+    flame(f, 0, 0.42 + st * 0.07, 61, VIOLET_FLAME);
+    centred(P.float, f);
+    return { fy: h + (sy + 5) * U, bob: 0.06, muzzle: [0, h + 2.1, 0.5] };
+  },
+
+  darkness_2(P, h, st) { // Void Tower: a black sphere over obsidian shards, an accretion ring of violet matter
+    const v = vx(-12, 12, 0, 20, -12, 12), C = darkPal(v);
+    for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) crystal(v, sx * 8, 0, sz * 8, 2.2, 13 + st, darkTones(C), { lean: [-sx * 0.2, -sz * 0.2] });
+    v.cyl(0, 0, 0, 4, 1, C.OB2); v.set(0, 2, 0, C.VI);
+    onTop(P.base, h, v);
+    const f = vx(-8, 8, -8, 8, -8, 8), F = darkPal(f), r = 6 + st * 0.3;
+    f.ell(0, 0, 0, r, r, r, (x, y, z) => (vnoise(x * 0.5, y * 0.5, z * 0.5) > 0.7 ? F.OB2 : F.VOID));
+    centred(P.float, f);
+    const s = vx(-20, 20, -2, 2, -20, 20), S = darkPal(s), R = rng(13);
+    s.fill((x, y, z) => {
+      const d = Math.hypot(x, z); if (d < 9 || d > 18 || y !== 0) return null;
+      const a = Math.atan2(z, x), band = vnoise(d * 0.5, a * 3, 1);
+      if (band < 0.35) return null;
+      return d < 11 ? S.VL : d < 14 ? (band > 0.6 ? S.VI2 : S.VI) : band > 0.55 ? S.VI : null;
+    }, -19, 19, 0, 0, -19, 19);
+    for (let i = 0; i < 14; i++) { const a = R() * TAU, d = 9 + R() * 9; s.set(Math.cos(a) * d, (R() < 0.5 ? 1 : -1), Math.sin(a) * d, R() < 0.5 ? S.VW : S.OB3); }
+    centred(P.spin, s);
+    return { fy: h + 1.9, sy: h + 1.9, spinRate: 2, bob: 0.15, muzzle: [0, h + 1.9, 0] };
+  },
+
+  darkness_3(P, h, st) { // Reaper Tower: a hooded reaper in tattered robes raising a scythe
+    const a = vx(-14, 16, 0, 40, -10, 14), A = darkPal(a);
+    // the robe: a flared cone, tattered at the hem
+    a.fill((x, y, z) => {
+      const t = y / 26, r = 8 - t * 4.5, d = Math.hypot(x, z * 1.15);
+      if (d > r) return null;
+      if (y < 3 && vnoise(x * 0.6, 3, z * 0.6) > 0.5 + y * 0.12) return null;
+      if (y === 4 || y === 5) return d > r - 1 ? (st >= 1 ? A.VI : A.CLOTH2) : A.CLOTH;
+      return (Math.round(Math.atan2(z, x) * 3) + y) % 7 === 0 ? A.CLOTH2 : A.CLOTH;
+    }, -9, 9, 0, 26, -9, 9);
+    // the hood with a black face and two glowing eyes
+    a.ell(0, 29, 0, 5, 5.5, 5, (x, y, z) => (y > 32 ? A.CLOTH2 : A.CLOTH));
+    a.cap([0, 30, -3], [0, 31, -6], 2.8, A.CLOTH, 1.6);
+    a.ell(0, 28.5, 4, 3, 3.5, 2.5, 0);
+    a.ell(0, 28.5, 2.5, 3, 3.5, 1.6, A.VOID);
+    for (const s of [-1, 1]) a.set(s * 1.3, 29, 3.2, A.VL);
+    // arms reaching to the scythe
+    for (const s of [-1, 1]) a.path([[s * 4.5, 22, 1], [7, 18 + s * 3, 4], [9, 19 + s * 4, 5]], 1.8, 1.4, A.CLOTH);
+    for (const s of [-1, 1]) a.ell(9, 19 + s * 4, 5, 1.4, 1.4, 1.4, A.BONE2);
+    // the scythe
+    a.path([[8.5, 2, 3.5], [9, 19, 5], [9.5, 37, 6.5]], 0.9, 0.9, A.WOOD);
+    a.box(9, 36, 6, 10, 38, 7, A.IRON);
+    a.path([[9.5, 37, 6.5], [6, 38.5, 9], [0, 37.5, 11], [-5, 35, 11.5], [-8, 31, 10.5]], 1.3, 0.5, (x, y, z) => (z > 10.4 || y > 38 ? A.STEEL : A.STEELD));
+    if (st >= 2) a.path([[6, 37.5, 9.6], [0, 36.5, 11.8], [-5, 34, 12.2]], 0.5, 0.5, A.VI2);
+    if (st >= 3) a.ell(0, 14, 7.5, 1.5, 1.5, 0.8, A.VI2);
+    centred(P.aim, a);
+    return { ay: h, muzzle: [0, 1.9 * 1.2, 0.6] };
+  },
+
+  darkness_4(P, h, st) { // Eclipse Spire: a horned obsidian spire holding an eclipsed sun in a violet corona
+    const H = Math.round((3.0 + st * 0.3) / U), v = vx(-12, 12, 0, H + 14, -12, 12), C = darkPal(v);
+    v.fill((x, y, z) => {
+      const tier = Math.min(4, Math.floor((y / H) * 5)), half = 7 - tier * 1.2, rot = tier * 0.2;
+      const xr = x * Math.cos(rot) - z * Math.sin(rot), zr = x * Math.sin(rot) + z * Math.cos(rot);
+      const m = Math.max(Math.abs(xr), Math.abs(zr));
+      if (m > half) return null;
+      if (m > half - 1) return (y - Math.round((tier * H) / 5)) === 0 ? C.OBH : vnoise(xr * 0.4, y * 0.3, zr * 0.4) > 0.8 ? C.VI : C.OB2;
+      return C.OB;
+    }, -8, 8, 0, H - 1, -8, 8);
+    for (const s of [-1, 1]) v.path([[s * 2, H - 3, 0], [s * 7, H + 1, 0], [s * 9, H + 7, 0], [s * 7.5, H + 12, 0]], 1.8, 0.5, (x, y) => (y > H + 9 ? C.OBH : C.OB3));
+    onTop(P.base, h, v);
+    const s = vx(-17, 17, -17, 17, -2, 2), S = darkPal(s), R = rng(31);
+    s.fill((x, y, z) => {
+      const d = Math.hypot(x, y), a = Math.atan2(y, x);
+      if (d <= 8 && Math.abs(z) <= 1) return d > 7 ? S.OB3 : S.VOID;
+      if (z !== 0 || d <= 8) return null;
+      const L = 9 + vnoise(a * 2.2 + 5, 1, 1) * 5 + (st >= 2 ? 1 : 0), k = vnoise(Math.cos(a) * 3, Math.sin(a) * 3, 7);
+      if (d > 10 && k < 0.42) return null;
+      if (d > L) return null;
+      return d < 9 ? S.VL : vnoise(x * 0.5, y * 0.5, 3) > 0.5 ? S.VI2 : S.VI;
+    }, -16, 16, -16, 16, -1, 1);
+    centred(P.spin, s);
+    return { sy: h + H * U + 1.0, spinRate: 0.4, spinAxis: "z", muzzle: [0, h + H * U + 1.0, 0] };
   },
 });
