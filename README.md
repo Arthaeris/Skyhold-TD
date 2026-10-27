@@ -75,7 +75,7 @@ Open <http://localhost:8000>. three.js r186 and the fonts come from CDNs, so the
 | `net/commands.js`, `app/loop.js`, `save.js` | Circle's command schema, fixed-step loop and save layer (Skyhold storage keys) |
 | `app/main.js` | Shell orchestrator, ported from Circle: commands, screens, autosave, bots, input |
 | `ui/shell.js`, `ui/icons.js` | Circle's UI panels and rings, elemental sigils and SVG icons |
-| `render/` | `renderer.js` (camera, sync, picking), `world.js` (ring, islands, gates, vortex, sea), `towers.js` (+ `towermodels.js`: all 40 towers as voxel sculpts), `enemies.js` (+ `bossmodels.js`: voxel bosses), `voxkit.js` (voxel sculpting kit), `propmodels.js` (voxel obstacles and island props), `effects.js`, `post.js`, `kit.js`, `theme.js`, `thumbs.js` |
+| `render/` | `renderer.js` (camera, sync, picking), `world.js` (ring, islands, gates, vortex, sea), `towers.js` (+ `towermodels.js`: all 40 towers as voxel sculpts), `enemies.js` (+ `bossmodels.js`: voxel bosses), `voxkit.js` (voxel sculpting kit), `propmodels.js` (voxel obstacles and island props), `ringmodels.js` (voxel portals, gate islands, vortex, bridges), `effects.js`, `post.js`, `kit.js`, `theme.js`, `thumbs.js` |
 | `audio/sound.js` | Music and synthesized SFX |
 | `tools/` | `parity-test.mjs`, `expanded-soak.mjs`, `balance-sim.mjs`, plus `preview.html` and `gallery.html` for eyeballing the world and models |
 | `docs/PORT_NOTES.md` | Decisions, known gaps and the backlog |

@@ -14,6 +14,7 @@ import { Batch, Part, MAT, rng, noise, fbm, col, shade, mix, clamp, lerp, smooth
 import { THEMES, WORLD } from "./theme.js";
 import { createBackdrop, fallMesh, crystal, decorate, FLOAT_KIND } from "./backdrop.js";
 import { VOX_OBSTACLES, VOX_RIM } from "./propmodels.js";
+import { portalEntrance, portalExit, gateIsland, menhir, rubble, chainLinkGeometry, padlockPart, steppingStone, bridgeArrow } from "./ringmodels.js";
 
 export const COLS = 31, ROWS = 61;
 const SIDE = 3.2, END = 6;             // rim width beside / beyond the build grid
@@ -135,7 +136,7 @@ function portalSwirl() {
 // THE VORTEX — idle: a blue spiral bound by chains and a lock (Circle's "Wave" state);
 // prep (end boss ready): it turns to fire and the chains burst outward ("Summon")
 // ---------------------------------------------------------------------------
-function buildVortex(radius) {
+export function buildVortex(radius) {
   const root = new THREE.Group();
   const mat = swirlMaterial({ a: WORLD.vortexIdle[0], b: WORLD.vortexIdle[1], c: WORLD.vortexIdle[2], a2: WORLD.vortexActive[0], b2: WORLD.vortexActive[1], c2: WORLD.vortexActive[2], spin: 0.9, arms: 4, twist: 3.6, core: 0.05, bright: 2.6 });
   const disc = new THREE.Mesh(new THREE.CircleGeometry(radius, 72), mat);
@@ -149,13 +150,11 @@ function buildVortex(radius) {
   const N = Math.round(radius * 2.4);
   for (let i = 0; i < N; i++) {
     const a = (i / N) * TAU, R = radius + 1.2 + r() * 0.8;
-    const h = 1 + r() * 1.6;
-    b.box(1.6 + r(), h, 1.2 + r() * 0.6, pick(WORLD.stone, r), Math.cos(a) * R, -3 + h / 2 - 0.6, Math.sin(a) * R, { rotY: -a, top: WORLD.stoneTop });
-    if (i % 4 === 0) gl.box(0.35, 0.5, 0.35, WORLD.vortexIdle[2], Math.cos(a) * R, -3 + h + 0.1, Math.sin(a) * R, { glow: 2.2, ao: 1, jitter: 0, rotY: -a });
+    menhir(b, gl, Math.cos(a) * R, -3.6, Math.sin(a) * R, Math.PI / 2 - a, i % 8, WORLD.vortexIdle[2]);
   }
   for (let i = 0; i < N * 1.5; i++) {
     const a = r() * TAU, R = radius + 3 + r() * 4;
-    b.box(1.4 + r() * 2, 1.5 + r() * 3, 1.4 + r() * 2, pick(WORLD.stone, r), Math.cos(a) * R, -4.5 - r() * 3, Math.sin(a) * R, { rotY: r() * TAU, top: WORLD.stoneTop });
+    rubble(b, Math.cos(a) * R, -4.5 - r() * 3, Math.sin(a) * R, r() * TAU, i % 3, 0.8 + r() * 0.7);
   }
   const rim = b.mesh(MAT.lit, true); root.add(rim);
   const rimGlow = gl.mesh(MAT.glow, false); root.add(rimGlow);
@@ -165,7 +164,7 @@ function buildVortex(radius) {
   const rb = new Batch(9);
   for (let i = 0; i < 22; i++) {
     const a = r() * TAU, R = radius * (0.55 + r() * 0.5);
-    rb.box(0.5 + r() * 0.9, 0.5 + r() * 0.7, 0.5 + r() * 0.9, pick(WORLD.stone, r), Math.cos(a) * R, -1.5 + r() * 3, Math.sin(a) * R, { rotY: r() * 3, rotX: r() * 3 });
+    rubble(rb, Math.cos(a) * R, -1.5 + r() * 3, Math.sin(a) * R, r() * 3, i % 3, 0.3 + r() * 0.3);
   }
   rub.add(rb.mesh(MAT.lit, false));
   root.add(rub);
@@ -173,7 +172,7 @@ function buildVortex(radius) {
   // chains: four arms meeting at a padlock above the centre
   const chains = new THREE.Group();
   const arms = [];
-  const linkGeo = (() => { const k = new Batch(2); k.box(0.9, 0.32, 0.5, WORLD.chain, 0, 0, 0, { top: "#b9c6dc" }); k.box(0.5, 0.32, 0.9, shade(WORLD.chain, 0.85), 0.75, 0, 0, { top: "#a9b6cc" }); return k.geometry(); })();
+  const linkGeo = chainLinkGeometry();
   const linkMat = new THREE.MeshLambertMaterial({ vertexColors: true, emissive: new THREE.Color("#1a3a8a"), emissiveIntensity: 0.6 });
   for (let k = 0; k < 4; k++) {
     const arm = new THREE.Group();
@@ -192,9 +191,7 @@ function buildVortex(radius) {
     arm.userData.dir = new THREE.Vector3(Math.cos(a), 0, Math.sin(a));
     chains.add(arm); arms.push(arm);
   }
-  const lock = new Part(4);
-  lock.b(2.2, 2.2, 0.9, "#4d5a78", 0, 0, 0, { top: "#7b8bb0" }).b(1.4, 0.35, 0.5, "#6b7a9c", 0, 1.35, 0).b(0.35, 0.9, 0.5, "#6b7a9c", -0.6, 1.0, 0).b(0.35, 0.9, 0.5, "#6b7a9c", 0.6, 1.0, 0);
-  lock.g(0.5, 0.8, 0.2, "#7fd0ff", 0, -0.15, 0.5, 2.4);
+  const lock = padlockPart("#7fd0ff");
   const lockG = lock.build(true);
   lockG.position.set(0, 2.4, 0);
   chains.add(lockG);
@@ -637,25 +634,9 @@ export function buildCorridorIsland(DB, element, grid, seed = 1) {
 
   // portals: a sunken swirl at the entrance (enemies rise out of it), an arch at the exit
   const group = new THREE.Group();
-  const portalStone = (zc, arch) => {
-    for (let i = 0; i < 16; i++) {
-      const a = (i / 16) * TAU;
-      props.box(0.8, 0.45, 0.6, pick(WORLD.stone, r), Math.cos(a) * 2.3, 0.1, zc + Math.sin(a) * 2.3, { rotY: -a, top: WORLD.stoneTop });
-    }
-    for (const sx of [-1, 1]) {
-      props.box(0.9, arch ? 4.4 : 1.4, 0.9, WORLD.stone[2], sx * 3.4, (arch ? 4.4 : 1.4) / 2, zc, { top: WORLD.stoneTop });
-      glow.box(0.5, 0.6, 0.5, T.accent, sx * 3.4, (arch ? 4.4 : 1.4) + 0.35, zc, { glow: 2.4, ao: 1, jitter: 0, rotY: 0.78 });
-    }
-  };
   const entZ = -oz + 2.95, extZ = oz - 2.4;   // the entrance ring stones stay clear of the last build row
-  portalStone(entZ, false);
-  // exit arch
-  for (let i = 0; i <= 10; i++) {
-    const a = Math.PI * (i / 10);
-    props.box(0.85, 0.85, 0.7, pick(WORLD.stone, r), Math.cos(a) * 2.6, 0.2 + Math.sin(a) * 2.9 + 0.5, extZ, { rotZ: a, top: WORLD.stoneTop });
-  }
-  props.box(6.6, 0.4, 2, WORLD.stone[1], 0, 0, extZ, { top: WORLD.stoneTop });
-  for (const sx of [-1, 1]) { props.box(0.9, 2.2, 0.9, WORLD.stone[2], sx * 3.6, 1.1, extZ); glow.box(0.45, 0.55, 0.45, T.accent, sx * 3.6, 2.5, extZ, { glow: 2.4, ao: 1, jitter: 0, rotY: 0.78 }); }
+  portalEntrance(props, glow, entZ, T.accent);
+  portalExit(props, glow, extZ, T.accent);
 
   const floorMesh = floor.mesh(MAT.lit, false); floorMesh.receiveShadow = true;
   const terrMesh = terr.mesh(MAT.lit, false); terrMesh.receiveShadow = true;
@@ -680,35 +661,9 @@ export function buildGate(DB, element, seed = 1) {
   const T = THEMES[element] || THEMES.fire, E = DB.ELEMENTS[element];
   const r = rng(seed * 17 + 3);
   const b = new Batch(seed), g = new Batch(seed + 1);
-  // platform: two stepped tiers of stone
-  for (let z = -4.5; z < 4.5; z += 1) for (let x = -4.5; x < 4.5; x += 1) {
-    const cx = x + 0.5, cz = z + 0.5, e = Math.max(Math.abs(cx), Math.abs(cz));
-    if (e > 4.2 && r() < 0.35) continue;
-    const h = e < 2.6 ? 0.6 : 0.3;
-    b.box(1.0, h + 0.5, 1.0, pick(WORLD.stone, r), cx, (h - 0.5) / 2, cz, { top: e < 2.6 ? shade(T.rimTop, 0.9 + r() * 0.15) : WORLD.stoneTop });
-  }
-  // underside cone
-  for (let k = 0; k < 7; k++) {
-    const w = 9 - k * 1.2;
-    b.box(w, 1.2, w, k < 2 ? T.soil : k < 4 ? T.rock : T.deep, (r() - 0.5) * 0.4, -0.9 - k * 1.15, (r() - 0.5) * 0.4, { skip: 4 });
-  }
+  gateIsland(b, g, T.glow, (E && E.color) || T.accent, T.soil, T.rock, T.deep);
   for (let i = 0; i < 6; i++) HANG[element](b, g, (r() - 0.5) * 6, -1.2, (r() - 0.5) * 6, r);
-  // the arch: a ring of blocks standing on the back half, swirl inside
-  const R = 2.9, yc = 3.6;
-  for (let i = 0; i < 22; i++) {
-    const a = (i / 22) * TAU;
-    b.box(0.95, 0.95, 0.9, i % 2 ? WORLD.stone[0] : WORLD.stone[2], Math.cos(a) * R, yc + Math.sin(a) * R, -0.8, { rotZ: a, top: WORLD.stoneTop });
-    if (i % 3 === 0) g.box(0.3, 0.3, 0.3, T.glow, Math.cos(a) * (R + 0.5), yc + Math.sin(a) * (R + 0.5), -0.8, { glow: 2.2, ao: 1, jitter: 0, rotZ: a });
-  }
-  b.box(2.2, 0.7, 1.4, WORLD.stone[1], 0, 0.85, -0.8);
-  // corner pillars topped with the element's light
-  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-    const px = sx * 3.3, pz = sz * 3.1, ph = sz < 0 ? 3.4 : 1.8;
-    b.box(0.9, ph, 0.9, WORLD.stone[2], px, ph / 2 + 0.3, pz, { top: WORLD.stoneTop });
-    b.box(1.2, 0.3, 1.2, WORLD.stone[0], px, ph + 0.4, pz);
-    g.box(0.55, 0.9, 0.55, E.color, px, ph + 1.0, pz, { glow: 2.2, ao: 1, jitter: 0, rotY: 0.78 });
-    g.box(0.3, 0.5, 0.3, T.glow, px, ph + 1.6, pz, { glow: 2.6, ao: 1, jitter: 0, rotY: 0.2 });
-  }
+  const yc = 3.6;
   const group = new THREE.Group();
   group.add(b.mesh(MAT.lit, true), g.mesh(MAT.glow, false));
   const disc = new THREE.Mesh(new THREE.CircleGeometry(2.45, 48), elementSwirl(DB, element));
@@ -721,7 +676,7 @@ export function buildGate(DB, element, seed = 1) {
 // ---------------------------------------------------------------------------
 // BRIDGES — floating stepping stones with an energy stream and a silver arrow (Circle's world arrows)
 // ---------------------------------------------------------------------------
-function buildBridge(points, color, seed) {
+export function buildBridge(points, color, seed) {
   const curve = new THREE.CatmullRomCurve3(points.map((p) => new THREE.Vector3(p.x, p.y || 0, p.z)));
   const len = curve.getLength();
   const b = new Batch(seed), g = new Batch(seed + 1);
@@ -731,8 +686,7 @@ function buildBridge(points, color, seed) {
   for (let i = 0; i <= n; i++) {
     curve.getPointAt(i / n, P); curve.getTangentAt(i / n, Tn);
     const a = Math.atan2(Tn.x, Tn.z);
-    b.box(1.5 + r() * 0.4, 0.45, 1.2, pick(WORLD.stone, r), P.x, P.y - 0.35 + Math.sin(i * 1.3) * 0.1, P.z, { rotY: a + (r() - 0.5) * 0.3, top: WORLD.stoneTop });
-    if (r() < 0.5) b.box(0.8, 0.8, 0.8, WORLD.stone[1], P.x + (r() - 0.5) * 1.2, P.y - 1.0, P.z + (r() - 0.5) * 1.2, { rotY: r() * 3 });
+    steppingStone(b, P.x, P.y - 0.42 + Math.sin(i * 1.3) * 0.1, P.z, a + (r() - 0.5) * 0.3, i % 4);
   }
   const m = Math.max(6, Math.floor(len / 0.6));
   for (let i = 0; i < m; i++) {
@@ -741,11 +695,7 @@ function buildBridge(points, color, seed) {
   }
   // silver arrowhead floating over the middle, pointing the way the loop runs
   curve.getPointAt(0.5, P); curve.getTangentAt(0.5, Tn);
-  b.push(P.x, P.y + 1.5, P.z, Math.atan2(Tn.x, Tn.z));
-  b.box(0.3, 0.3, 1.6, "#c9d2e6", 0, 0, -0.3, { top: "#eef3ff" });
-  b.box(0.3, 0.3, 1.1, "#aab4cc", -0.4, 0, 0.25, { rotY: -0.7 });
-  b.box(0.3, 0.3, 1.1, "#aab4cc", 0.4, 0, 0.25, { rotY: 0.7 });
-  b.pop();
+  bridgeArrow(b, P.x, P.y + 1.5, P.z, Math.atan2(Tn.x, Tn.z));
   const grp = new THREE.Group();
   grp.add(b.mesh(MAT.lit, true), g.mesh(MAT.glow, false));
   grp.userData.curve = curve;
