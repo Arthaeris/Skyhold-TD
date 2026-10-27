@@ -12,6 +12,7 @@ import { createWorld, ringLayout, corridorToWorld, worldToCorridor, COLS, ROWS }
 import { createTowerModel, towerStage, towerTemplate } from "./towers.js";
 import { createEnemyRenderer, enemyScale, setEnemyVisScale } from "./enemies.js";
 import { createSparks, createBits, createStreaks, createRings, createProjectiles, createBars, createRoute, createPreviews } from "./effects.js";
+import { createShotFx } from "./shotfx.js";
 import { createPost, QUALITY } from "./post.js";
 import { WORLD } from "./theme.js";
 import { clamp, lerp, easeInOut, TAU, Part } from "./kit.js";
@@ -53,6 +54,7 @@ export function createRenderer(opts) {
   const enemies = createEnemyRenderer(scene);
   const sparks = createSparks(scene), bits = createBits(scene), streaks = createStreaks(scene), rings = createRings(scene);
   const projs = createProjectiles(scene), bars = createBars(scene), route = createRoute(scene), previews = createPreviews(scene);
+  const shot = createShotFx(scene, { sparks, bits, streaks, rings });
   const post = createPost(renderer);
 
   // ---- quality (Riftfall's tiers + automatic step-down) ------------------
@@ -361,10 +363,13 @@ export function createRenderer(opts) {
       let r = prec.get(p.id);
       const u = TILE(p.x), v = TILE(p.y);
       if (!r) {
-        r = { pu: u, pv: v, cu: u, cv: v, ri, element: p.element, arche: p.arche, splash: p.st ? TILE(p.st.splash) : 0, seen: true, tu: TILE(p.tx), tv: TILE(p.ty) };
+        const defId = p.twRef && p.twRef.def ? p.twRef.def.id : null;
+        r = { pu: u, pv: v, cu: u, cv: v, ri, element: p.element, arche: p.arche, splash: p.st ? TILE(p.st.splash) : 0, seen: true, tu: TILE(p.tx), tv: TILE(p.ty), def: defId, born: clock };
+        r.style = shot.style(defId, p.element, p.arche);
+        r.d0 = Math.max(1, Math.hypot(r.tu - u, r.tv - v));
         prec.set(p.id, r);
         const tr = trec.get(p.twId);
-        if (tr) { tr.recoil = 1; tr.target = p.targetId; }
+        if (tr) { tr.recoil = 1; tr.target = p.targetId; if (tr.model && tr.model.muzzle && (ri === fieldIdx || mode !== "field")) { tr.model.muzzle.getWorldPosition(tmpB); shot.muzzle(defId, tmpB); } }
         if (ri === fieldIdx || mode !== "field") sfx("shoot", p.element);
       } else { r.pu = r.cu; r.pv = r.cv; r.cu = u; r.cv = v; r.tu = TILE(p.tx); r.tv = TILE(p.ty); }
       r.seen = true;
@@ -421,13 +426,9 @@ export function createRenderer(opts) {
   }
   function impactFx(r) {
     if (r.ri < 0 || !L.corridors[r.ri]) return;
-    const p = corridorToWorld(L, r.ri, r.cu, r.cv, 0.6, tmpA);
-    const c = elColor(r.element);
-    if (r.arche === "splash" && r.splash > 0) {
-      rings.add(p.clone().setY(0.08), c, 0.2, r.splash, 0.45, 1.6);
-      if (r.ri === fieldIdx) sfx("boom");
-      sparks.burst(p.x, p.y, p.z, c, 10, 5, 0.45, 0.5, 4);
-    } else sparks.burst(p.x, p.y, p.z, c, 4, 3, 0.3, 0.35, 2);
+    const p = corridorToWorld(L, r.ri, r.cu, r.cv, 0.6, tmpA).clone();
+    if (r.arche === "splash" && r.splash > 0 && r.ri === fieldIdx) sfx("boom");
+    shot.impact(r, p, r.dir || new THREE.Vector3(0, 0, 1));
   }
 
   // cosmetic reactions to sim events (the UI handles toasts)
@@ -481,10 +482,10 @@ export function createRenderer(opts) {
     if (ev.style === "melee") {
       tr.model.root.getWorldPosition(tmpB);
       rings.add(tmpB.clone().setY(0.15), c, 0.6, 2.2, 0.25, 1.4);
-      for (const id of ev.targets) { const r = erec.get(id); if (r) sparks.burst(r.world.x, r.world.y + 0.5, r.world.z, "#d8dce4", 3, 3, 0.25, 0.25, 4); }
+      for (const id of ev.targets) { const r = erec.get(id); if (!r) continue; sparks.burst(r.world.x, r.world.y + 0.5, r.world.z, "#ffe9a8", 6, 5, 0.25, 0.22, 9); sparks.burst(r.world.x, r.world.y + 0.5, r.world.z, "#d8dce4", 3, 3, 0.25, 0.25, 4); bits.burst(r.world.x, r.world.y + 0.4, r.world.z, mobColor(r.type) || "#a33a26", 2, 3, 0.08, 0.02); }
       return;
     }
-    let prev = from;
+    const pts = [];
     ev.targets.forEach((id, i) => {
       const r = erec.get(id); if (!r) return;
       let to;
@@ -492,9 +493,15 @@ export function createRenderer(opts) {
       else if (r.pri === tr.ri && L.corridors[r.pri]) to = corridorToWorld(L, r.pri, r.pu, r.pv, 0.02, new THREE.Vector3()); // hit on its way out
       else return;
       to.y += r.h * 0.55;
+      if (i === 0) tr.target = id;
+      pts.push(to);
+    });
+    if (!pts.length) return;
+    if (shot.zap(tr.def.id, ev.element, ev.style, from, pts)) return;
+    let prev = from;
+    pts.forEach((to, i) => {
       if (ev.style === "beam" && i === 0) streaks.add(prev, to, c, 0.16, 0.09, 2.4);
       else streaks.bolt(prev, to, c, 0.12, 0.16, 4);
-      if (i === 0) tr.target = id;
       sparks.burst(to.x, to.y, to.z, c, 2, 2, 0.25, 0.3, 0);
       prev = to;
     });
@@ -739,16 +746,21 @@ export function createRenderer(opts) {
 
   function syncProjectiles(alpha) {
     projs.begin();
+    shot.begin();
     for (const [id, r] of prec) {
       if (r.ri < 0 || !L.corridors[r.ri]) continue;
       const u = r.pu + (r.cu - r.pu) * alpha, v = r.pv + (r.cv - r.pv) * alpha;
       const rem = Math.hypot(r.tu - u, r.tv - v);
-      const p = corridorToWorld(L, r.ri, u, v, 0.7 + Math.min(1.8, rem * 0.4), tmpA);
-      const c = elColor(r.element);
-      const sz = r.arche === "splash" ? 0.42 : 0.26;
-      projs.add(p, c, sz, clock * 8 + id);
-      if (Math.random() < 0.5) sparks.spawn({ x: p.x, y: p.y, z: p.z, color: c, life: 0.3, size: sz * 1.4, drag: 4, glow: 1.4 });
+      const st = r.style || {};
+      let h = 0.7 + Math.min(1.8, rem * 0.4);
+      if (st.lob) { const prog = Math.min(1, Math.max(0, 1 - rem / r.d0)); h = 0.7 + Math.min(1.6, r.d0 * 0.3) * (1 - prog) + Math.sin(prog * Math.PI) * st.lob * Math.min(1, 0.4 + r.d0 * 0.12); }
+      const p = corridorToWorld(L, r.ri, u, v, h, tmpA);
+      if (r.last) { const d = tmpB.copy(p).sub(r.last); if (d.lengthSq() > 1e-6) { r.dir = (r.dir || new THREE.Vector3()).copy(d).normalize(); } }
+      r.last = (r.last || new THREE.Vector3()).copy(p);
+      if (st.kind) shot.draw(r, p, r.dir || new THREE.Vector3(0, 0, 1), clock - (r.born || 0) + id * 0.37);
+      else { const c = elColor(r.element), sz = r.arche === "splash" ? 0.42 : 0.26; projs.add(p, c, sz, clock * 8 + id); if (Math.random() < 0.5) sparks.spawn({ x: p.x, y: p.y, z: p.z, color: c, life: 0.3, size: sz * 1.4, drag: 4, glow: 1.4 }); }
     }
+    shot.end();
     projs.end();
   }
 
