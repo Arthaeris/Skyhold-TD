@@ -1286,3 +1286,299 @@ Object.assign(VOX_HEADS, {
     return { sy: h + H * U + 1.0, spinRate: 0.4, spinAxis: "z", muzzle: [0, h + H * U + 1.0, 0] };
   },
 });
+
+// ===========================================================================
+// MECH and ABNORMAL
+// ===========================================================================
+function mechPal(v) {
+  return {
+    PL: v.pal("#4e555c", 0, 0.05), PL2: v.pal("#5d656c", 0, 0.05), PLH: v.pal("#7a838b", 0, 0.04), PLD: v.pal("#373c42", 0, 0.05), GUN: v.pal("#25292d", 0, 0.05), GUNH: v.pal("#3c4248", 0, 0.05),
+    HAZ: v.pal("#e0a020", 0, 0.04), BLK: v.pal("#1c1c1e", 0, 0.03), RUST: v.pal("#8a5a3a", 0, 0.08), RED: v.pal("#c8423a", 0, 0.05), REDH: v.pal("#e05a4a", 0, 0.04), REDD: v.pal("#922e28", 0, 0.05),
+    CHR: v.pal("#d8dce4", 0, 0.03), BL: v.pal("#c8ccd4", 0, 0.03), BLD: v.pal("#9aa0aa", 0, 0.04), WHITE: v.pal("#eeeef0", 0, 0.03), SMOKE: v.pal("#8a8a90", 0, 0.08), SMOKE2: v.pal("#a8a8ae", 0, 0.07),
+    CY: v.pal("#7fe8ff", 1.5, 0.04), CY2: v.pal("#c8f6ff", 1.8, 0.03), AMB: v.pal("#ffb84a", 1.55, 0.05), FIRE: v.pal("#ff6a3d", 1.6, 0.04),
+  };
+}
+function abPal(v) {
+  return {
+    P1: v.pal("#3b2842", 0, 0.07), P2: v.pal("#4a3354", 0, 0.07), PH: v.pal("#64466e", 0, 0.06), PL: v.pal("#7a5a84", 0, 0.06), PX: v.pal("#8e6e98", 0, 0.05), PD: v.pal("#2a1c30", 0, 0.06),
+    PALE: v.pal("#f2e8f6", 0, 0.03), PALE2: v.pal("#dccfe2", 0, 0.03), BLK: v.pal("#07050c", 0, 0.02),
+    PK: v.pal("#ff5fa2", 1.55, 0.05), PKL: v.pal("#ffc2dd", 1.85, 0.03), MN: v.pal("#5dffb0", 1.55, 0.05), MNL: v.pal("#c4ffe4", 1.85, 0.03), VI: v.pal("#c77dff", 1.55, 0.05), WG: v.pal("#ffffff", 2.0, 0.02),
+    PKs: v.pal("#e0508c", 0, 0.04), MNs: v.pal("#46c48a", 0, 0.04),
+  };
+}
+const rotY = (x, z, a) => [x * Math.cos(a) - z * Math.sin(a), x * Math.sin(a) + z * Math.cos(a)];
+// diagonal hazard stripes
+const hazard = (C, a, b) => ((((a + b) % 6) + 6) % 6 < 3 ? C.HAZ : C.BLK);
+
+Object.assign(VOX_PLINTH, {
+  mech(p, st) {
+    const v = vx(-18, 18, 0, 26, -18, 18), C = mechPal(v);
+    const top = st >= 1 ? 7 : 3;
+    const course = (half, y0, y1, isTop) => v.fill((x, y, z) => {
+      const ax = Math.abs(x), az = Math.abs(z), m = Math.max(ax, az);
+      if (m > half) return null;
+      if (m === half) {
+        const al = ax === half ? z : x;
+        if (y === y1) return C.PLH;
+        if (y === y1 - 1 && isTop) return hazard(C, al, y);
+        if (Math.abs(al) % 8 === 0) return C.PLD;                                     // panel seams
+        return Math.abs(al) < 3 && y === y0 + 1 && y0 === 0 ? (Math.abs(al) & 1 ? C.GUN : C.PLD) : C.PL2;   // a vent grille
+      }
+      if (y < y1) return C.PLD;
+      if (!isTop) return m >= half - 1 ? C.PLH : C.PL2;
+      if (m >= half - 1) return C.PLH;
+      if (ax % 9 === 0 || az % 9 === 0) return C.PLD;                               // deck plate seams
+      return ((x + z) & 1) && ((x - z + 40) % 4 === 0) ? C.PLH : C.PL;              // diamond tread
+    }, -half, half, y0, y1, -half, half);
+    course(17, 0, 3, st < 1);
+    if (st >= 1) course(13, 4, 7, true);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      v.box(sx * 15 - 1, 4, sz * 15 - 1, sx * 15 + 1, 4, sz * 15 + 1, C.GUNH); v.set(sx * 15, 5, sz * 15, C.CHR);
+      if (st >= 2) { v.box(sx * 15, 6, sz * 15, sx * 15, 15, sz * 15, C.PLD); v.box(sx * 15, 10, sz * 15, sx * 15 + sx, 10, sz * 15, C.PLH); v.set(sx * 15, 16, sz * 15, C.CY); }
+    }
+    v.emit(p, 0, U / 2, 0, MERGE);
+    return (top + 1) * U;
+  },
+  abnormal(p, st) {
+    const v = vx(-19, 19, 0, 26, -19, 19), C = abPal(v);
+    const top = st >= 1 ? 7 : 3;
+    const course = (half, y0, y1, isTop, skew) => v.fill((x, y, z) => {
+      const [xr, zr] = rotY(x - skew, z + skew * 0.5, skew * 0.04), ax = Math.abs(xr), az = Math.abs(zr), m = Math.max(ax, az);
+      if (m > half + 0.4) return null;
+      const row = h3(y, 7, 3);
+      if (m > half - 0.6) { if (row < 0.18) return row < 0.09 ? C.PKs : C.MNs; return (Math.round(ax > az ? zr : xr) + 40) % 7 === 0 ? C.PD : h3(x, y, z) < 0.3 ? C.P2 : C.P1; }
+      if (y < y1) return C.PD;
+      if (!isTop) return C.PH;
+      const band = h3(Math.round(zr / 2), 1, 9);                                   // glitch scan bands across the top
+      if (band < 0.1 && Math.abs(xr) < half - 2) return h3(Math.round(xr / 3), 2, Math.round(zr / 2)) < 0.5 ? C.PK : C.MN;
+      return (Math.floor((xr + 40) / 3) + Math.floor((zr + 40) / 3)) & 1 ? C.PH : C.P2;
+    }, -half - 3, half + 3, y0, y1, -half - 3, half + 3);
+    course(17, 0, 3, st < 1, 0);
+    if (st >= 1) course(12, 4, 7, true, 1.5);
+    const R = rng(17);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      const cx = sx * 15, cz = sz * 15, y = top + 3 + Math.round(R() * 4) + (st >= 2 ? 4 : 0), c = (sx * sz > 0) ? C.PK : C.MN;
+      v.box(cx - 1, y, cz - 1, cx, y + 1, cz, c);
+      v.box(cx - 1, top + 1, cz - 1, cx + 1, top + 1, cz + 1, C.PH);
+    }
+    v.emit(p, 0, U / 2, 0, MERGE);
+    return (top + 1) * U;
+  },
+});
+
+Object.assign(VOX_HEADS, {
+  // ===== MECH ==============================================================
+  mech_0(P, h, st) { // Gun Turret: an armoured twin/triple-barrel turret on a bolted swivel ring
+    const v = vx(-10, 10, 0, 8, -10, 10), C = mechPal(v);
+    v.fill((x, y, z) => { const d = Math.hypot(x, z); if (d > 8.6) return null; if (y === 6) return d > 7.6 ? C.PLH : C.GUNH; if (y > 6) return null; return d > 7.6 ? (y === 1 ? hazard(C, Math.round(Math.atan2(z, x) * 8), 0) : Math.round(Math.atan2(z, x) / (TAU / 16)) % 2 === 0 && y === 4 ? C.CHR : C.PL2) : C.PLD; });
+    onTop(P.base, h, v);
+    const a = vx(-11, 11, -6, 7, -10, 26), A = mechPal(a);
+    a.fill((x, y, z) => {
+      const ax = Math.abs(x); if (ax > 8 || y < -4 || y > 4 || z < -9 || z > 6 || ax + Math.abs(y) > 11 || (z > 3 && y > 4 - (z - 3))) return null;
+      if (y === -4) return hazard(A, x, z);
+      if (z === 6 && Math.abs(y) < 1 && ax < 6) return 0;
+      if (ax === 8 && Math.abs(z + 2) <= 3 && Math.abs(y) <= 2) return A.GUN;          // ammo hatches
+      return (z + 40) % 5 === 0 || ax === 8 && (y + 40) % 4 === 0 ? A.PLD : y > 2 ? A.PLH : A.PL2;
+    });
+    a.box(-3, 2, 4, 3, 2, 5, A.CY); a.box(-2, 2, 6, 2, 2, 6, A.CY2);                   // the sight slit
+    const n = st >= 2 ? 3 : 2;
+    for (let i = 0; i < n; i++) {
+      const x = (i - (n - 1) / 2) * 4.5;
+      a.cyl(x, 0, 0, 1.6, 23, (xx, y, z) => (z % 4 === 0 ? A.GUNH : A.GUN), "z");
+      a.cyl(x, 0, 6, 2.5, 11, A.PLD, "z");
+      a.cyl(x, 0, 21, 2.4, 24, (xx, y, z) => (z === 22 && Math.abs(xx - x) > 1.5 ? 0 : A.GUNH), "z");
+      a.cyl(x, 0, 23, 0.8, 24, 0, "z");
+    }
+    if (st >= 1) a.box(-9, -3, -6, -9, 2, 2, A.RUST), a.box(-10, -2, -5, -10, 1, 1, A.HAZ);
+    if (st >= 3) a.box(-1, 5, -4, 1, 6, 0, A.PLH), a.set(0, 7, -2, A.CY);
+    centred(P.aim, a);
+    return { ay: h + 0.95, muzzle: [0, 0.05, 1.9] };
+  },
+
+  mech_1(P, h, st) { // Saw Blade: toothed circular saws whirling on a gearbox hub
+    const v = vx(-8, 8, 0, 12, -8, 8), C = mechPal(v);
+    v.fill((x, y, z) => { const m = Math.max(Math.abs(x), Math.abs(z)); if (m > 6) return null; if (y === 8) return m === 6 ? C.PLH : C.PL; if (m === 6) return y === 3 ? hazard(C, x + z, 0) : (Math.abs(x) === 6 && Math.abs(z) === 6 ? C.PLD : C.PL2); return C.PLD; }, -6, 6, 0, 8, -6, 6);
+    for (const s of [-1, 1]) v.box(s * 6, 5, -1, s * 6, 6, 1, C.AMB);
+    v.cyl(0, 9, 0, 2.5, 11, C.GUNH);
+    onTop(P.base, h, v);
+    const s = vx(-16, 16, -2, 8, -16, 16), S = mechPal(s);
+    const blade = (y, r, n) => s.fill((x, yy, z) => {
+      const d = Math.hypot(x, z), a = Math.atan2(z, x), f = (((a / TAU) * n) % 1 + 1) % 1;
+      if (d > r - 1.5 + 2.5 * f) return null;
+      if (d < 2.2) return S.CHR;
+      if (d > 4.5 && d < r - 4 && Math.abs(((a / TAU) * 6 % 1 + 1) % 1 - 0.5) < 0.12 && Math.abs(d - (r * 0.55)) < 1.6) return 0;   // lightening holes
+      return d > r - 2 ? S.BL : (Math.round(d) % 3 === 0 ? S.BLD : S.BL);
+    }, -r - 1, r + 1, y, y, -r - 1, r + 1);
+    blade(0, 14, 24);
+    if (st >= 1) blade(5, 11, 20);
+    s.cyl(0, -1, 0, 2.6, 6, S.GUNH); s.set(0, 7, 0, S.AMB);
+    centred(P.spin, s);
+    return { sy: h + 0.9, spinRate: 9, muzzle: [0, h + 0.9, 0] };
+  },
+
+  mech_2(P, h, st) { // Railgun: twin rails threaded with glowing coils, a capacitor bank at the breech
+    const v = vx(-9, 9, 0, 10, -9, 9), C = mechPal(v);
+    v.fill((x, y, z) => { const ax = Math.abs(x), az = Math.abs(z); if (ax > 7 || az > 7 || ax + az > 11) return null; if (y === 9) return C.PLH; return y === 2 ? hazard(C, x, z) : (ax === 7 || az === 7 || ax + az === 11) && (y & 1) ? C.PLD : C.PL2; }, -7, 7, 0, 9, -7, 7);
+    onTop(P.base, h, v);
+    const a = vx(-8, 8, -6, 7, -14, 33), A = mechPal(a);
+    a.box(-6, -4, -12, 6, 4, 4, (x, y, z) => (y === 4 ? A.PLH : (z + 40) % 6 === 0 ? A.PLD : A.PL2));
+    for (let i = 0; i < 4; i++) a.box(-5 + i * 3, -2, -13, -4 + i * 3, 2, -13, (x, y) => (y === 2 ? A.CY2 : A.CY));     // capacitor cells
+    for (const s of [-1, 1]) a.box(s * 3, -2, 4, s * 4, 2, 32, (x, y, z) => (y === 2 ? A.CHR : z > 30 ? A.GUNH : A.GUN));
+    a.box(-2, -1, 4, 2, 1, 30, 0);
+    a.box(-1, -1, 5, 1, 1, 28, (x, y, z) => (x === 0 && y === 0 && z % 2 === 0 ? A.CY : null) || null);
+    const nc = 4 + st;
+    for (let i = 0; i < nc; i++) { const z = 7 + i * Math.floor(22 / nc); a.fill((x, y) => { const ax = Math.abs(x), ay = Math.abs(y); /* copper coil */ return (ax === 5 && ay <= 3) || (ay === 3 && ax <= 5) ? (y === 3 && ax <= 1 ? A.CY : A.RUST) : null; }, -5, 5, -3, 3, z, z); }
+    if (st >= 2) for (const s of [-1, 1]) a.box(s * 7, -3, -10, s * 7, 2, 2, (x, y, z) => (y === -3 || y === 2 || z === -10 || z === 2 ? A.PLH : y === 0 && (z === -7 || z === -1) ? A.CY : A.PLD));
+    centred(P.aim, a);
+    return { ay: h + 1.1, muzzle: [0, 0.1, 2.5] };
+  },
+
+  mech_3(P, h, st) { // Magnet Tower: a great chrome-tipped horseshoe magnet turning over a cabled housing
+    const v = vx(-8, 8, 0, 14, -8, 8), C = mechPal(v);
+    v.fill((x, y, z) => { const m = Math.max(Math.abs(x), Math.abs(z)); if (m > 6) return null; if (y === 11) return m === 6 ? C.PLH : C.PL; if (m === 6) return y === 2 ? hazard(C, x + z, 0) : (y + 40) % 4 === 0 ? C.PLD : C.PL2; return C.PLD; }, -6, 6, 0, 11, -6, 6);
+    for (const s of [-1, 1]) v.path([[s * 6.5, 9, 3], [s * 8, 5, 4], [s * 7.5, 0, 6]], 0.9, 0.9, C.BLK);
+    v.cyl(0, 12, 0, 3, 13, C.CHR);
+    onTop(P.base, h, v);
+    const s = vx(-13, 13, -12, 22, -4, 4), S = mechPal(s), pts = [];
+    for (let i = 0; i <= 16; i++) { const a = Math.PI + (i / 16) * Math.PI; pts.push([Math.cos(a) * 9, 4 + Math.sin(a) * 9, 0]); }
+    s.path([[-9, 16, 0], [-9, 4, 0]], 2.8, 2.8, S.RED); s.path(pts, 2.8, 2.8, (x, y) => (y < -3 ? S.REDD : S.RED)); s.path([[9, 4, 0], [9, 16, 0]], 2.8, 2.8, S.RED);
+    for (const sx of [-1, 1]) { s.box(sx * 9 - 3, 17, -3, sx * 9 + 3, 20, 3, (x, y) => (y === 20 ? S.WHITE : S.CHR)); s.box(sx * 9 - 3, 12, -3, sx * 9 + 3, 12, 3, S.REDH); }
+    s.path([[-7, 20, 0], [-3, 21.5, 0], [0, 20, 0], [3, 21.5, 0], [7, 20, 0]], 0.6, 0.6, S.CY);
+    if (st >= 2) s.path([[-7, 19, 0], [-2, 18, 1.5], [2, 18.5, -1.5], [7, 19, 0]], 0.6, 0.6, S.CY2);
+    centred(P.spin, s);
+    return { sy: h + 1.15, spinRate: 0.7, muzzle: [0, h + 2.5, 0] };
+  },
+
+  mech_4(P, h, st) { // War Factory: a lit-up factory hall with a smokestack and a roof-mounted missile launcher
+    const v = vx(-14, 14, 0, 44, -12, 12), C = mechPal(v), RT = 14;
+    v.fill((x, y, z) => {
+      const ax = Math.abs(x); if (ax > 12 || z < -10 || z > 9) return null;
+      const roofY = RT + ((x + 40) % 8 < 4 ? (x + 40) % 8 : 0);                    // sawtooth roof
+      if (y > roofY) return null;
+      if (y >= RT) return (x + 40) % 8 === 3 ? C.CY : C.PLH;
+      const wall = ax === 12 || z === -10 || z === 9;
+      if (!wall) return C.PLD;
+      if (z === 9 && Math.abs(x) <= 4 && y < 9) return y % 2 ? C.GUNH : C.PLD;        // roller door
+      if (y === 10) return hazard(C, x, y);
+      if (y >= 5 && y <= 7 && ((ax === 12 ? z : x) + 40) % 5 < 2) return C.AMB;      // lit windows
+      return ((ax === 12 ? z : x) + 40) % 5 === 4 ? C.PLD : C.PL2;
+    }, -12, 12, 0, RT + 4, -10, 9);
+    // the smokestack and its smoke
+    v.cyl(-7, RT, -6, 2.6, 36, (x, y) => ((y >> 2) & 1 ? C.RED : C.WHITE));
+    v.cyl(-7, 37, -6, 3.2, 37, C.GUNH); v.cyl(-7, 37, -6, 1.6, 37, C.AMB);
+    for (let i = 0; i < 3; i++) v.ell(-7 + i * 1.5, 40 + i * 1.8, -6 - i, 2.2 + i * 0.4, 1.6, 2.2, i ? C.SMOKE2 : C.SMOKE);
+    onTop(P.base, h, v);
+    const a = vx(-10, 10, -4, 9, -8, 12), A = mechPal(a);
+    a.cyl(0, -4, 0, 5, -3, A.PL2); a.cyl(0, -2, 0, 3, 0, A.GUNH);
+    for (const s of [-1, 1]) {
+      a.box(s * 7 - 3, 0, -6, s * 7 + 3, 6, 8, (x, y, z) => (z === 8 ? A.GUN : y === 6 ? A.PLH : (z + 40) % 5 === 0 ? A.PLD : A.PL2));
+      for (const [dx, dy] of [[-1.5, 1.5], [1.5, 1.5], [-1.5, 4.5], [1.5, 4.5]]) { a.set(s * 7 + dx, dy, 9, A.FIRE); a.set(s * 7 + dx, dy, 8, A.WHITE); }
+      a.box(s * 3, 0, -2, s * 4, 2, 2, A.GUNH);
+    }
+    if (st >= 2) { a.box(0, 0, -4, 0, 6, -4, A.PLD); a.fill((x, y, z) => { const d = Math.hypot(x, y - 8); return d < 3.6 && z === -5 + Math.round(d * d * 0.08) ? A.CHR : null; }, -4, 4, 4, 12, -5, -3); a.set(0, 8, -2, A.CY); }
+    centred(P.aim, a);
+    return { ay: h + 1.45, muzzle: [0, 0.3, 0.8] };
+  },
+
+  // ===== ABNORMAL ==========================================================
+  abnormal_0(P, h, st) { // Glitch Tower: stacked cubes that never line up, scan lines tearing through them
+    const n = 3 + st, v = vx(-12, 12, 0, n * 6 + 2, -12, 12), C = abPal(v);
+    const offs = [[0, 0], [2, -1], [-2, 2], [1, 2], [-2, -1], [2, 1]];
+    for (let i = 0; i < n; i++) {
+      const [ox, oz] = offs[i % 6], half = 7 - i * 0.9, rot = i * 0.3;
+      v.fill((x, y, z) => {
+        const tear = h3(y, i, 5) < 0.2 ? (h3(y, i, 6) < 0.5 ? 2 : -2) : 0;           // displaced scan rows
+        const [xr, zr] = rotY(x - ox - tear, z - oz, rot), m = Math.max(Math.abs(xr), Math.abs(zr));
+        if (m > half) return null;
+        if (tear) return h3(y, i, 7) < 0.5 ? C.PK : C.MN;
+        if (m > half - 1) return y === i * 6 + 5 ? C.PX : (i & 1 ? C.P2 : C.P1);
+        return C.PD;
+      }, -12, 12, i * 6, i * 6 + 5, -12, 12);
+    }
+    onTop(P.base, h, v);
+    const f = vx(-7, 7, -6, 6, -7, 7), F = abPal(f);
+    f.box(0, -2, -2, 4, 2, 2, F.PK); f.box(1, -1, -1, 3, 1, 3, F.PKL);
+    f.box(-5, 1, -1, -2, 4, 2, F.MN);
+    f.box(-5, -4, -5, 5, -4, 5, (x, y, z) => ((x + z) & 1 ? F.PKL : null));
+    centred(P.float, f);
+    return { fy: h + 2.1 + st * 0.5, bob: 0.2, muzzle: [0, h + 2.1 + st * 0.5, 0] };
+  },
+
+  abnormal_1(P, h, st) { // Warp Tower: a standing ring of studded stone around a spiralling fold in space
+    const v = vx(-14, 14, 0, 18, -6, 6), C = abPal(v);
+    v.box(-9, 0, -5, 9, 5, 5, (x, y, z) => (y === 5 ? C.PH : Math.abs(x) === 9 || Math.abs(z) === 5 ? (y === 2 ? C.PK : C.P2) : C.PD));
+    for (const s of [-1, 1]) v.box(s * 11 - 2, 0, -3, s * 11 + 2, 16, 3, (x, y, z) => (y % 5 === 4 ? C.PX : Math.abs(x - s * 11) === 2 ? C.P2 : C.P1));
+    onTop(P.base, h, v);
+    const s = vx(-17, 17, -17, 17, -3, 3), S = abPal(s);
+    s.fill((x, y, z) => {
+      const d = Math.hypot(x, y), a = Math.atan2(y, x);
+      if (d > 12.5 && d <= 15.5 && Math.abs(z) <= 2) { const k = Math.round(a / (TAU / 12)); return Math.abs(a - k * TAU / 12) < 0.09 && d > 14.5 ? (k & 1 ? S.PK : S.MN) : d > 14.5 ? S.PL : S.P2; }
+      if (z !== 0 || d > 12.5) return null;
+      const sp = (((a / TAU) * 3 + d * 0.09) % 1 + 1) % 1;                          // three spiral arms
+      return sp < 0.28 ? (d < 4 ? S.WG : d < 8 ? S.PKL : S.PK) : sp < 0.36 ? S.VI : null;
+    }, -16, 16, -16, 16, -2, 2);
+    centred(P.spin, s);
+    return { sy: h + 1.9, spinRate: 1.2, spinAxis: "z", muzzle: [0, h + 1.9, 0] };
+  },
+
+  abnormal_2(P, h, st) { // Chaos Tower: an unstable spiked core inside a swarm of mismatched blocks
+    const v = vx(-9, 9, 0, 14, -9, 9), C = abPal(v);
+    v.fill((x, y, z) => { const [xr, zr] = rotY(x, z, 0.4 + y * 0.03), m = Math.max(Math.abs(xr), Math.abs(zr)); if (m > 6.5) return null; if (y === 12) return C.PX; return m > 5.5 ? (h3(y, 1, 1) < 0.15 ? C.MN : C.P2) : C.PD; }, -9, 9, 0, 12, -9, 9);
+    onTop(P.base, h, v);
+    const f = vx(-10, 10, -10, 10, -10, 10), F = abPal(f), R = rng(5);
+    f.ell(0, 0, 0, 4.5, 4.5, 4.5, (x, y, z) => (Math.hypot(x, y, z) < 3 ? F.WG : h3(x, y, z) < 0.3 ? F.PKL : F.PK));
+    for (let i = 0; i < 10 + st * 2; i++) { const u = R() * 2 - 1, a = R() * TAU, w = Math.sqrt(1 - u * u), L = 6.5 + R() * 2.5; f.cap([0, 0, 0], [Math.cos(a) * w * L, u * L, Math.sin(a) * w * L], 1.4, i % 3 ? F.PK : F.MN, 0.4); }
+    centred(P.float, f);
+    const s = vx(-20, 20, -10, 10, -20, 20), S = abPal(s), R2 = rng(71), cols = [S.MN, S.VI, S.PK, S.P2, S.PH, S.PALE];
+    for (let i = 0; i < 12 + st * 3; i++) { const a = R2() * TAU, d = 11 + R2() * 7, y = (R2() - 0.5) * 12, k = 1 + Math.round(R2()); s.box(Math.cos(a) * d - k / 2, y - k / 2, Math.sin(a) * d - k / 2, Math.cos(a) * d + k / 2, y + k / 2, Math.sin(a) * d + k / 2, cols[i % 6]); }
+    centred(P.spin, s);
+    return { fy: h + 1.9, sy: h + 1.9, spinRate: 2.6, bob: 0.12, muzzle: [0, h + 1.9, 0] };
+  },
+
+  abnormal_3(P, h, st) { // Paradox Tower: an impossible cube frame tumbling round a corrupted core
+    const v = vx(-8, 8, 0, 12, -8, 8), C = abPal(v);
+    v.fill((x, y, z) => { const m = Math.max(Math.abs(x), Math.abs(z)), half = 6 - Math.floor(y / 4); if (m > half) return null; return y % 4 === 3 ? C.PX : m === half ? C.P2 : C.PD; }, -6, 6, 0, 11, -6, 6);
+    onTop(P.base, h, v);
+    const s = vx(-14, 14, -14, 14, -14, 14), S = abPal(s), L = 11;
+    // the 12 edges of a cube, shaded so faces seem to swap depth; one joint is left broken
+    const edges = [];
+    for (const a of [-L, L]) for (const b of [-L, L]) edges.push([[-L, a, b], [L, a, b], 0], [[a, -L, b], [a, L, b], 1], [[a, b, -L], [a, b, L], 2]);
+    edges.forEach(([p0, p1, ax], i) => {
+      const col = [S.PL, S.PH, S.PX][ax];
+      s.fill((x, y, z) => {
+        const p = [x, y, z], t = (p[ax] - p0[ax]) / (p1[ax] - p0[ax]);
+        if (t < 0 || t > 1) return null;
+        for (let k = 0; k < 3; k++) if (k !== ax && Math.abs(p[k] - p0[k]) > 1.5) return null;
+        if (i === 4 && t > 0.82) return null;
+        return Math.abs(t - 0.5) < 0.06 ? (ax === 1 ? S.MN : S.PK) : col;
+      }, Math.min(p0[0], p1[0]) - 2, Math.max(p0[0], p1[0]) + 2, Math.min(p0[1], p1[1]) - 2, Math.max(p0[1], p1[1]) + 2, Math.min(p0[2], p1[2]) - 2, Math.max(p0[2], p1[2]) + 2);
+    });
+    bipyr(s, [0, 0, 0], 4.5 + st * 0.3, 5.5 + st * 0.3, [S.PK, S.PKs, S.PKs, S.PK, S.PKL, S.PKL]);
+    s.box(-1, -1, -1, 1, 1, 1, S.MNL);
+    centred(P.spin, s);
+    return { sy: h + 2.1, spinRate: 0.9, spinAxis: "xyz", muzzle: [0, h + 2.1, 0] };
+  },
+
+  abnormal_4(P, h, st) { // Reality Engine: a lopsided machine humming round a floating, watching eye
+    const v = vx(-14, 14, 0, 26, -12, 12), C = abPal(v);
+    v.fill((x, y, z) => { const [xr, zr] = rotY(x - 2, z + 2, 0.2); if (Math.abs(xr) > 10 || Math.abs(zr) > 7) return null; if (y === 11) return C.PX; if (Math.abs(xr) > 9 || Math.abs(zr) > 6) { if (vnoise(xr * 0.3, y * 0.4, zr * 0.3) > 0.72) return C.PK; return (y + 40) % 4 === 0 ? C.PH : C.P2; } return C.PD; }, -14, 14, 0, 11, -12, 12);
+    v.path([[-10, 0, 6], [-10.5, 12, 6], [-11.5, 22, 6.5]], 3.2, 2.6, (x, y) => (y % 5 === 0 ? C.PX : C.P2));
+    v.ell(-11.5, 24, 6.5, 2.4, 2.4, 2.4, C.MN);
+    v.path([[9, 12, 0], [11, 16, 2], [11, 18, 7], [9, 17, 10]], 2.2, 1.6, (x, y, z) => (z > 8 ? C.PK : C.PH));
+    if (st >= 2) for (let i = 0; i < 3; i++) v.cyl(-2 + i * 4, 12, -3, 1, 14 + i * 2, i === 1 ? C.MN : C.PL);
+    onTop(P.base, h, v);
+    const f = vx(-8, 8, -8, 8, -8, 9), F = abPal(f), r = 6;
+    f.ell(0, 0, 0, r, r, r, (x, y, z) => {
+      const d = Math.hypot(x, y);
+      if (z > 2) { if (d < 1.6) return F.BLK; if (d < 3.6) return d < 2.6 ? F.PK : F.PKL; }
+      return (Math.abs(vnoise(x * 0.5, y * 0.5, z * 0.5) - 0.5) < 0.04 && z > -2) ? F.PKs : z > 0 ? F.PALE : F.PALE2;
+    });
+    f.fill((x, y, z) => { const e = (x / 7) ** 2 + ((y - 1) / 6.8) ** 2 + (z / 7) ** 2; return e <= 1 && y > 3.5 && z < 3 ? C.P2 : null; }, -8, 8, 3, 8, -8, 3);
+    centred(P.float, f);
+    const s = vx(-20, 20, -20, 20, -20, 20), S = abPal(s);
+    for (let i = 0; i < 40; i++) { const a = (i / 40) * TAU; s.set(Math.cos(a) * 17, Math.sin(a) * 17, 0, i % 5 === 0 ? S.VI : S.PL); s.set(Math.cos(a) * 19, 0, Math.sin(a) * 19, i % 4 === 0 ? S.MN : S.PH); }
+    if (st >= 2) for (let i = 0; i < 32; i++) { const a = (i / 32) * TAU; s.set(0, Math.cos(a) * 15, Math.sin(a) * 15, i % 4 === 0 ? S.PK : S.PX); }
+    centred(P.spin, s);
+    return { fy: h + 2.6 + st * 0.15, sy: h + 2.6 + st * 0.15, spinRate: 1.1, bob: 0.14, muzzle: [0, h + 2.6, 0] };
+  },
+});
