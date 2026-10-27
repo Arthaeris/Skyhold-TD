@@ -78,7 +78,18 @@ async function firebaseBackend() {
     update(p, o) { return dbM.update(R(p), deep(o)); },
     remove(p) { return dbM.remove(R(p)); },
     async push(p, v) { const r = dbM.push(R(p)); await dbM.set(r, deep(v)); return r.key; },
-    async claim(p, fn) { const r = await dbM.runTransaction(R(p), fn); return { committed: r.committed, value: r.snapshot.val() }; },
+    // Firebase runs a transaction handler first against the LOCAL cache, which is empty (null) for a path
+    // nobody is listening to. Returning undefined there aborts the whole transaction — that is what made
+    // every open seat look taken ("That room is full"). So the first null is answered with null, which
+    // sends the attempt to the server; it disagrees and calls us again with the real value.
+    async claim(p, fn) {
+      let primed = false;
+      const r = await dbM.runTransaction(R(p), (cur) => {
+        if (cur === null && !primed) { primed = true; return null; }
+        return fn(cur);
+      }, { applyLocally: false });
+      return { committed: r.committed, value: r.snapshot.val() };
+    },
     on(p, cb) { return dbM.onValue(R(p), (s) => cb(s.val())); },
     onChild(p, cb) { return dbM.onChildAdded(R(p), (s) => cb(s.key, s.val())); },
     onChildRemoved(p, cb) { return dbM.onChildRemoved(R(p), (s) => cb(s.key)); },

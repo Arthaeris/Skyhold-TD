@@ -98,7 +98,7 @@ export function createSession(opts) {
       for (const k of Object.keys(seats).sort((a, b) => a - b)) {
         if (!seats[k] || seats[k].kind !== "open") continue;
         const r = await rt.claim(P("seats/" + k), (cur) => (cur && cur.kind === "open" ? { kind: "human", uid, name: cleanName(name), el: opts.defaultElement || "fire", ready: false, online: true } : undefined));
-        if (r.committed) { mine = k; break; }
+        if (r.committed && r.value && r.value.uid === uid) { mine = k; break; } // really ours (not a no-op commit)
       }
       if (mine == null) throw new Error("That room is full.");
       await rt.set(P("members/" + uid), { seat: +mine, name: cleanName(name) });
