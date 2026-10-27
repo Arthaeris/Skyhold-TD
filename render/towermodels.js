@@ -595,3 +595,383 @@ export const VOX_HEADS = {
     return { fy: h + 2.0, sy: h + 2.0, spinRate: 1.1, bob: 0.12, muzzle: [0, h + 2.0, 0] };
   },
 };
+
+// ===========================================================================
+// NATURE and STORM
+// ===========================================================================
+function naturePal(v) {
+  return {
+    ST: v.pal("#7a7a6a", 0, 0.08), ST2: v.pal("#8f8f7c", 0, 0.08), STD: v.pal("#5e5e52", 0, 0.08), MOR: v.pal("#4a4a40", 0, 0.05),
+    MOSS: v.pal("#5f8a3a", 0, 0.1), MOSS2: v.pal("#71a044", 0, 0.1), MOSSD: v.pal("#46702c", 0, 0.1),
+    LEAF: v.pal("#4f9a45", 0, 0.1), LEAF2: v.pal("#5fae50", 0, 0.1), LEAF3: v.pal("#78c25e", 0, 0.08), LEAFD: v.pal("#3a7834", 0, 0.1),
+    BARK: v.pal("#5a4228", 0, 0.09), BARK2: v.pal("#6e5133", 0, 0.09), BARKD: v.pal("#3e2c1c", 0, 0.08), THORN: v.pal("#d2c290", 0, 0.05),
+    CREAM: v.pal("#e8dcc0", 0, 0.05), CREAM2: v.pal("#f4ead4", 0, 0.04), CAP: v.pal("#b8743a", 0, 0.07), CAP2: v.pal("#d08848", 0, 0.06), CAP3: v.pal("#e2a464", 0, 0.05),
+    PINK: v.pal("#c94a6a", 0, 0.06), PINK2: v.pal("#e46a86", 0, 0.05), RED: v.pal("#d9483a", 0, 0.05), FLOW: v.pal("#ffd2e6", 0, 0.03), YEL: v.pal("#ffe27a", 0, 0.03),
+    G1: v.pal("#73d35f", 1.4, 0.06), G2: v.pal("#9cff7a", 1.6, 0.05), G3: v.pal("#d6ffc4", 1.9, 0.03),
+  };
+}
+const leafTones = (C) => [C.LEAF3, C.LEAF2, C.LEAF, C.LEAFD, C.LEAF3, C.G2];
+function stormPal(v) {
+  return {
+    SL: v.pal("#3a4060", 0, 0.07), SL2: v.pal("#4a5274", 0, 0.07), SLH: v.pal("#626b92", 0, 0.06), SLD: v.pal("#2a2f48", 0, 0.06), MOR: v.pal("#22263a", 0, 0.05),
+    STEEL: v.pal("#8a92b0", 0, 0.05), STEELH: v.pal("#c0c7dc", 0, 0.04), STEELD: v.pal("#5a6282", 0, 0.05),
+    CU: v.pal("#c98a4a", 0, 0.05), CUH: v.pal("#eab070", 0, 0.04), CUD: v.pal("#8a5a30", 0, 0.05), CER: v.pal("#e8e4f2", 0, 0.03),
+    CL: v.pal("#5a6080", 0, 0.06), CL2: v.pal("#727a9c", 0, 0.06), CL3: v.pal("#8d94b4", 0, 0.05), CLD: v.pal("#41466a", 0, 0.06),
+    V1: v.pal("#b98cff", 1.45, 0.06), V2: v.pal("#c77dff", 1.6, 0.05), V3: v.pal("#ecd1ff", 1.9, 0.03), VW: v.pal("#f6ecff", 2.1, 0.02),
+  };
+}
+const stormTones = (C) => [v_(C, "a"), v_(C, "b"), v_(C, "c"), v_(C, "d"), v_(C, "e"), C.V3];
+function v_(C, k) { return C["CR" + k]; }
+function stormCrystalPal(v, C) { Object.assign(C, { CRa: v.pal("#c9a2ff", 0, 0.03), CRb: v.pal("#9a6cf0", 0, 0.04), CRc: v.pal("#8458e0", 0, 0.04), CRd: v.pal("#5a3cb0", 0, 0.05), CRe: v.pal("#dcc4ff", 0, 0.03) }); return C; }
+// a zig-zag lightning bolt from a to b (glowing)
+function bolt(v, a, b, seed, segs, jag, p1, p2) {
+  const R = rng(seed), pts = [a];
+  for (let i = 1; i < segs; i++) { const t = i / segs; pts.push([a[0] + (b[0] - a[0]) * t + (R() - 0.5) * jag * 2, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t + (R() - 0.5) * jag * 2]); }
+  pts.push(b);
+  v.path(pts, 0.75, 0.5, (x, y, z) => (h3(x, y, z) < 0.5 ? p1 : p2));
+}
+// a double diamond (bipyramid) crystal centred at c
+function bipyr(v, c, r, H, tones) {
+  v.fill((x, y, z) => {
+    const dy = y - c[1], t = Math.abs(dy) / H, rr = r * (1 - t);
+    const dx = x - c[0], dz = z - c[2];
+    if (t > 1 || Math.abs(dx) + Math.abs(dz) > rr + 0.35) return null;
+    if (t > 0.85) return tones[5];
+    if (Math.abs(Math.abs(dx) - Math.abs(dz)) > rr - 0.9 && rr > 1.5) return tones[4];
+    return dx >= 0 ? (dz >= 0 ? tones[0] : tones[2]) : (dz >= 0 ? tones[1] : tones[3]);
+  }, c[0] - r - 1, c[0] + r + 1, c[1] - H, c[1] + H, c[2] - r - 1, c[2] + r + 1);
+}
+
+Object.assign(VOX_PLINTH, {
+  nature(p, st) {
+    const v = vx(-19, 19, 0, 22, -19, 19), C = naturePal(v);
+    const top = st >= 1 ? 7 : 3;
+    const course = (half, y0, y1, isTop) => v.fill((x, y, z) => {
+      const ax = Math.abs(x), az = Math.abs(z), oct = half * 1.42;
+      if (ax > half || az > half || ax + az > oct) return null;
+      const edge = ax === half || az === half || ax + az > oct - 1;
+      const mossy = vnoise(x * 0.3, y * 0.5, z * 0.3) > 0.55 - (y - y0) * 0.06;
+      if (edge && y < y1) return mossy && y >= y1 - 2 ? C.MOSSD : mortar(ax >= az ? z : x, y - y0, 2, 5) ? C.MOR : h3(x, y, z) < 0.3 ? C.STD : C.ST;
+      if (y < y1) return C.STD;
+      if (!isTop) return edge ? C.MOSS : C.ST2;
+      if (edge) return mossy ? C.MOSS2 : C.ST2;
+      // flagstones in a bed of moss
+      const fx = Math.floor((x + 40) / 4), fz = Math.floor((z + 40 + (fx & 1) * 2) / 4);
+      if ((x + 40) % 4 === 0 || (z + 40 + (fx & 1) * 2) % 4 === 0) return vnoise(x * 0.4, 2, z * 0.4) > 0.4 ? C.MOSS : C.MOSSD;
+      return h3(fx, 1, fz) < 0.3 ? C.MOSS2 : h3(fx, 2, fz) < 0.5 ? C.ST : C.ST2;
+    }, -half, half, y0, y1, -half, half);
+    course(17, 0, 3, st < 1);
+    if (st >= 1) course(13, 4, 7, true);
+    // roots crawling over the edge
+    const R = rng(3);
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * TAU + 0.4, r0 = st >= 1 ? 12 : 9;
+      v.path([[Math.cos(a) * r0, top + 1, Math.sin(a) * r0], [Math.cos(a + 0.15) * 15, top + 0.5, Math.sin(a + 0.15) * 15], [Math.cos(a + 0.2) * 18.5, 2, Math.sin(a + 0.2) * 18.5], [Math.cos(a + 0.22) * 19, 0, Math.sin(a + 0.22) * 19]], 1.1, 0.7, i % 2 ? C.BARK : C.BARK2);
+    }
+    // a few flowers and toadstools
+    for (let i = 0; i < 8; i++) {
+      const a = R() * TAU, d = (st >= 1 ? 14.5 : 12) + R() * 2, x = Math.round(Math.cos(a) * d), z = Math.round(Math.sin(a) * d), y = (st >= 1 && d < 14 ? 8 : 4);
+      if (i % 3 === 0) { v.set(x, y, z, C.CREAM); v.set(x, y + 1, z, C.RED); v.set(x + 1, y + 1, z, C.RED); }
+      else { v.set(x, y, z, C.LEAF); v.set(x, y + 1, z, i % 2 ? C.FLOW : C.YEL); }
+    }
+    // corner stones sprouting leaf crystals
+    const H = st >= 2 ? 10 : 6;
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      const cx = sx * 12, cz = sz * 12;
+      v.box(cx - 1, top + 1, cz - 1, cx + 1, top + 2, cz + 1, (x, y) => (y === top + 2 ? C.MOSS : C.ST2));
+      crystal(v, cx, top + 3, cz, 1.4, H, leafTones(C), { lean: [sx * 0.08, sz * 0.08] });
+    }
+    v.emit(p, 0, U / 2, 0, MERGE);
+    return (top + 1) * U;
+  },
+  storm(p, st) {
+    const v = vx(-18, 18, 0, 30, -18, 18), C = stormPal(v);
+    const top = st >= 1 ? 7 : 3;
+    const course = (half, y0, y1, isTop) => v.fill((x, y, z) => {
+      const ax = Math.abs(x), az = Math.abs(z), m = Math.max(ax, az);
+      if (m > half || (ax === half && az === half && y === y1)) return null;
+      if (m === half) { if (y === y1) return C.STEEL; const al = ax === half ? z : x; return Math.abs(al) <= 1 && y === y0 + 1 ? C.V1 : mortar(al, y - y0, 2, 7) ? C.MOR : C.SL2; }
+      if (y < y1) return C.SL;
+      if (!isTop) return m >= half - 1 ? C.SLH : C.SL2;
+      // glowing conduits running from the edges to the centre
+      if ((ax <= 0.5 || az <= 0.5) && m < half - 2) return m % 4 === 0 ? C.STEELD : C.V1;
+      if (ax === az && m < half - 2 && m > 3) return C.SLD;
+      return m >= half - 1 ? C.SLH : (Math.floor(x / 3) + Math.floor(z / 3)) & 1 ? C.SL2 : C.SL;
+    }, -half, half, y0, y1, -half, half);
+    course(17, 0, 3, st < 1);
+    if (st >= 1) course(13, 4, 7, true);
+    const rh = st >= 2 ? 18 : 10;
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      const cx = sx * 15, cz = sz * 15;
+      v.box(cx - 1, 4, cz - 1, cx + 1, 5, cz + 1, C.SLH);
+      v.box(cx, 6, cz, cx, 5 + rh, cz, C.STEEL);
+      for (let y = 8; y < 5 + rh - 1; y += 3) v.box(cx - 1, y, cz - 1, cx + 1, y, cz + 1, (x, yy, z) => (x === cx && z === cz ? C.STEEL : C.CU));
+      v.set(cx, 6 + rh, cz, C.V3);
+    }
+    v.emit(p, 0, U / 2, 0, MERGE);
+    return (top + 1) * U;
+  },
+});
+
+Object.assign(VOX_HEADS, {
+  // ===== NATURE ============================================================
+  nature_0(P, h, st) { // Thorn Tower: a braided cone of thorny vines crowned with a leaf crystal
+    const H = 30, v = vx(-13, 13, 0, H + 20, -13, 13), C = naturePal(v);
+    v.fill((x, y, z) => {
+      const t = y / H, r = 9.5 - t * 6.5, d = Math.hypot(x, z);
+      if (d > r || d < r - 2.6) return null;
+      const s = (((Math.atan2(z, x) / TAU) * 4 + y * 0.09) % 1 + 1) % 1, s2 = (((Math.atan2(z, x) / TAU) * -4 + y * 0.09) % 1 + 1) % 1;
+      if (s < 0.28) return h3(x, y, z) < 0.3 ? C.BARK2 : C.BARK;
+      if (s2 < 0.28) return C.MOSSD;
+      return vnoise(x * 0.4, y * 0.4, z * 0.4) > 0.5 ? C.LEAF : C.MOSS;
+    }, -10, 10, 0, H, -10, 10);
+    const R = rng(9), n = 16 + st * 4;
+    for (let i = 0; i < n; i++) {
+      const y = 2 + R() * (H - 4), a = R() * TAU, r = 9.5 - (y / H) * 6.5, L = 3 + R() * 2;
+      const o = [Math.cos(a) * r, y, Math.sin(a) * r]; v.cap(o, [o[0] + Math.cos(a) * L, y + L * 0.6, o[2] + Math.sin(a) * L], 0.8, C.THORN, 0.3);
+    }
+    for (let i = 0; i < 10; i++) { const y = 3 + R() * (H - 6), a = R() * TAU, r = 9.8 - (y / H) * 6.5; v.ell(Math.cos(a) * (r + 0.6), y, Math.sin(a) * (r + 0.6), 1.6, 0.8, 1.6, C.LEAF3); }
+    crystal(v, 0, H - 2, 0, 3.4 + st * 0.3, 13 + st * 2, leafTones(C), { vein: true });
+    if (st >= 2) for (const s of [-1, 1]) crystal(v, s * 6, 14, 0, 1.8, 8, leafTones(C), { lean: [s * 0.35, 0] });
+    if (st >= 3) for (const s of [-1, 1]) crystal(v, 0, 10, s * 7, 1.6, 7, leafTones(C), { lean: [0, s * 0.4] });
+    onTop(P.base, h, v);
+    return { muzzle: [0, h + (H + 12) * U, 0] };
+  },
+
+  nature_1(P, h, st) { // Spore Tower: a giant spotted mushroom on a vine-wrapped stem, glowing spores drifting off it
+    const v = vx(-17, 17, 0, 36, -17, 17), C = naturePal(v), SH = 22, R0 = 12 + st;
+    v.cyl(0, 0, 0, 4.2, 2, (x, y, z) => (Math.hypot(x, z) > 3.4 ? C.CREAM : C.CREAM2));
+    v.fill((x, y, z) => { const r = 3.4 - y * 0.03 + (y > SH - 5 ? (y - SH + 5) * 0.35 : 0), d = Math.hypot(x, z); if (d > r) return null; const k = Math.round(Math.atan2(z, x) / (TAU / 12)); return (k & 1) && d > r - 0.8 ? C.CREAM : C.CREAM2; }, -6, 6, 3, SH, -6, 6);
+    // a ragged ring (annulus) part-way up and vines spiralling the stem
+    v.fill((x, y, z) => { const d = Math.hypot(x, z); return d > 3 && d < 5.4 - (y - 13) * 0.6 && h3(x, 1, z) > 0.15 ? C.CREAM : null; }, -6, 6, 13, 14, -6, 6);
+    for (const ph of [0, Math.PI]) { const pts = []; for (let y = 1; y <= SH - 2; y += 2) pts.push([Math.cos(y * 0.35 + ph) * 3.8, y, Math.sin(y * 0.35 + ph) * 3.8]); v.path(pts, 0.8, 0.7, C.MOSSD); }
+    // the cap, with gills underneath
+    v.fill((x, y, z) => {
+      const d = Math.hypot(x, z), yy = y - SH, hh = 9 * Math.sqrt(Math.max(0, 1 - (d / R0) ** 2));
+      if (d > R0 || yy > hh || yy < 0) return null;
+      if (yy < 1.5) return d > R0 - 1.5 ? C.CAP : (Math.round(Math.atan2(z, x) / (TAU / 40)) & 1 ? C.CREAM : C.CREAM2);
+      const sp = vnoise(x * 0.35, y * 0.35, z * 0.35);
+      if (sp > 0.68 && yy > hh - 1.5) return C.CREAM2;
+      return yy > hh - 1.5 && d < R0 * 0.55 ? C.CAP3 : yy > hh - 1.5 ? C.CAP2 : C.CAP;
+    }, -R0, R0, SH, SH + 10, -R0, R0);
+    // glowing toadstools round the foot
+    for (let i = 0; i < 5 + st; i++) { const a = i * 1.3 + 0.4, d = 7 + (i % 3) * 1.5, x = Math.cos(a) * d, z = Math.sin(a) * d; v.box(x, 0, z, x, 1 + (i % 2), z, C.CREAM); v.ell(x, 2 + (i % 2), z, 1.6, 0.9, 1.6, i % 2 ? C.G1 : C.G2); }
+    onTop(P.base, h, v);
+    const f = vx(-14, 14, -2, 12, -14, 14), F = naturePal(f), R = rng(21);
+    for (let i = 0; i < 9 + st * 2; i++) { const a = (i / (9 + st * 2)) * TAU + R() * 0.5, d = 6 + R() * 7, y = R() * 9; f.ell(Math.cos(a) * d, y, Math.sin(a) * d, 0.9, 0.9, 0.9, R() < 0.5 ? F.G2 : F.G3); }
+    centred(P.float, f);
+    return { fy: h + 3.0, bob: 0.2, muzzle: [0, h + 2.8, 0] };
+  },
+
+  nature_2(P, h, st) { // Bramble Tower: two braided vines arching round a glowing seed-heart
+    const v = vx(-16, 16, 0, 34, -10, 10), C = naturePal(v), AH = 24;
+    v.box(-13, 0, -4, -8, 3, 4, (x, y, z) => (y === 3 ? C.MOSS : C.ST)); v.box(8, 0, -4, 13, 3, 4, (x, y, z) => (y === 3 ? C.MOSS : C.ST));
+    for (const [ph, pal] of [[0, C.BARK], [Math.PI, C.BARK2], [Math.PI / 2, C.MOSSD]]) {
+      const pts = [];
+      for (let i = 0; i <= 40; i++) {
+        const a = Math.PI * (i / 40), cx = Math.cos(a) * 10.5, cy = 2 + Math.sin(a) * AH, tw = i * 0.75 + ph, rr = ph === Math.PI / 2 ? 1.2 : 1.8;
+        pts.push([cx + Math.cos(tw) * rr * Math.sin(a), cy + Math.cos(tw) * rr * Math.cos(a) * 0.3, Math.sin(tw) * rr]);
+      }
+      v.path(pts, ph === Math.PI / 2 ? 0.8 : 1.5, ph === Math.PI / 2 ? 0.8 : 1.3, pal);
+    }
+    const R = rng(12);
+    for (let i = 0; i < 18; i++) {
+      const a = Math.PI * R(), cx = Math.cos(a) * 10.5, cy = 2 + Math.sin(a) * AH, o = R() * TAU;
+      if (i % 2) v.cap([cx, cy, 0], [cx + Math.cos(o) * 4, cy + Math.sin(o) * 2 + 1, Math.sin(o) * 3.5], 0.7, C.THORN, 0.3);
+      else v.ell(cx + Math.cos(o) * 2.2, cy + 1, Math.sin(o) * 2.2, 1.8, 0.8, 1.4, i % 4 ? C.LEAF2 : C.LEAF3);
+    }
+    if (st >= 1) for (let i = 0; i < 6; i++) { const a = 0.4 + i * 0.47, x = Math.cos(a) * 10.5, y = 2 + Math.sin(a) * AH; v.set(x, y + 2.5, 2, C.FLOW); v.set(x, y + 2.5, 3, C.YEL); }
+    if (st >= 2) v.ell(0, AH + 3, 0, 8, 3.5, 6, (x, y, z) => (vnoise(x * 0.4, y * 0.4, z * 0.4) > 0.55 ? C.LEAF3 : y > AH + 4 ? C.LEAF2 : C.LEAF));
+    onTop(P.base, h, v);
+    // the heart: a green crystal seed in a little leaf cradle
+    const f = vx(-6, 6, -7, 7, -6, 6), F = naturePal(f);
+    bipyr(f, [0, 0, 0], 3.2 + st * 0.3, 5.5 + st * 0.4, [F.G2, F.G1, F.G1, F.LEAF2, F.G3, F.G3]);
+    for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2 + 0.78; f.cap([0, -4, 0], [Math.cos(a) * 4, -2, Math.sin(a) * 4], 0.9, F.LEAF, 0.5); }
+    centred(P.float, f);
+    return { fy: h + 1.2, bob: 0.1, muzzle: [0, h + 1.2, 0.3] };
+  },
+
+  nature_3(P, h, st) { // Venom Tower: a carnivorous plant on a curling stalk, jaws open over a pool of venom
+    const v = vx(-17, 17, 0, 22, -17, 17), C = naturePal(v);
+    // splayed leaves on the plinth
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * TAU + 0.3, L = 12 + (i % 2) * 3;
+      v.fill((x, y, z) => {
+        const u = x * Math.cos(a) + z * Math.sin(a), w = -x * Math.sin(a) + z * Math.cos(a);
+        if (u < 2 || u > L) return null;
+        const half = Math.sin(((u - 2) / (L - 2)) * Math.PI) * 3.2, lift = Math.round(((u - 2) / L) ** 2 * 3);
+        if (Math.abs(w) > half || y !== lift + (Math.abs(w) < 0.6 ? 1 : 0)) return null;
+        return Math.abs(w) < 0.6 ? C.LEAF3 : Math.abs(w) > half - 1 ? C.LEAFD : i % 2 ? C.LEAF : C.LEAF2;
+      }, -L, L, 0, 5, -L, L);
+    }
+    // the stalk
+    v.path([[0, 0, 0], [0.5, 6, -1], [-0.5, 12, 0.5], [0, 19, 0]], 3.2, 2.2, (x, y, z) => ((y + Math.round(Math.atan2(z, x) * 2)) % 5 === 0 ? C.MOSSD : C.MOSS));
+    v.cyl(0, 0, 0, 4.5, 1, C.MOSSD);
+    onTop(P.base, h, v);
+    // the head (aims): two jaw shells, red inside, cream teeth along the rims, venom pooled in the lower jaw
+    const a = vx(-12, 12, -11, 13, -10, 17), A = naturePal(a);
+    const jaw = (open, upper) => pitched(a, open, (X, Y, Z) => {
+      const e = (X / 8.5) ** 2 + (Y / 5) ** 2 + ((Z - 4) / 9.5) ** 2, ei = (X / 6.6) ** 2 + (Y / 3.2) ** 2 + ((Z - 4) / 7.6) ** 2;
+      if ((upper ? Y < 0 : Y > 0) || e > 1) return null;
+      if (ei < 1) return 0;
+      if (ei < 1.25 || Math.abs(Y) < 0.6) return upper ? A.PINK : A.PINK2;                     // the red lining and lips
+      return Math.abs(X) < 1 && upper ? A.LEAF3 : e > 0.8 && Math.round(Z) % 5 === 0 ? A.LEAFD : upper ? A.LEAF2 : A.LEAF;
+    }, [-12, 12, -11, 13, -10, 17]);
+    jaw(-0.5, true); jaw(0.18, false);
+    // teeth along each jaw's rim, pointing across the gape (frame -> voxel: y = Y cos + Z sin, z = Z cos - Y sin)
+    for (const [open, sgn] of [[-0.5, 1], [0.18, -1]]) {
+      const sn = Math.sin(open), cs = Math.cos(open), toV = (X, Y, Z) => [X, Y * cs + Z * sn, Z * cs - Y * sn];
+      for (let i = 0; i <= 10; i++) {
+        const t = (i / 10) * Math.PI, X = -Math.cos(t) * 7.4, Z = 4 + Math.sin(t) * 8.4;
+        if (Z < 6) continue;
+        a.cap(toV(X, 0, Z), toV(X * 0.92, -sgn * 2.4, Z - 0.3), 0.75, A.CREAM2, 0.3);
+      }
+    }
+    a.ell(0, -1.8, 6, 4.8, 1.4, 6, (x, y, z) => (y > -1.2 ? A.G2 : A.G1));
+    a.cap([2, -4, 12], [2, -9, 12.5], 0.8, A.G1, 0.5); a.set(2, -10, 12.5, A.G3);
+    if (st >= 2) for (const s of [-1, 1]) a.fill((x, y, z) => { const u = x * s; return u > 6 && u < 13 && Math.abs(y + 1 - (u - 6) * 0.3) < 0.6 && Math.abs(z) < 3.5 - (u - 6) * 0.4 ? A.LEAF2 : null; }, -14, 14, -3, 3, -4, 4);
+    centred(P.aim, a);
+    return { ay: h + 1.6, muzzle: [0, 0.2, 0.9] };
+  },
+
+  nature_4(P, h, st) { // World Tree: an ancient tree with a glowing seed set in its trunk
+    const H = Math.round((2.2 + st * 0.3) / U), v = vx(-18, 18, 0, H + 26, -18, 18), C = naturePal(v);
+    // the trunk, ridged bark flaring into roots
+    v.fill((x, y, z) => {
+      const d = Math.hypot(x, z), a = Math.atan2(z, x), r = 5 + Math.max(0, 4 - y) * 1.2 + Math.sin(a * 5 + y * 0.15) * 0.6;
+      if (d > r) return null;
+      if (z > 3 && Math.abs(x) <= 2 && Math.abs(y - H * 0.45) <= 2.5) return z > 4 ? 0 : C.G2;   // the seed niche
+      return (Math.round(a * 5 / TAU * 2 + y * 0.12) & 1) ? C.BARK : h3(x, y, z) < 0.2 ? C.BARKD : C.BARK2;
+    }, -10, 10, 0, H + 2, -10, 10);
+    v.set(0, H * 0.45, 4, C.G3); v.set(0, H * 0.45 + 1, 4, C.G3);
+    for (let i = 0; i < 6; i++) { const a = (i / 6) * TAU + 0.2; v.path([[Math.cos(a) * 4, 4, Math.sin(a) * 4], [Math.cos(a) * 9, 1.5, Math.sin(a) * 9], [Math.cos(a + 0.1) * 14, 0, Math.sin(a + 0.1) * 14]], 2.0, 0.8, i % 2 ? C.BARK : C.BARK2); }
+    // branches
+    const BR = [[-1, 0.3], [1, -0.2], [0.2, 1], [-0.3, -1]];
+    for (const [bx, bz] of BR) v.path([[0, H - 6, 0], [bx * 5, H - 1, bz * 5], [bx * 9, H + 3, bz * 9]], 1.8, 1.0, C.BARK2);
+    // canopy: overlapping leaf clumps
+    const R = rng(4), clumps = [[0, H + 8, 0, 11, 6, 11], ...BR.map(([bx, bz]) => [bx * 9, H + 4, bz * 9, 6.5, 4.5, 6.5]), [0, H + 14, 0, 7, 4.5, 7]];
+    for (const [cx, cy, cz, rx, ry, rz] of clumps) v.fill((x, y, z) => {
+      const e = ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 + ((z - cz) / rz) ** 2 + (vnoise(x * 0.35, y * 0.35, z * 0.35) - 0.5) * 0.9;
+      if (e > 1) return null;
+      const n = vnoise(x * 0.25 + 7, y * 0.25, z * 0.25);
+      return y > cy + ry * 0.35 ? (n > 0.55 ? C.LEAF3 : C.LEAF2) : y < cy - ry * 0.3 ? C.LEAFD : n > 0.5 ? C.LEAF2 : C.LEAF;
+    }, cx - rx - 1, cx + rx + 1, cy - ry - 1, cy + ry + 1, cz - rz - 1, cz + rz + 1);
+    if (st >= 2) for (let i = 0; i < 14; i++) { const a = R() * TAU, d = 6 + R() * 6; v.set(Math.cos(a) * d, H + 6 + R() * 8, Math.sin(a) * d + 0, i % 2 ? C.FLOW : C.G2); }
+    onTop(P.base, h, v);
+    const f = vx(-22, 22, -6, 6, -22, 22), F = naturePal(f);
+    for (let i = 0; i < 8 + st * 2; i++) { const a = (i / (8 + st * 2)) * TAU, d = 17 + (i % 3) * 2; f.set(Math.cos(a) * d, Math.sin(i * 2) * 4, Math.sin(a) * d, i % 2 ? F.G2 : F.G3); }
+    centred(P.float, f);
+    return { fy: h + H * U + 1.0, bob: 0.25, muzzle: [0, h + H * 0.45 * U, 0.6] };
+  },
+
+  // ===== STORM =============================================================
+  storm_0(P, h, st) { // Spark Tower: a slate pedestal with an insulated lightning rod and a crackling ball
+    const top = Math.round((3.0 + st * 0.3) / U), v = vx(-10, 10, 0, top, -10, 10), C = stormPal(v);
+    v.fill((x, y, z) => { const m = Math.max(Math.abs(x), Math.abs(z)), half = y < 2 ? 7 : 6; if (m > half) return null; if (y === 2 || y === 9) return C.CU; if (m === half) return mortar(Math.abs(x) === half ? z : x, y, 3, 4) ? C.MOR : C.SL2; return C.SL; }, -7, 7, 0, 9, -7, 7);
+    for (const [x, z] of [[0, 6], [0, -6], [6, 0], [-6, 0]]) v.box(x - (x ? 0 : 1), 4, z - (z ? 0 : 1), x + (x ? 0 : 1), 6, z + (z ? 0 : 1), C.V1);
+    v.cyl(0, 10, 0, 1.6, top - 4, C.STEEL);
+    for (let i = 0; i < 3 + Math.min(st, 2); i++) { const y = 13 + i * 5, r = 4.2 - i * 0.6; v.cyl(0, y, 0, r, y, C.CER); v.cyl(0, y + 1, 0, r - 0.8, y + 1, C.CER); v.cyl(0, y - 1, 0, r - 1.2, y - 1, C.STEELH); }
+    v.cyl(0, top - 3, 0, 2.6, top - 3, C.CU);
+    onTop(P.base, h, v);
+    const f = vx(-8, 8, -8, 8, -8, 8), F = stormPal(f), r = 3.4 + st * 0.3;
+    f.ell(0, 0, 0, r, r, r, (x, y, z) => (Math.hypot(x, y, z) < r - 1.2 ? F.VW : h3(x, y, z) < 0.3 ? F.V3 : F.V2));
+    for (let i = 0; i < 5; i++) { const a = i * 1.26, e = i * 0.7; bolt(f, [Math.cos(a) * r, Math.sin(e) * 2, Math.sin(a) * r], [Math.cos(a) * 7.5, Math.sin(e) * 4, Math.sin(a) * 7.5], 50 + i, 3, 1, F.V3, F.V1); }
+    centred(P.float, f);
+    return { fy: h + 3.0 + st * 0.3, bob: 0.05, muzzle: [0, h + 3.0 + st * 0.3, 0] };
+  },
+
+  storm_1(P, h, st) { // Tesla Tower: a stack of copper coils round a slate core, a charge orb above
+    const n = 5 + st, top = 9 + n * 5, v = vx(-12, 12, 0, top + 3, -12, 12), C = stormPal(v);
+    v.fill((x, y, z) => { const ax = Math.abs(x), az = Math.abs(z); if (ax > 9 || az > 9 || ax + az > 14) return null; if (y === 5) return C.STEEL; return (ax === 9 || az === 9 || ax + az === 14) ? (mortar(ax === 9 ? z : x, y, 3, 4) ? C.MOR : C.SL2) : C.SL; }, -9, 9, 0, 5, -9, 9);
+    v.cyl(0, 6, 0, 3.2, top, (x, y, z) => ((y + Math.round(Math.atan2(z, x) * 2)) % 4 === 0 ? C.SLD : C.SL2));
+    for (let i = 0; i < n; i++) {
+      const y = 8 + i * 5, r = 7 - i * 0.25;
+      v.fill((x, yy, z) => { const d = Math.hypot(x, z); return d <= r && d > 3 ? (yy === y ? (d > r - 1 ? C.CUH : C.CU) : d > r - 1.5 ? C.CUD : null) : null; }, -8, 8, y, y + 1, -8, 8);
+    }
+    for (let i = 0; i < 3; i++) { const a = (i / 3) * TAU; v.box(Math.cos(a) * 3.5, 6, Math.sin(a) * 3.5, Math.cos(a) * 3.5, top - 1, Math.sin(a) * 3.5, C.V1); }
+    // the toroid
+    v.fill((x, y, z) => { const d = Math.hypot(x, z), q = Math.hypot(d - 7, y - top - 1); return q <= 2 ? (y > top + 1 ? C.STEELH : C.STEEL) : null; }, -10, 10, top - 1, top + 3, -10, 10);
+    onTop(P.base, h, v);
+    const f = vx(-9, 9, -9, 9, -9, 9), F = stormPal(f), r = 4 + st * 0.3;
+    f.ell(0, 0, 0, r, r, r, (x, y, z) => (Math.hypot(x, y, z) < r - 1.3 ? F.VW : h3(x, y, z) < 0.35 ? F.V3 : F.V2));
+    for (let i = 0; i < 4; i++) { const a = i * 1.57 + 0.5; bolt(f, [Math.cos(a) * r, 0, Math.sin(a) * r], [Math.cos(a) * 8.5, -4 - i, Math.sin(a) * 8.5], 70 + i, 3, 1.2, F.V3, F.V2); }
+    centred(P.float, f);
+    return { fy: h + (top + 5) * U + 0.3, bob: 0.06, muzzle: [0, h + (top + 5) * U + 0.3, 0] };
+  },
+
+  storm_2(P, h, st) { // Cyclone Tower: a vented drum under a spinning funnel of wind ribbons and debris
+    const v = vx(-11, 11, 0, 8, -11, 11), C = stormPal(v);
+    v.fill((x, y, z) => {
+      const d = Math.hypot(x, z); if (d > 10) return null;
+      if (y === 7) return d > 9 ? C.STEELH : d > 6.5 ? C.STEEL : ((Math.abs(x) + 40) % 2 === 0 ? C.STEELD : C.V2);
+      if (y > 7) return null;
+      return d > 9 ? (y === 1 || y === 5 ? C.STEEL : (Math.round(Math.atan2(z, x) * 5) + y) % 4 === 0 ? C.MOR : C.SL2) : C.SL;
+    });
+    onTop(P.base, h, v);
+    const s = vx(-26, 26, -2, 44, -26, 26), S = stormPal(s), WH = s.pal("#f2eeff", 0.95, 0.03), LV = s.pal("#d9c2ff", 1.1, 0.04), R = rng(8);
+    for (let i = 0; i < 6 + st; i++) {
+      const r = 4.4 + i * 2.75, y = i * 5.2;
+      for (let k = 0; k < 3; k++) {
+        const a0 = (k / 3) * TAU + i * 0.7, span = 1.2 + R() * 0.4, pts = [];
+        for (let j = 0; j <= 8; j++) { const a = a0 + (j / 8) * span; pts.push([Math.cos(a) * r, y + (j / 8) * 2, Math.sin(a) * r]); }
+        s.path(pts, 0.7, 0.55, i % 2 ? LV : WH);
+      }
+      if (i > 1) for (let k = 0; k < 2; k++) { const a = R() * TAU; s.box(Math.cos(a) * r, y + 1, Math.sin(a) * r, Math.cos(a) * r + 1, y + 2, Math.sin(a) * r, k ? S.SL2 : S.SLH); }
+    }
+    centred(P.spin, s);
+    return { sy: h + 0.7, spinRate: 3.5, muzzle: [0, h + 2.2, 0] };
+  },
+
+  storm_3(P, h, st) { // Thunder Tower: a battlemented slate keep under its own thundercloud
+    const v = vx(-12, 12, 0, 30, -12, 12), C = stormPal(v), T = 24;
+    v.fill((x, y, z) => {
+      const ax = Math.abs(x), az = Math.abs(z), m = Math.max(ax, az), half = y < 3 ? 10 : y > T - 3 ? 10 : 8;
+      if (m > half) return null;
+      if (y > T) return m === half && ((ax === half ? z : x) + 20) % 4 < 2 ? C.SLH : null;     // battlements
+      if (m < half && y < T) return C.SL;
+      if (y === T) return m === half ? C.SLH : C.SL2;
+      const al = ax === half ? z * Math.sign(x) : -x * Math.sign(z);
+      // a zig-zag lightning rune running up each face
+      if (half === 8 && y > 4 && y < T - 4 && Math.abs(al - (Math.floor((y - 4) / 4) % 2 ? 1 : -1) * ((y - 4) % 4 - 1.5)) < 0.7) return C.V2;
+      return mortar(al, y, 3, 5) ? C.MOR : h3(x, y, z) < 0.2 ? C.SLD : C.SL2;
+    }, -10, 10, 0, T + 2, -10, 10);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) v.box(sx * 9, 3, sz * 9, sx * 9, T - 3, sz * 9, (x, y) => (y % 5 === 0 ? C.CU : C.SLH));
+    onTop(P.base, h, v);
+    const f = vx(-16, 16, -18, 10, -12, 12), F = stormPal(f);
+    const blobs = [[0, 2, 0, 9, 4.5, 7], [-7, 1, 1, 6, 4, 5], [7, 1.5, -1, 6.5, 4, 5.5], [2, 5.5, 0, 6, 4, 5], [-3, 4.5, -2, 5, 3.5, 4]];
+    if (st >= 2) blobs.push([11, 3, 2, 4.5, 3, 4], [-11, 3, -1, 4, 3, 4]);
+    for (const [cx, cy, cz, rx, ry, rz] of blobs) f.fill((x, y, z) => {
+      const e = ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 + ((z - cz) / rz) ** 2 + (vnoise(x * 0.4, y * 0.4, z * 0.4) - 0.5) * 0.7;
+      if (e > 1) return null;
+      if (y < cy - ry * 0.55) return vnoise(x * 0.3, 5, z * 0.3) > 0.62 ? F.V1 : F.CLD;
+      return y > cy + ry * 0.3 ? F.CL3 : y > cy - ry * 0.1 ? F.CL2 : F.CL;
+    }, cx - rx - 1, cx + rx + 1, cy - ry - 1, cy + ry + 1, cz - rz - 1, cz + rz + 1);
+    bolt(f, [1, -2, 1], [-2, -16, 2], 91, 5, 2, F.VW, F.V3);
+    if (st >= 1) bolt(f, [-6, -2, -1], [-9, -11, 0], 92, 3, 1.5, F.V3, F.V2);
+    if (st >= 3) bolt(f, [7, -2, 0], [10, -12, 1], 93, 3, 1.5, F.V3, F.V2);
+    centred(P.float, f);
+    return { fy: h + 3.2 + st * 0.15, bob: 0.1, muzzle: [0, h + 2.4, 0] };
+  },
+
+  storm_4(P, h, st) { // Storm Nexus: a great double-pointed crystal hung between four coil pylons, rings spinning round it
+    const v = vx(-14, 14, 0, 28, -14, 14), C = stormCrystalPal(v, stormPal(v));
+    v.fill((x, y, z) => { const ax = Math.abs(x), az = Math.abs(z); if (ax > 10 || az > 10 || ax + az > 15) return null; if (y === 4) return Math.hypot(x, z) < 4 ? C.V2 : ax + az > 13 ? C.STEELH : C.SL2; return (ax === 10 || az === 10 || ax + az === 15) ? (mortar(ax === 10 ? z : x, y, 2, 5) ? C.MOR : C.SL2) : C.SL; }, -10, 10, 0, 4, -10, 10);
+    for (const [x, z] of [[-11, 0], [11, 0], [0, 11], [0, -11]]) {
+      v.box(x - 1, 0, z - 1, x + 1, 2, z + 1, C.SLH);
+      v.box(x, 3, z, x, 22, z, C.STEEL);
+      for (let y = 6; y <= 18; y += 3) v.box(x - 1, y, z - 1, x + 1, y + 1, z + 1, (xx, yy, zz) => (xx === x && zz === z ? C.STEEL : yy === y ? C.CU : C.CUD));
+      v.box(x, 23, z, x, 24, z, C.V3); v.set(x, 25, z, C.VW);
+    }
+    onTop(P.base, h, v);
+    const f = vx(-8, 8, -16, 16, -8, 8), F = stormCrystalPal(f, stormPal(f));
+    bipyr(f, [0, 0, 0], 5.5 + st * 0.4, 13 + st, stormTones(F));
+    f.cyl(0, 0, 0, 1.5, 0, F.VW);
+    centred(P.float, f);
+    const s = vx(-26, 26, -26, 26, -26, 26), S = stormPal(s);
+    const ring = (r, tilt, n, axisV) => { for (let i = 0; i < n; i++) { const a = (i / n) * TAU, x = Math.cos(a) * r, w = Math.sin(a) * r; const [px, py, pz] = axisV ? [x, w, 0] : [x, tilt, w]; s.set(px, py, pz, i % 6 === 0 ? S.V3 : i % 2 ? S.STEEL : S.STEELD); } };
+    ring(19, 0, 48, false); ring(17, 0, 42, true);
+    if (st >= 2) ring(24, 7, 56, false);
+    centred(P.spin, s);
+    return { fy: h + 2.8, sy: h + 2.8, spinRate: 1.4, bob: 0.15, muzzle: [0, h + 2.8, 0] };
+  },
+});
