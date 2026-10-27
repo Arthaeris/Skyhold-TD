@@ -13,6 +13,7 @@ import { createTowerModel, towerStage, towerTemplate } from "./towers.js";
 import { createEnemyRenderer, enemyScale, setEnemyVisScale } from "./enemies.js";
 import { createSparks, createBits, createStreaks, createRings, createProjectiles, createBars, createRoute, createPreviews } from "./effects.js";
 import { createShotFx } from "./shotfx.js";
+import { createStatusFx } from "./statusfx.js";
 import { createPost, QUALITY } from "./post.js";
 import { WORLD } from "./theme.js";
 import { clamp, lerp, easeInOut, TAU, Part } from "./kit.js";
@@ -55,6 +56,7 @@ export function createRenderer(opts) {
   const sparks = createSparks(scene), bits = createBits(scene), streaks = createStreaks(scene), rings = createRings(scene);
   const projs = createProjectiles(scene), bars = createBars(scene), route = createRoute(scene), previews = createPreviews(scene);
   const shot = createShotFx(scene, { sparks, bits, streaks, rings });
+  const sfxStatus = createStatusFx(scene, { sparks, bits, streaks, rings });
   const post = createPost(renderer);
 
   // ---- quality (Riftfall's tiers + automatic step-down) ------------------
@@ -356,7 +358,7 @@ export function createRenderer(opts) {
       }
       r.e = e; r.seen = true; r.alive = e.alive;
     }
-    for (const [id, r] of erec) if (!r.seen) { if (!r.killed) deathFx(r, false); erec.delete(id); }
+    for (const [id, r] of erec) if (!r.seen) { if (!r.killed) deathFx(r, false); erec.delete(id); sfxStatus.forget(id); }
     for (const r of prec.values()) r.seen = false;
     for (const p of state.projectiles) {
       const ri = V ? (V.versus ? p.owner : (p.owner === V.fieldId ? p.corr.index : -1)) : p.corr.index;
@@ -660,7 +662,7 @@ export function createRenderer(opts) {
   }
 
   function syncEnemies(view, alpha, dt) {
-    enemies.begin();
+    enemies.begin(); sfxStatus.begin(dt);
     bars.begin(camera);
     for (const [id, r] of erec) {
       const e = r.e;
@@ -686,11 +688,12 @@ export function createRenderer(opts) {
         if (e.stoneT > 0 || e.shellT > 0) stat = "brittle";
       }
       enemies.add(e.type, p, r.yaw, r.walk, clock + id, s, stat, r.flash * 0.8, frozen && !!e.statuses.frozen, ex);
-      // status motes
-      if (stat) {
-        const k = (statusT.get(id) || 0) + dt;
-        if (k > 0.22) { statusT.set(id, 0); const d = DB.STATUSES[stat]; sparks.spawn({ x: p.x + (Math.random() - 0.5) * 0.6, y: p.y + r.h * (0.3 + Math.random() * 0.6), z: p.z + (Math.random() - 0.5) * 0.6, vy: stat === "burning" || stat === "molten" ? 1.6 : 0.6, color: d.color, life: 0.6, size: 0.32, drag: 1, glow: 1.6 }); }
-        else statusT.set(id, k);
+      // status effects: markers and particles per status (render/statusfx.js), up to three at once
+      if (sk.length) {
+        const list = [];
+        for (const k of sk) { const d = DB.STATUSES[k]; if (d && !d.adaptive) list.push(k); }
+        for (const k of sk) { const d = DB.STATUSES[k]; if (d && d.adaptive) list.push(k); }
+        if (list.length) sfxStatus.add(list, p, r.h, s, clock, id);
       }
       // HP bar, origin ring, markers
       if (e.hidden && Math.random() < dt * 4) sparks.spawn({ x: p.x + (Math.random() - 0.5) * 0.7, y: p.y + r.h * Math.random(), z: p.z + (Math.random() - 0.5) * 0.7, vy: 0.4, color: "#9fd8ff", life: 0.5, size: 0.22, drag: 1, glow: 1.3 });
@@ -716,7 +719,7 @@ export function createRenderer(opts) {
       r.model.root.getWorldPosition(tmpB); tmpB.y = 3.8;
       bars.bar(tmpB, clamp(frac, 0, 1), 2.6, col, 0.5);
     }
-    enemies.end();
+    enemies.end(); sfxStatus.end();
     bars.end();
   }
 
@@ -1055,7 +1058,7 @@ export function createRenderer(opts) {
     const active = V ? ((V.versus ? V.state.players[V.me] : V.field).phase === "prep") : false;
     world.update(dt, clock, active);
     if (V) { syncEnemies(V, alpha, dt); syncProjectiles(alpha); syncOverlays(V); syncBuilders(V, alpha, dt); }
-    else { for (const b of brec.values()) { b.group.visible = false; b.ring.visible = false; } enemies.begin(); enemies.end(); bars.begin(camera); bars.end(); projs.begin(); projs.end(); previews.hideFoot(); previews.hideRange(); route.clear(); }
+    else { for (const b of brec.values()) { b.group.visible = false; b.ring.visible = false; } enemies.begin(); enemies.end(); sfxStatus.begin(0); sfxStatus.end(); bars.begin(camera); bars.end(); projs.begin(); projs.end(); previews.hideFoot(); previews.hideRange(); route.clear(); }
     route.update(clock, mode === "field" && V && V.field && (V.field.phase === "build" || (V.buildMenuOpen)) ? 1 : 0.45);
     sparks.update(dt); bits.update(dt); streaks.update(dt); rings.update(dt);
     syncLabels(V);

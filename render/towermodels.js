@@ -1585,3 +1585,35 @@ Object.assign(VOX_HEADS, {
 
 // shared with render/propmodels.js (obstacles and island props)
 export { firePal, icePal, naturePal, stormPal, lightPal, darkPal, mechPal, abPal, crystal, iceTones, leafTones, darkTones, column, mortar, h3, bipyr, flame, FLAME_COLS, VIOLET_FLAME, stormCrystalPal, stormTones, rotY, hazard };
+
+// ---------------------------------------------------------------------------
+// TOWER ADD-ONS: the Lv 10 crown (a floating gilded circlet set with the element's gems) and the
+// mutation shards (Circle marks a mutated tower in pink: faceted pink crystals with a white heart)
+// ---------------------------------------------------------------------------
+export function crownAddon(P, color, glow) {
+  const U = 0.06;
+  const v2 = new Vox(U, -30, 30, -2, 14, -30, 30);
+  const GO = v2.pal("#d9b84a", 0, 0.04), GOH = v2.pal("#f4da7c", 0, 0.03), GOD = v2.pal("#a8862e", 0, 0.05), GEM = v2.pal(color, 1.7, 0.03), GEMH = v2.pal(glow, 2.1, 0.02);
+  const R = 27.5;
+  v2.fill((x, y, z) => {
+    const d = Math.hypot(x, z), a = Math.atan2(z, x), seg = ((a / TAU) * 8 % 1 + 1) % 1;
+    if (Math.abs(d - R) > 1.3) return null;
+    if (y >= 0 && y <= 2) return y === 1 && Math.abs(seg - 0.5) < 0.04 ? GEM : y === 2 ? GOH : y === 0 ? GOD : GO;
+    const point = 1 - Math.abs(seg - 0.5) * 2;                       // eight crown points between the gems
+    if (y > 2 && y <= 2 + point * 8 && Math.abs(d - R) < 1.3 - (y - 2) * 0.1) return y > point * 8 ? GOH : GO;
+    return null;
+  }, -30, 30, 0, 11, -30, 30);
+  for (let i = 0; i < 8; i++) { const a = ((i + 0.5) / 8) * TAU; v2.set(Math.cos(a) * R, 11, Math.sin(a) * R, GEMH); v2.set(Math.cos(a) * R, 10, Math.sin(a) * R, GEM); }
+  v2.emit(P, 0, 0, 0, 4);
+}
+export function mutationAddon(P, count) {
+  const U = 0.05, v = new Vox(U, -34, 34, -10, 12, -34, 34);
+  const T = [v.pal("#ff9ac8", 1.3, 0.03), v.pal("#ff5fa2", 1.5, 0.03), v.pal("#e0508c", 0, 0.03), v.pal("#b8306c", 0, 0.04), v.pal("#ffc2dd", 1.6, 0.02), v.pal("#ffffff", 2.2, 0.01)];
+  for (let i = 0; i < count; i++) {
+    const a = i * Math.PI, cx = Math.cos(a) * 29, cz = Math.sin(a) * 29;
+    bipyr(v, [cx, 0, cz], 3.4, 7.5, T);
+    v.set(cx, 0, cz, T[5]);
+    for (const [dx, dz, h] of [[4, 2, 3], [-3, -4, 2.5]]) bipyr(v, [cx + dx, -3, cz + dz], 1.4, h, T);
+  }
+  v.emit(P, 0, 0, 0, 4);
+}

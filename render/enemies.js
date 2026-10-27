@@ -9,6 +9,7 @@ import * as THREE from "three";
 import { Part, TAU, col } from "./kit.js";
 import { MOB_MODELS } from "./mobmodels.js";
 import { BOSS_MODELS } from "./bossmodels.js";
+import { iceChunkGeometry } from "./statusfx.js";
 
 // ---------------------------------------------------------------------------
 // MODELS — parts drawn at 1 unit ≈ 1 tile, facing +z. anim: what the part does while walking.
@@ -256,8 +257,8 @@ export function createEnemyRenderer(scene) {
   for (const id of ["grunt", "runner", "swarm", "brute", "tank"]) getType(id);
 
   // ice blocks around frozen enemies
-  const iceGeo = new THREE.BoxGeometry(1, 1, 1);
-  const iceMat = new THREE.MeshLambertMaterial({ color: "#bfefff", transparent: true, opacity: 0.45, emissive: new THREE.Color("#3a8aff"), emissiveIntensity: 0.4, depthWrite: false });
+  const iceGeo = iceChunkGeometry();
+  const iceMat = new THREE.MeshLambertMaterial({ color: "#ffffff", vertexColors: true, transparent: true, opacity: 0.55, emissive: new THREE.Color("#3a8aff"), emissiveIntensity: 0.35, depthWrite: false });
   let iceCap = 32;
   let ice = new THREE.InstancedMesh(iceGeo, iceMat, iceCap); ice.frustumCulled = false; ice.count = 0; root.add(ice);
   // shield bubbles (barriers, aegis shields, divine shields) and flyer shadows

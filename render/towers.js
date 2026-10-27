@@ -12,7 +12,7 @@
    The aim part's +z faces the target. */
 import * as THREE from "three";
 import { Part, rng, shade, mix, TAU } from "./kit.js";
-import { VOX_PLINTH, VOX_HEADS } from "./towermodels.js";
+import { VOX_PLINTH, VOX_HEADS, crownAddon, mutationAddon } from "./towermodels.js";
 
 const STAGE_OF = (level) => (level >= 10 ? 3 : level >= 7 ? 2 : level >= 4 ? 1 : 0);
 export const towerStage = STAGE_OF;
@@ -865,14 +865,13 @@ function assemble(def, stage, mutCount, E) {
   // stage 3 (Lv 10): a crown halo of the element's light
   if (stage >= 3) {
     const crown = new Part(31);
-    hring(crown, 1.65, 0, E.glow, 10, 0.14, 1.6, 0.08);
-    for (let i = 0; i < 4; i++) { const a = (i / 4) * TAU + 0.4; crown.g(0.22, 0.4, 0.22, E.color, Math.cos(a) * 1.65, 0.25, Math.sin(a) * 1.65, 2.6, { rotY: 0.78 }); }
+    crownAddon(crown, E.color, E.glow);
     const cg = crown.build(false); cg.name = "crown"; cg.position.y = h + 0.15; root.add(cg);
   }
   // mutations: orbiting pink shards (Circle marks a mutated tower with a pink pip)
   if (mutCount > 0) {
     const mp = new Part(41);
-    for (let i = 0; i < mutCount; i++) { const a = i * Math.PI; mp.g(0.3, 0.5, 0.3, "#ff5fa2", Math.cos(a) * 1.45, 0, Math.sin(a) * 1.45, 2.6, { rotY: 0.78, rotZ: 0.3 }); mp.g(0.16, 0.16, 0.16, "#ffffff", Math.cos(a) * 1.45, 0.4, Math.sin(a) * 1.45, 3); }
+    mutationAddon(mp, mutCount);
     const mg = mp.build(false); mg.name = "mut"; mg.position.y = h + 1.1; root.add(mg);
   }
   const muzzle = new THREE.Object3D(); muzzle.name = "muzzle";
