@@ -385,6 +385,8 @@ function startRun(cfg, seed, replay, online) {
   document.body.dataset.spectate = replay ? "replay" : "";
   game.me = online ? online.me : 0; game.speed = 1; game.clock = 0; game.paused = false;
   game.summoning = false; hideSummonCard();
+  // the voxel bosses take a moment to build: do it now, in idle slices, not when they first walk in
+  try { renderer.warmEnemies(["boss", ...(cfg.challenge ? [(CHALLENGES.find((c) => c.id === cfg.challenge.id) || {}).boss] : ["endboss"])].filter(Boolean)); } catch (e) { /* fine */ }
   if (!online && game.online) stopOnline();
   game.view = "world"; game.activeCorridor = 0;
   game.selectedTowerId = game.selectedEnemyId = game.buildTile = null; game.buildPreview = null;

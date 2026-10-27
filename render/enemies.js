@@ -8,6 +8,7 @@
 import * as THREE from "three";
 import { Part, TAU, col } from "./kit.js";
 import { MOB_MODELS } from "./mobmodels.js";
+import { BOSS_MODELS } from "./bossmodels.js";
 
 // ---------------------------------------------------------------------------
 // MODELS — parts drawn at 1 unit ≈ 1 tile, facing +z. anim: what the part does while walking.
@@ -171,6 +172,7 @@ const STATUS_TINT = {
   corrupted: "#ffb0d8", fracture: "#ffc0e0", entropy: "#ffd0e8",
 };
 Object.assign(MODELS, MOB_MODELS); // the expanded bestiary (render/mobmodels.js)
+Object.assign(MODELS, BOSS_MODELS); // the bosses, sculpted in true voxels (render/bossmodels.js)
 export const enemyModels = MODELS;
 
 // ---------------------------------------------------------------------------
@@ -341,6 +343,8 @@ export function createEnemyRenderer(scene) {
       bub.count = nBub; bub.visible = nBub > 0; bub.instanceMatrix.needsUpdate = true; if (bub.instanceColor) bub.instanceColor.needsUpdate = true;
       sh.count = nSh; sh.visible = nSh > 0; sh.instanceMatrix.needsUpdate = true;
     },
+    // build models ahead of their first appearance (the voxel bosses take a moment), one per slice
+    warm(ids) { const q = ids.slice(); const next = () => { const id = q.shift(); if (!id) return; getType(id); setTimeout(next, 60); }; setTimeout(next, 200); },
     heightOf(type) { const M = MODELS[type] || MODELS.grunt; return M.height + (M.hover || 0); },
   };
 }

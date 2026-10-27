@@ -1064,6 +1064,7 @@ export function createRenderer(opts) {
 
   return {
     render, resize, snapshotPositions, onEvents, previewRing, pick, panBy, zoomAt, setMode, enterField, emote,
+    warmEnemies(ids) { enemies.warm(ids); },
     setFollow(id) { follow = id; if (id != null) nudge = null; },
     // the seal breaking: a shockwave and a fountain of sparks out of the Vortex
     flashVortex() {
