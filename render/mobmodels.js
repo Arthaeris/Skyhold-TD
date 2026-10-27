@@ -16,6 +16,7 @@
    These are first-pass placeholders: replace any one by editing its spec. */
 import { TAU, shade, mix } from "./kit.js";
 import { SKIN_SPECS } from "../content/skins.js";
+import { voxelBuilderModel } from "./buildermodels.js";
 
 // ---------------------------------------------------------------------------
 // extras: small builders that decorate a part. (P, o, a) — o = spec, a = anchor {x,y,z,s}
@@ -429,6 +430,9 @@ export const BUILDER_SPECS = {
 // every unlockable skin (Sealbreakers, challenge looks per element) from content/skins.js
 for (const k in SKIN_SPECS) if (!BUILDER_SPECS[k]) BUILDER_SPECS[k] = SKIN_SPECS[k];
 export function builderModel(id) {
+  return voxelBuilderModel(id);
+}
+export function legacyBuilderModel(id) {
   const o = BUILDER_SPECS[id] || BUILDER_SPECS.fire;
   const s = 0.7, c1 = o.c1, c2 = o.c2;
   const isFire = id === "fire";
