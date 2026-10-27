@@ -10,11 +10,13 @@
    Coordinates: 1 world unit = 1 grid tile. Corridor-local space: x = u - cols/2, z = v - rows/2 (u = column,
    v = row, both in tiles; row 0 = exit, last row = entrance), y = 0 is the build surface. */
 import * as THREE from "three";
-import { Batch, Part, MAT, rng, noise, fbm, col, shade, mix, clamp, lerp, smooth, TAU, pick } from "./kit.js";
+import { Batch, Part, MAT, rng, noise, fbm, col, shade, mix, clamp, lerp, smooth, TAU, pick, hash2 } from "./kit.js";
+const h3i = (a, b) => hash2(a * 7 + 3, b * 13 - 5);
 import { THEMES, WORLD } from "./theme.js";
 import { createBackdrop, fallMesh, crystal, decorate, FLOAT_KIND } from "./backdrop.js";
 import { VOX_OBSTACLES, VOX_RIM } from "./propmodels.js";
-import { portalEntrance, portalExit, gateIsland, menhir, rubble, chainLinkGeometry, padlockPart, steppingStone, bridgeArrow } from "./ringmodels.js";
+import { portalEntrance, portalExit, gateIsland, menhir, rubble, chainLinkGeometry, padlockPart, steppingStone, bridgeArrow, shrine, floatRock } from "./ringmodels.js";
+import { Vox, vnoise } from "./voxkit.js";
 
 export const COLS = 31, ROWS = 61;
 const SIDE = 3.2, END = 6;             // rim width beside / beyond the build grid
@@ -496,108 +498,132 @@ export function buildCorridorIsland(DB, element, grid, seed = 1) {
     if (dzEnd > 0 && kind !== "plaza") h = Math.min(h, Math.max(0.2, (dzEnd - 0.8) * 0.7));
     tops.set(tk(x, z), { x, z, cx, cz, d, h, kind, dg });
   }
-  const topH = (x, z) => { const t = tops.get(tk(x, z)); if (t) return t.h; return Math.abs(x + LX) < COLS / 2 && Math.abs(z + LZ) < ROWS / 2 ? 0 : -99; };
+  // ---- the land as half-unit voxels: grass/frost/ash tops, strata in the cliffs, tufts on the lip,
+  // stone-tiled portal plazas and rock outcrops built into the terrain. Voxel boundaries fall on the
+  // grid's tile edges (multiples of 0.5), so the curb never covers a build cell.
+  const TS = 2;
+  const tv = new Vox(0.5, Math.floor((X0 - EXT - 1) * TS), Math.ceil((X1 + EXT + 1) * TS), -3, 26, Math.floor((Z0 - 4) * TS), Math.ceil((Z1 + 4) * TS));
+  const TP = {
+    top: topCol.map((c) => [tv.pal(c, 0, 0.06), tv.pal(shade(c, 1.08), 0, 0.05), tv.pal(shade(c, 0.92), 0, 0.06)]),
+    tuft: topCol.map((c) => tv.pal(shade(c, 1.2), 0, 0.06)),
+    soil: tv.pal(T.soil, 0, 0.07), soil2: tv.pal(shade(T.soil, 0.85), 0, 0.07), soilE: tv.pal(shade(T.soil, 1.07), 0, 0.07),
+    rim: T.rim.map((c) => tv.pal(c, 0, 0.06)), rimTop: tv.pal(T.rimTop, 0, 0.05), rimTop2: tv.pal(shade(T.rimTop, 0.86), 0, 0.05), seam: tv.pal(shade(T.rim[1], 0.72), 0, 0.04),
+    rock: tv.pal(T.rock, 0, 0.07), rockH: tv.pal(shade(T.rock, 1.18), 0, 0.06),
+  };
+  const fill = (cx, cz, top, fn) => { const x0 = Math.round((cx - 0.5) * TS), z0 = Math.round((cz - 0.5) * TS); for (let ix = 0; ix < TS; ix++) for (let iz = 0; iz < TS; iz++) { const x = x0 + ix, z = z0 + iz, tj = top(x, z); for (let y = -3; y <= tj; y++) tv.set(x, y, z, fn(x, y, z, tj)); } };
+  // heights between cell centres (bilinear over the neighbouring land), so slopes step in half units
+  const cellH = (x, z) => { const t = tops.get(tk(x, z)); if (t) return t.kind === "land" ? t.h : null; return Math.abs(x + LX) < COLS / 2 && Math.abs(z + LZ) < ROWS / 2 ? 0 : null; };
+  const smoothH = (px, pz, own) => {
+    const x0 = Math.floor(px), z0 = Math.floor(pz), fx = px - x0, fz = pz - z0;
+    const g = (x, z) => { const v = cellH(x, z); return v == null ? own : v; };
+    return (g(x0, z0) * (1 - fx) + g(x0 + 1, z0) * fx) * (1 - fz) + (g(x0, z0 + 1) * (1 - fx) + g(x0 + 1, z0 + 1) * fx) * fz;
+  };
+  const soilAt = (x, y, z) => (vnoise(x * 0.18, y * 0.35, z * 0.18) > 0.68 ? TP.rock : ((y + 40) % 3 === 0 ? TP.soil2 : TP.soil));
   for (const t of tops.values()) {
     const { cx, cz, h, kind } = t;
-    const n = [topH(t.x + 1, t.z), topH(t.x - 1, t.z), topH(t.x, t.z + 1), topH(t.x, t.z - 1)];
-    const sk = (n[0] >= h ? 1 : 0) | (n[1] >= h ? 2 : 0) | (n[2] >= h ? 16 : 0) | (n[3] >= h ? 32 : 0);
+    const topJ = Math.round(h * TS) - 1;
     if (kind === "plaza") {
-      const ring = Math.max(Math.abs(cx) - 5.5, Math.abs(cz - (cz < 0 ? oz - 3 : -oz + 3)) - 2.2);
-      // the portal pads sit just below the swirl discs, so nothing ever covers the portal effects
-      terr.box(0.98, 1.1, 0.98, pick(T.rim, r), cx, (ring > 0 ? -0.43 : -0.6), cz, { top: shade(T.rimTop, 0.85 + r() * 0.2), skip: 8, jitter: 0.06 });
+      // dressed stone tiles; the portal pads sit just below the swirl discs
+      fill(cx, cz, () => topJ, (x, y, z, tj) => (y === tj ? (((x + 99) % 2 === 0 && (z + 99) % 2 === 0) ? TP.seam : ((Math.floor(x / 2) + Math.floor(z / 2)) & 1 ? TP.rimTop : TP.rimTop2)) : TP.rim[(x + y + z + 99) % 3]));
       continue;
     }
     if (kind === "curb") {
-      const stone = r() < 0.3;
-      const gc2 = topCol[Math.floor(r() * 4)];
-      terr.box(1.0, h + 0.9, 1.0, stone ? pick(T.rim, r) : T.soil, cx, (h - 0.9) / 2, cz, { top: stone ? shade(T.rimTop, 0.85 + r() * 0.2) : shade(gc2, 0.95 + r() * 0.1), skip: 8 | sk, jitter: 0.08 });
+      const stone = r() < 0.3, gi = Math.floor(r() * 4);
+      fill(cx, cz, () => topJ, (x, y, z, tj) => (y === tj ? (stone ? TP.rimTop : TP.top[gi][(x + z) & 1]) : stone ? TP.rim[(y + 99) % 3] : soilAt(x, y, z)));
       continue;
     }
-    const g = topCol[clamp(Math.floor(fbm(cx * 0.09 + seed, cz * 0.09) * 4.4 - 0.7), 0, 3)];
+    const gi = clamp(Math.floor(fbm(cx * 0.09 + seed, cz * 0.09) * 4.4 - 0.7), 0, 3);
     const edge = t.d > -1.3;
-    terr.box(1.0, h + 1.2, 1.0, edge ? shade(T.soil, 1.05) : T.soil, cx, (h - 1.2) / 2, cz, { top: shade(g, 0.94 + r() * 0.12), skip: 8 | sk, jitter: 0.07, ao: 0.8 });
-    // grass/frost tufts on the lip, props and bigger landmarks further in
     const endBand = Math.abs(cz) - ROWS / 2;   // > 0: in front of / behind the grid's ends
-    if (edge && r() < 0.35 && !(endBand > 0 && endBand < 2.5)) terr.box(0.35, 0.3, 0.35, shade(g, 1.15), cx + (r() - 0.5) * 0.6, h + 0.15, cz + (r() - 0.5) * 0.6);
     const nearPortal = Math.min(Math.hypot(cx, cz - (ROWS / 2 + 3)), Math.hypot(cx, cz + (ROWS / 2 + 3))) < 10 || (endBand > -1 && endBand < 8);
+    const bumpy = !edge && !nearPortal && t.dg > 2 && h >= 1;
+    const smoothOK = !nearPortal && t.dg > 1.6 && !(endBand > -1);
+    fill(cx, cz, (x, z) => (smoothOK ? Math.max(0, Math.round(smoothH(x / TS + 0.25 - LX, z / TS + 0.25 - LZ, h) * TS) - 1) : topJ) + (bumpy && vnoise(x * 0.33 + seed, 3, z * 0.33) > 0.64 ? 1 : 0), (x, y, z, tj) => {
+      if (y === tj) return TP.top[gi][vnoise(x * 0.3, 7, z * 0.3) > 0.7 ? 1 : 0];
+      if (y === tj - 1 && edge) return TP.top[gi][2];                                   // the turf hangs over the lip
+      return edge && y > tj - 3 ? TP.soilE : soilAt(x, y, z);
+    });
+    // grass/frost tufts on the lip, props and bigger landmarks further in
+    if (edge && r() < 0.35 && !(endBand > 0 && endBand < 2.5)) tv.set(Math.round((cx - 0.5) * TS) + (r() < 0.5 ? 0 : 1), topJ + 1, Math.round((cz - 0.5) * TS) + (r() < 0.5 ? 0 : 1), TP.tuft[gi]);
     if (!edge && !nearPortal && t.dg > 3 && r() < 0.03) {
-      // rock outcrop
-      const w0 = 1.2 + r() * 1.4;
-      for (let q = 0; q < 3; q++) terr.box(w0 * (1 - q * 0.28), 0.9 + r() * 0.9, w0 * (0.9 - q * 0.25), shade(q ? T.rock : T.rim[1], 1.05 + q * 0.06), cx + (r() - 0.5) * 0.6, h + 0.45 + q * 0.85, cz + (r() - 0.5) * 0.6, { rotY: r() * TAU, top: q === 2 ? shade(g, 1.05) : undefined, skip: 8, jitter: 0.06 });
+      // rock outcrop, built into the terrain
+      const w0 = (1.2 + r() * 1.4) * TS, hx = Math.round(cx * TS), hz = Math.round(cz * TS), hh = (1.6 + r() * 1.6) * TS, sd = r() * 9;
+      tv.fill((x, y, z) => {
+        const yy = y - topJ, rr = w0 * (1 - yy / hh) * 0.75 + 0.6;
+        if (yy < 0 || yy > hh) return null;
+        const d = Math.hypot(x - hx, (z - hz) * 1.15) + (vnoise(x * 0.4 + sd, y * 0.4, z * 0.4) - 0.5) * 2.4;
+        if (d > rr) return null;
+        return yy > hh - 1.5 || (d > rr - 1 && vnoise(x * 0.5, y * 0.2, z * 0.5 + sd) > 0.6) ? TP.top[gi][1] : (y & 1 ? TP.rim[1] : TP.rock);
+      }, hx - w0, hx + w0, topJ, topJ + hh, hz - w0, hz + w0);
       continue;
     }
     if (!edge && !nearPortal && t.dg > 1.6) {
       const k = r();
-      if (k < 0.08) RIM[element](props, glow, cx, h, cz, r);
-      else if (k < 0.2) { /* bare ground (voxel props are bigger, so fewer of them) */ }
-      else if (k < 0.25 && t.dg > 2.5) decorate(FLOAT_KIND[element], props, glow, cx, h, cz, 0.5 + r() * 0.3, r, T);
+      if (k < 0.065) RIM[element](props, glow, cx, h, cz, r);
+      else if (k < 0.25) { /* bare ground (voxel props are bigger, so fewer of them) */ }
       else if (k < 0.27 && crystally) crystal(glow, cx, h, cz, 0.35 + r() * 0.25, T.accent, r);
     }
   }
+  tv.emit({ lit: terr, glow }, 0.25, 0.25, 0.25, 8);
 
   // a small elemental shrine on the widest stretch of each side
   for (const sx of [-1, 1]) {
     const best = [...tops.values()].filter((t) => t.kind === "land" && Math.sign(t.cx) === sx && t.d < -2.5 && t.dg > 3.5 && Math.abs(t.cz) < ROWS / 2 - 3).sort((p, q) => q.dg - p.dg)[0];
     if (!best) continue;
     const { cx, cz, h } = best;
-    terr.box(3.2, 0.5, 3.2, WORLD.stone[1], cx, h + 0.25, cz, { top: WORLD.stoneTop, skip: 8 });
-    for (const [px, pz] of [[-1.1, -1.1], [1.1, -1.1], [-1.1, 1.1], [1.1, 1.1]]) terr.box(0.55, 2.2, 0.55, WORLD.stone[2], cx + px, h + 1.6, cz + pz, { top: WORLD.stoneTop });
-    terr.box(3.0, 0.4, 3.0, WORLD.stone[0], cx, h + 2.9, cz, { top: WORLD.stoneTop });
-    glow.box(0.8, 0.8, 0.8, T.accent, cx, h + 1.5, cz, { glow: 2.4, jitter: 0, ao: 1, rotY: 0.78, rotX: 0.6 });
+    shrine(props, glow, cx, h, cz, T.accent);
   }
 
-  // ---- the underside: an inverted mountain on a 2×2 grid ----------------
-  const Q = 2, under = new Map(), uk = (i, j) => i * 1000 + j;
-  for (let j = Math.floor((Z0 - 3) / Q); j <= Math.ceil((Z1 + 3) / Q); j++) for (let i = Math.floor((X0 - EXT) / Q); i <= Math.ceil((X1 + EXT) / Q); i++) {
-    const ux = i * Q + Q / 2, uz = j * Q + Q / 2;
-    const d = landD(ux, uz);
+  // ---- the underside: an inverted mountain of one-unit voxels, banded into strata, with lava seams
+  // (fire) and stalactites under its low points --------------------------------------------------
+  const TOPY = -0.5;
+  const depthAt = new Map();
+  for (let z = Math.floor(Z0 - 3); z <= Math.ceil(Z1 + 3); z++) for (let x = Math.floor(X0 - EXT); x <= Math.ceil(X1 + EXT); x++) {
+    const ux = x + 0.5, uz = z + 0.5, d = landD(ux, uz);
     if (d > -0.4) continue;
     const coast = -d, e = clamp(coast / 15, 0, 1);
     const lobe = Math.max(0, fbm(ux * 0.12 + 40 + seed, uz * 0.12) - 0.52) / 0.48;
-    let depth = 1.5 + Math.pow(e, 0.85) * 22 * (0.55 + 0.9 * fbm(ux * 0.07 + seed, uz * 0.07 - seed)) + 16 * Math.pow(lobe, 1.4) * e;
-    depth = Math.round(depth / 1.5) * 1.5;
-    under.set(uk(i, j), { i, j, ux, uz, depth, coast });
+    const depth = Math.round(1.5 + Math.pow(e, 0.85) * 22 * (0.55 + 0.9 * fbm(ux * 0.07 + seed, uz * 0.07 - seed)) + 16 * Math.pow(lobe, 1.4) * e + (noise(ux * 0.6, uz * 0.6) - 0.5) * 1.5);
+    depthAt.set(x * 1000 + z, { x, z, depth: Math.max(1, depth), coast });
   }
-  const dep = (i, j) => { const u = under.get(uk(i, j)); return u ? u.depth : -1; };
-  const BAND = 3, TOPY = -0.5;
+  const DA = (x, z) => { const u = depthAt.get(x * 1000 + z); return u ? u.depth : 0; };
+  const uvx = new Vox(1, Math.floor(X0 - EXT - 1), Math.ceil(X1 + EXT + 1), -52, -1, Math.floor(Z0 - 4), Math.ceil(Z1 + 4));
+  const strata = [];
+  for (let b = 0; b < 18; b++) { const tt = clamp((b * 3) / 26, 0, 1), base = b === 0 ? T.soil : mix(T.rock, T.deep, tt); strata.push([uvx.pal(shade(base, 1.04), 0, 0.07), uvx.pal(shade(base, 0.92), 0, 0.07)]); }
+  const VEIN = uvx.pal(T.hot, 1.9, 0.1), VEIN2 = uvx.pal(T.accent, 1.6, 0.1), STAL = uvx.pal(shade(T.deep, 0.88), 0, 0.07), CRY = uvx.pal(T.accent, 1.6, 0.06);
   const fireVein = element === "fire";
-  for (const u of under.values()) {
-    const n = [dep(u.i + 1, u.j), dep(u.i - 1, u.j), dep(u.i, u.j + 1), dep(u.i, u.j - 1)];
-    let y = 0, b = 0;
-    while (y < u.depth) {
-      const y1 = Math.min(u.depth, (b + 1) * BAND);
-      const sk = (n[0] >= y1 ? 1 : 0) | (n[1] >= y1 ? 2 : 0) | (n[2] >= y1 ? 16 : 0) | (n[3] >= y1 ? 32 : 0);
-      const tt = clamp(y / 26, 0, 1);
-      const base = b === 0 ? T.soil : mix(T.rock, T.deep, tt);
-      const colr = shade(base, (b % 2 ? 0.94 : 1.04) * (0.96 + noise(u.i * 0.4 + b, u.j * 0.4) * 0.1));
-      const inset = b === 0 ? 0 : Math.min(0.5, b * 0.05);
-      terr.box(Q - inset + 0.04, y1 - y, Q - inset + 0.04, colr, u.ux, TOPY - (y + y1) / 2, u.uz, { skip: 4 | 8 | sk, jitter: 0.06, ao: 1 });
-      if (fireVein && b > 0 && u.coast < 4 && r() < 0.06) glow.box(Q + 0.12, 0.22, Q + 0.12, T.hot, u.ux, TOPY - y - 0.3, u.uz, { glow: 2.1, jitter: 0, ao: 1 });
-      y = y1; b++;
+  for (const u of depthAt.values()) {
+    for (let k = 1; k <= u.depth; k++) {
+      const b = Math.floor((k - 1) / 3), pal = strata[Math.min(17, b)];
+      let p = pal[b & 1];
+      if (fireVein && b > 0 && (k - 1) % 3 === 0 && u.coast < 5 && vnoise(u.x * 0.25, k * 0.1, u.z * 0.25) > 0.6) p = vnoise(u.x, k, u.z) > 0.5 ? VEIN : VEIN2;
+      uvx.set(u.x, -k, u.z, p);
     }
     // stalactites under local low points
-    if (u.depth > 7 && n.every((v) => v <= u.depth)) {
-      let w = 1.5, yy = TOPY - u.depth;
-      for (let k = 0; k < 3; k++) { const hh = 1.6 + r() * 1.4; terr.box(w, hh, w, shade(T.deep, 0.9), u.ux + (r() - 0.5) * 0.3, yy - hh / 2, u.uz + (r() - 0.5) * 0.3, { skip: 4, jitter: 0.05, ao: 1 }); yy -= hh; w *= 0.62; }
-      if (crystally && r() < 0.6) glow.box(0.45, 1.4, 0.45, T.accent, u.ux, yy - 0.5, u.uz, { glow: 2.0, jitter: 0, ao: 1 });
-      if (fireVein && r() < 0.7) glow.box(0.35, 0.9, 0.35, T.hot, u.ux, yy - 0.3, u.uz, { glow: 2.3, jitter: 0, ao: 1 });
+    const n = [DA(u.x + 1, u.z), DA(u.x - 1, u.z), DA(u.x, u.z + 1), DA(u.x, u.z - 1)];
+    if (u.depth > 7 && n.every((v) => v <= u.depth) && r() < 0.8) {
+      const L = 3 + Math.floor(r() * 5);
+      for (let k = 1; k <= L; k++) {
+        uvx.set(u.x, -u.depth - k, u.z, k === L && (crystally || fireVein) ? (fireVein ? VEIN : CRY) : STAL);
+        if (k <= L / 3) for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (DA(u.x + dx, u.z + dz) < u.depth + k) uvx.set(u.x + dx, -u.depth - k, u.z + dz, STAL);
+      }
     }
     // roots, icicles, drips hanging from the lip
-    if (u.coast < 2.6 && r() < 0.32) HANG[element](props, glow, u.ux + (r() - 0.5) * 1.2, TOPY - Math.min(u.depth, 2.5), u.uz + (r() - 0.5) * 1.2, r);
+    if (u.coast < 2.6 && r() < 0.16) HANG[element](props, glow, u.x + 0.5 + (r() - 0.5) * 1.2, TOPY - Math.min(u.depth, 2.5), u.z + 0.5 + (r() - 0.5) * 1.2, r);
     // crystals jutting out of the rock
-    if (crystally && u.coast > 1.5 && u.coast < 5 && r() < 0.05) {
-      glow.push(u.ux, TOPY - u.depth * 0.45, u.uz, r() * TAU, Math.PI * (0.62 + r() * 0.2), 0, 1);
+    if (crystally && u.coast > 1.5 && u.coast < 5 && r() < 0.012) {
+      glow.push(u.x + 0.5, TOPY - u.depth * 0.45, u.z + 0.5, r() * TAU, Math.PI * (0.62 + r() * 0.2), 0, 1);
       crystal(glow, 0, 0, 0, 0.5 + r() * 0.35, T.accent, r);
       glow.pop();
     }
   }
+  const uvc = uvx.resample(1.5); uvc.emit({ lit: terr, glow }, 0.5, 0.5, 0.5, 8);
   // loose rocks drifting beside and beneath the island
   for (let k = 0; k < 12; k++) {
     const a = r() * TAU, side = Math.cos(a), along = Math.sin(a);
     const px = side * (HALF_W + 4 + r() * 8), pz = along * (HALF_L - 6) * (0.2 + r() * 0.8), py = -3 - r() * 22;
     const s2 = 0.8 + r() * 1.6;
-    terr.box(s2 * 1.6, s2, s2 * 1.4, T.rock, px, py, pz, { rotY: r() * TAU, top: topCol[1], jitter: 0.08 });
-    terr.box(s2, s2 * 1.1, s2 * 0.9, shade(T.deep, 1.1), px + 0.2, py - s2, pz - 0.1, { rotY: r() * TAU, skip: 4 });
+    floatRock(terr, px, py, pz, r() * TAU, s2 * 0.55, topCol[1], T.rock, T.deep, k % 3);
     if (crystally && r() < 0.4) glow.box(0.3, 0.9, 0.3, T.accent, px, py + s2 * 0.9, pz, { glow: 1.9, jitter: 0, ao: 1, rotZ: 0.3 });
   }
   // falls pouring off the long sides (water, lava, void…), fed by a little spring on the lip

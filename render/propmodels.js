@@ -158,10 +158,10 @@ const S = {
     out(P, v);
   },
   bigTree(P, k, r) {
-    const v = vox(-14, 14, 0, 52, -14, 14), C = naturePal(v), H = 24 + k * 5;
+    const v = vox(-14, 14, 0, 52, -14, 14), C = naturePal(v), H = 20 + k * 4;
     v.fill((x, y, z) => { const d = Math.hypot(x, z), rr = 2.4 + Math.max(0, 3 - y) * 0.8; return d <= rr ? ((Math.round(Math.atan2(z, x) * 3) + (y >> 2)) & 1 ? C.BARK : C.BARK2) : null; }, -6, 6, 0, H, -6, 6);
     for (const [bx, bz] of [[1, 0.3], [-0.6, 0.9], [-0.4, -1]]) v.path([[0, H - 6, 0], [bx * 5, H - 1, bz * 5]], 1.3, 0.8, C.BARK2);
-    const cl = [[0, H + 6, 0, 11, 7, 11], [5, H + 2, 3, 6, 4.5, 6], [-5, H + 3, -3, 6, 4.5, 6], [1, H + 11, -1, 7, 4.5, 7]];
+    const cl = [[0, H + 5, 0, 9.5, 6, 9.5], [5, H + 2, 3, 5, 4, 5], [-4, H + 9, -2, 6, 4, 6]];
     for (const [cx, cy, cz, rx, ry, rz] of cl) v.fill((x, y, z) => {
       const e = ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 + ((z - cz) / rz) ** 2 + (vnoise(x * 0.35, y * 0.35, z * 0.35) - 0.5) * 0.8;
       if (e > 1) return null;
@@ -340,7 +340,7 @@ const S = {
 // ---------------------------------------------------------------------------
 // OBSTACLES (b = lit batch, g = glow batch, around x, 0, z) and island props (on the ground at x, y, z)
 // ---------------------------------------------------------------------------
-const OB_RES = 1.5, RIM_RES = 1.6;
+const OB_RES = 1.5, RIM_RES = 2;
 const ob = (key) => (b, g, x, z, r) => { RES = OB_RES; place(b, g, x, 0, z, r, key, S[key]); };
 export const VOX_OBSTACLES = {
   fire: [ob("lavaRock"), ob("obsidianPillar")],

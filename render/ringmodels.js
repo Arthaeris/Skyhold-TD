@@ -11,6 +11,8 @@ import { WORLD } from "./theme.js";
 import { crystal, h3 } from "./towermodels.js";
 
 const cache = new Map();
+// mesh a sculpt f times coarser (sitting on the ground at y = 0 when ground is set)
+const emitR = (P, v, f, ground = true) => { const w = v.resample(f); w.emit(P, 0, ground ? w.u / 2 : 0, 0, 4); };
 function template(key, build) {
   let t = cache.get(key);
   if (!t) { const P = new Part(1); build(P); t = { lit: P.lit, glow: P.glow }; cache.set(key, t); }
@@ -68,7 +70,7 @@ export function portalEntrance(b, g, zc, accent) {
       v.fill((x, y, z) => { const ax = Math.abs(x - cx), az = Math.abs(z), half = y < 3 ? 6 : 5 - Math.floor((y - 3) / 6); if (ax > half || az > half) return null; return y === 17 ? C.TOP2 : ax === half || az === half ? block(C, ax === half ? z : x, sx, y) : C.S1; }, cx - 6, cx + 6, 0, 17, -6, 6);
       crystal(v, cx, 18, 0, 2.6, 8, accTones(C));
     }
-    v.emit(P, 0, U / 2, 0, 4);
+    emitR(P, v, 1.25);
   });
   stamp(b, g, t, 0, 0, zc);
 }
@@ -95,7 +97,7 @@ export function portalExit(b, g, zc, accent) {
       v.fill((x, y, z) => { const ax = Math.abs(x - cx), az = Math.abs(z); if (ax > 5 || az > 5) return null; return y === 27 ? C.TOP2 : ax === 5 || az === 5 ? block(C, ax === 5 ? z : x, sx + 3, y) : C.S1; }, cx - 5, cx + 5, 0, 27, -5, 5);
       crystal(v, cx, 28, 0, 2.4, 9, accTones(C));
     }
-    v.emit(P, 0, U / 2, 0, 4);
+    emitR(P, v, 1.25);
   });
   stamp(b, g, t, 0, 0, zc);
 }
@@ -132,7 +134,7 @@ export function gateIsland(b, g, accent, color, soil, rock, deep) {
       v.fill((x, y, z) => { const ax = Math.abs(x - px), az = Math.abs(z - pz); if (ax > 4 || az > 4) return null; if (y >= ph) return ax <= 6 && az <= 6 ? C.TOP2 : null; return ax === 4 || az === 4 ? block(C, ax === 4 ? z : x, sx, y, 5, 4) : C.S1; }, px - 6, px + 6, 6, ph + 1, pz - 6, pz + 6);
       crystal(v, px, ph + 2, pz, 3, 10, accTones(CC));
     }
-    v.emit(P, 0, U / 2, 0, 4);
+    emitR(P, v, 1.5);
   });
   // the underside: an inverted rock cone (coarse voxels, it's seen from afar)
   const under = template("gund|" + soil + "|" + rock + "|" + deep, (P) => {
@@ -220,7 +222,7 @@ export function steppingStone(b, x, y, z, a, k) {
       if (y < bottom || y > 2) return null;
       return y === 2 ? (e > 0.75 ? C.TOP : C.TOP2) : y > -1 ? C.S1 : vnoise(x * 0.4, y * 0.4, z * 0.4) > 0.55 ? C.S2 : C.DEEP;
     });
-    v.emit(P, 0, 0, 0, 4);
+    emitR(P, v, 1.5, false);
   });
   stamp(b, null, t, x, y, z, a);
 }
@@ -238,4 +240,43 @@ export function bridgeArrow(b, x, y, z, a) {
     v.emit(P, 0, 0, 0, 4);
   });
   stamp(b, null, t, x, y, z, a);
+}
+
+// ---------------------------------------------------------------------------
+// ISLAND LANDMARKS: the elemental shrine and the rocks drifting beside each island
+// ---------------------------------------------------------------------------
+export function shrine(b, g, x, y, z, accent) {
+  const t = template("shrine|" + accent, (P) => {
+    const U = 0.1, v = new Vox(U, -17, 17, 0, 34, -17, 17), C = stonePal(v, accent);
+    v.box(-16, 0, -16, 16, 4, 16, (x, y, z) => (y === 4 ? ((Math.floor((x + 40) / 5) + Math.floor((z + 40) / 5)) & 1 ? C.TOP : C.TOP2) : Math.max(Math.abs(x), Math.abs(z)) === 16 ? block(C, Math.abs(x) === 16 ? z : x, 1, y, 6, 2) : C.S1));
+    for (const [px, pz] of [[-11, -11], [11, -11], [-11, 11], [11, 11]]) {
+      v.box(px - 3, 5, pz - 3, px + 3, 6, pz + 3, C.TOP);
+      v.fill((x, y, z) => { const ax = Math.abs(x - px), az = Math.abs(z - pz); return ax <= 2 && az <= 2 ? (ax === 2 && az === 2 ? C.S2 : (y % 4 === 0 ? C.S0 : C.S1)) : null; }, px - 2, px + 2, 7, 25, pz - 2, pz + 2);
+      v.box(px - 3, 26, pz - 3, px + 3, 26, pz + 3, C.TOP2);
+    }
+    v.box(-15, 27, -15, 15, 29, 15, (x, y, z) => (y === 29 ? C.TOP : Math.max(Math.abs(x), Math.abs(z)) === 15 && (x + z) % 4 === 0 ? C.G1 : C.S0));
+    v.box(-9, 30, -9, 9, 31, 9, (x, y) => (y === 31 ? C.TOP2 : C.S1)); v.box(-3, 32, -3, 3, 33, 3, C.TOP);
+    v.box(-4, 5, -4, 4, 8, 4, (x, y) => (y === 8 ? C.TOP2 : C.S2));                                    // the altar
+    emitR(P, v, 1.5);
+  });
+  const c = template("shrinegem|" + accent, (P) => {
+    const U = 0.1, v = new Vox(U, -5, 5, -7, 7, -5, 5), C = stonePal(v, accent);
+    v.fill((x, y, z) => { const r = 4.5 * (1 - Math.abs(y) / 7.5); return Math.abs(x) + Math.abs(z) <= r ? (Math.abs(x) + Math.abs(z) < r - 1.5 ? C.G2 : C.G1) : null; });
+    v.emit(P, 0, 0, 0, 4);
+  });
+  stamp(b, g, t, x, y, z, 0);
+  stamp(g, null, c, x, y + 1.6, z, 0.78, 1, 0.3, 0);
+}
+export function floatRock(b, x, y, z, a, s, top, rock, deep, k) {
+  const t = template("frock|" + top + rock + deep + "|" + k, (P) => {
+    const U = 0.2, v = new Vox(U, -10, 10, -14, 4, -10, 10);
+    const TOP = v.pal(top, 0, 0.06), RO = v.pal(rock, 0, 0.07), DE = v.pal(deep, 0, 0.08);
+    v.fill((x, y, z) => {
+      const rr = y >= 0 ? 7.5 - y * 0.8 : 7.5 * (1 + y / 14) ** 0.8;
+      const d = Math.hypot(x, z * 1.15) + (vnoise(x * 0.3 + k * 4, y * 0.3, z * 0.3) - 0.5) * 4;
+      return d <= rr ? (y >= 1 ? (y >= 2 || d > rr - 1 ? TOP : RO) : y > -5 ? RO : DE) : null;
+    });
+    v.emit(P, 0, 0, 0, 4);
+  });
+  stamp(b, null, t, x, y, z, a, s);
 }
