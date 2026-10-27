@@ -1582,3 +1582,6 @@ Object.assign(VOX_HEADS, {
     return { fy: h + 2.6 + st * 0.15, sy: h + 2.6 + st * 0.15, spinRate: 1.1, bob: 0.14, muzzle: [0, h + 2.6, 0] };
   },
 });
+
+// shared with render/propmodels.js (obstacles and island props)
+export { firePal, icePal, naturePal, stormPal, lightPal, darkPal, mechPal, abPal, crystal, iceTones, leafTones, darkTones, column, mortar, h3, bipyr, flame, FLAME_COLS, VIOLET_FLAME, stormCrystalPal, stormTones, rotY, hazard };

@@ -87,6 +87,16 @@ export class Vox {
     }
     return true;
   }
+  // a coarser copy: voxels f times bigger, each taking the nearest original voxel (cheaper meshes)
+  resample(f) {
+    if (f <= 1) return this;
+    const x0 = Math.floor(this.x0 / f), x1 = Math.ceil((this.x0 + this.nx - 1) / f), y0 = Math.floor(this.y0 / f), y1 = Math.ceil((this.y0 + this.ny - 1) / f), z0 = Math.floor(this.z0 / f), z1 = Math.ceil((this.z0 + this.nz - 1) / f);
+    const v = new Vox(this.u * f, x0, x1, y0, y1, z0, z1);
+    v.pals = this.pals; v.palKey = this.palKey;
+    // sample at the centre of each big voxel; the bottom layer stays on the ground (y = 0 maps to y = 0)
+    v.fill((x, y, z) => this.get(Math.round(x * f), Math.round(y * f + (y > 0 ? (f - 1) / 2 : 0)), Math.round(z * f)) || null);
+    return v;
+  }
   // ---- mesh it into a Part: offset = where voxel (0,0,0)'s centre sits in part space
   // merge > 1: unshaded faces of one material in one plane are merged into tiles of up to merge×merge
   // voxels (each tile keeps its own colour jitter), which cuts a large flat model's vertices several-fold

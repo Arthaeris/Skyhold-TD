@@ -13,6 +13,7 @@ import * as THREE from "three";
 import { Batch, Part, MAT, rng, noise, fbm, col, shade, mix, clamp, lerp, smooth, TAU, pick } from "./kit.js";
 import { THEMES, WORLD } from "./theme.js";
 import { createBackdrop, fallMesh, crystal, decorate, FLOAT_KIND } from "./backdrop.js";
+import { VOX_OBSTACLES, VOX_RIM } from "./propmodels.js";
 
 export const COLS = 31, ROWS = 61;
 const SIDE = 3.2, END = 6;             // rim width beside / beyond the build grid
@@ -387,6 +388,10 @@ const RIM = {
   },
 };
 
+// obstacles and island props are voxel sculpts now (render/propmodels.js)
+Object.assign(OBSTACLES, VOX_OBSTACLES);
+Object.assign(RIM, VOX_RIM);
+
 // what hangs under each island
 const HANG = {
   fire: (b, g, x, y, z, r) => { const h = 1 + r() * 3; G(g, 0.25, h, 0.25, "#ff6a2a", x, y - h / 2, z, 2.2); G(g, 0.35, 0.35, 0.35, "#ffb15c", x, y - h - 0.2, z, 2.6); },
@@ -526,7 +531,8 @@ export function buildCorridorIsland(DB, element, grid, seed = 1) {
     }
     if (!edge && !nearPortal && t.dg > 1.6) {
       const k = r();
-      if (k < 0.2) RIM[element](props, glow, cx, h, cz, r);
+      if (k < 0.08) RIM[element](props, glow, cx, h, cz, r);
+      else if (k < 0.2) { /* bare ground (voxel props are bigger, so fewer of them) */ }
       else if (k < 0.25 && t.dg > 2.5) decorate(FLOAT_KIND[element], props, glow, cx, h, cz, 0.5 + r() * 0.3, r, T);
       else if (k < 0.27 && crystally) crystal(glow, cx, h, cz, 0.35 + r() * 0.25, T.accent, r);
     }
