@@ -15,6 +15,7 @@ Open <http://localhost:8000>. three.js r186 and the fonts come from CDNs, so the
 - `?unlock` treats every element as mastered, which is handy for testing towers. Your saved progress is left untouched.
 - **PC controls:** Space starts a wave · W world map · Q/E or ←/→ switch corridors · 1, 2, 3, 5 game speed · Esc pause · mouse wheel zooms · drag pans.
 - **Touch controls:** tap an empty spot for the build ring (towers, plus 📍 *Builder* to send your builder there) · drag the green square to shift the spot · tap a tower for its ring · drag to pan · pinch to zoom.
+- **Builders** (main menu or the run options): every look stands on a turntable — drag or swipe to turn it, ‹ › to flip through the looks, tap any card to try it on (locked ones too) and *Equip* to wear it.
 - **Settings** (gear on the main menu, or the pause menu): music and sound effects on/off with volume, graphics quality, frame rate.
 
 ## What's in this version

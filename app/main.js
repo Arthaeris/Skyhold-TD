@@ -23,6 +23,7 @@ import * as C from "../net/commands.js";
 import { createLoop } from "./loop.js";
 import { createRenderer } from "../render/renderer.js";
 import { towerThumb, enemyThumb, warmThumbs } from "../render/thumbs.js";
+import { createBuilderViewer, builderThumb } from "../render/builderview.js";
 import { createUI } from "../ui/shell.js";
 import { icon, sigil, setIconDB } from "../ui/icons.js";
 import { createSound } from "../audio/sound.js";
@@ -1288,7 +1289,10 @@ function boot() {
     isFollowing: (id) => renderer.following === id,
     toggleFollow: (id) => renderer.setFollow(renderer.following === id ? null : id),
     setSkin: (id) => { xmeta.skin = id; game.skin = id; saveXMeta(); },
-    skinSwatch: (id) => skinSwatch(id),
+    skinSwatch: (id, el) => skinSwatch(id, el),
+    builderViewer: (canvas) => createBuilderViewer(canvas),
+    builderThumb: (id, el) => builderThumb(id, el),
+    previewElement: () => (game.state && myPlayer() ? myPlayer().elements[0] : setup.elements[0]) || "fire",
     npcLevels: NPC_LEVELS,
     isBossWave: (st, fp, w) => isBossWaveX(st, fp, w),
     hpReal: (st, v) => hpReal(st, v),

@@ -1071,19 +1071,68 @@ export function createUI(opts) {
   }
 
   // ---- wardrobe: builder skins, grouped -----------------------------------------------
+  // The builder wardrobe: a turntable on top (drag or swipe to turn the builder, ‹ › to flip through the
+  // looks), then every look as a card with its portrait. Tap a card to try it on the turntable — locked
+  // ones too, so you can see what you're playing for — and Equip to wear it.
+  let _wdView = null, _wdSel = null;
   function openWardrobe(after) {
     const m = $("wardrobe-modal"); if (!m || !opts.getSkins) return;
     const skins = opts.getSkins(), cur = opts.getSkin();
-    const sw = (k) => { const c = opts.skinSwatch ? opts.skinSwatch(k.id) : { c1: "#888", gl: "#fff" }; return `<i class="sw" style="--c1:${c.c1};--gl:${c.gl}"></i>`; };
-    const group = (title, list, note) => list.length ? `<div class="wd-group"><div class="wd-head">${title}<span class="dim">${list.filter((k) => k.unlocked).length}/${list.length}</span></div>${note ? `<p class="dim wd-note">${note}</p>` : ""}<div class="wd-grid">${list.map((k) => `<button class="wd-skin${k.id === cur ? " sel" : ""}${k.unlocked ? "" : " locked"}" data-skin="${k.id}" title="${k.desc}">${sw(k)}<b>${k.unlocked ? "" : "🔒 "}${k.name}</b><span>${k.unlocked ? (k.id === cur ? "Equipped" : "Tap to equip") : k.desc}</span></button>`).join("")}</div></div>` : "";
-    m.innerHTML = `<div class="modal wide glass"><button class="panel-close" id="wd-close">${icon("close")}</button><h2>Builders</h2>
+    const el = (opts.previewElement && opts.previewElement()) || "fire";
+    if (!_wdSel || !skins.find((k) => k.id === _wdSel)) _wdSel = cur;
+    const glowOf = (k) => { const c = opts.skinSwatch ? opts.skinSwatch(k.id, el) : null; return c ? c.gl : "#9f8cff"; };
+    const portrait = (k) => {
+      const url = opts.builderThumb ? opts.builderThumb(k.id, el) : "";
+      if (url) return `<img class="wd-pic" src="${url}" alt="">`;
+      const c = opts.skinSwatch ? opts.skinSwatch(k.id, el) : { c1: "#888", gl: "#fff" };
+      return `<i class="sw" style="--c1:${c.c1};--gl:${c.gl}"></i>`;
+    };
+    const card = (k) => `<button class="wd-skin${k.id === cur ? " worn" : ""}${k.id === _wdSel ? " sel" : ""}${k.unlocked ? "" : " locked"}" data-skin="${k.id}" title="${k.desc}">${portrait(k)}<b>${k.unlocked ? "" : "🔒 "}${k.name}</b><span>${k.id === cur ? "Equipped" : k.unlocked ? "Unlocked" : k.desc}</span></button>`;
+    const group = (title, list, note) => list.length ? `<div class="wd-group"><div class="wd-head">${title}<span class="dim">${list.filter((k) => k.unlocked).length}/${list.length}</span></div>${note ? `<p class="dim wd-note">${note}</p>` : ""}<div class="wd-grid">${list.map(card).join("")}</div></div>` : "";
+    m.innerHTML = `<div class="modal wide glass wardrobe"><button class="panel-close" id="wd-close">${icon("close")}</button><h2>Builders</h2>
+      <div class="wd-stage">
+        <canvas id="wd-canvas" aria-label="Builder preview — drag to turn"></canvas>
+        <button class="wd-arrow l" id="wd-prev" aria-label="Previous look">${icon("left")}</button>
+        <button class="wd-arrow r" id="wd-next" aria-label="Next look">${icon("right")}</button>
+        <span class="wd-hint">↔ Drag to turn</span>
+        <div class="wd-info"><div><b id="wd-name"></b><span id="wd-desc"></span></div><button class="btn primary small" id="wd-equip">Equip</button></div>
+      </div>
+      <div class="wd-list">
       ${group("Classics", skins.filter((k) => k.family === "general"))}
-      ${group("Sealbreakers", skins.filter((k) => k.family === "seal"), "Beat the Sealed One — the optional bonus round after the last wave — with that element in your run.")}
-      ${group("Challenge looks", skins.filter((k) => k.family === "challenge"), "Only from Challenges: beat one with an element to earn its look in that element.")}</div>`;
+      ${group("Sealbreakers", skins.filter((k) => k.family === "seal"), "Beat the Sealed One — the bonus fight after the last wave — with that element in your run.")}
+      ${group("Challenge looks", skins.filter((k) => k.family === "challenge"), "Only from Challenges: beat one with an element to earn its look in that element.")}</div></div>`;
     m.classList.add("show");
-    $("wd-close").onclick = () => m.classList.remove("show");
-    m.querySelectorAll("[data-skin]").forEach((b) => b.onclick = () => { const k = skins.find((x) => x.id === b.dataset.skin); if (!k.unlocked) { toast("🔒 " + k.desc); return; } opts.setSkin(k.id); sfx("click"); openWardrobe(after); if (after) after(); });
+    const close = () => { m.classList.remove("show"); if (_wdView) { _wdView.dispose(); _wdView = null; } };
+    $("wd-close").onclick = close;
+    m.onclick = (e) => { if (e.target === m) close(); };
+    if (_wdView) { _wdView.dispose(); _wdView = null; }
+    const cv = $("wd-canvas");
+    try { if (opts.builderViewer && cv) _wdView = opts.builderViewer(cv); } catch (e) { console.warn("builder preview", e); }
+    const select = (id, scroll) => {
+      _wdSel = id;
+      const k = skins.find((x) => x.id === id); if (!k) return;
+      if (_wdView) _wdView.show(k.id, el, glowOf(k));
+      setText("wd-name", k.name);
+      const d = $("wd-desc"); if (d) d.textContent = k.id === opts.getSkin() ? "Equipped" : k.unlocked ? (k.id === "element" ? "Takes the colours of each corridor's element." : "Unlocked — ready to wear.") : "🔒 " + k.desc;
+      const eq = $("wd-equip");
+      if (eq) { const worn = k.id === opts.getSkin(); eq.textContent = worn ? "Equipped" : k.unlocked ? "Equip" : "Locked"; eq.classList.toggle("disabled", worn || !k.unlocked); }
+      m.querySelectorAll("[data-skin]").forEach((b) => b.classList.toggle("sel", b.dataset.skin === id));
+      if (scroll) { const b = m.querySelector(`[data-skin="${id}"]`); if (b) b.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
+    };
+    const step = (d) => { const i = skins.findIndex((k) => k.id === _wdSel); select(skins[(i + d + skins.length) % skins.length].id, true); sfx("click"); };
+    $("wd-prev").onclick = () => step(-1);
+    $("wd-next").onclick = () => step(1);
+    $("wd-equip").onclick = () => {
+      const k = skins.find((x) => x.id === _wdSel); if (!k) return;
+      if (!k.unlocked) { toast("🔒 " + k.desc); sfx("reject"); return; }
+      opts.setSkin(k.id); sfx("click");
+      if (_wdView) { _wdView.dispose(); _wdView = null; }
+      openWardrobe(after); if (after) after();
+    };
+    m.querySelectorAll("[data-skin]").forEach((b) => b.onclick = () => { select(b.dataset.skin, false); sfx("click"); });
+    select(_wdSel, true);
   }
+
 
   // ---- mastery screen + synergy codex ------------------------------------------
   function openMastery() {
