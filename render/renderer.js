@@ -9,7 +9,7 @@ import * as THREE from "three";
 import * as fx from "../sim/fx.js";
 import * as pf from "../sim/pathfind.js";
 import { createWorld, ringLayout, corridorToWorld, worldToCorridor, COLS, ROWS } from "./world.js";
-import { createTowerModel, towerStage } from "./towers.js";
+import { createTowerModel, towerStage, towerTemplate } from "./towers.js";
 import { createEnemyRenderer, enemyScale, setEnemyVisScale } from "./enemies.js";
 import { createSparks, createBits, createStreaks, createRings, createProjectiles, createBars, createRoute, createPreviews } from "./effects.js";
 import { createPost, QUALITY } from "./post.js";
@@ -1065,6 +1065,8 @@ export function createRenderer(opts) {
   return {
     render, resize, snapshotPositions, onEvents, previewRing, pick, panBy, zoomAt, setMode, enterField, emote,
     warmEnemies(ids) { enemies.warm(ids); },
+    // pre-build the heavier voxel towers (stage 0) in idle slices so the first placement doesn't hitch
+    warmTowers(ids) { const q = ids.slice(); const next = () => { const id = q.shift(); if (!id) return; try { if (DB.TOWER_BY_ID[id]) towerTemplate(DB, id, 0, 0); } catch (e) { /* built on demand instead */ } setTimeout(next, 80); }; setTimeout(next, 1200); },
     setFollow(id) { follow = id; if (id != null) nudge = null; },
     // the seal breaking: a shockwave and a fountain of sparks out of the Vortex
     flashVortex() {

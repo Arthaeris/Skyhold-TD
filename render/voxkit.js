@@ -79,20 +79,40 @@ export class Vox {
   paint(fn) { for (let i = 0, z = this.z0; z < this.z0 + this.nz; z++) for (let y = this.y0; y < this.y0 + this.ny; y++) for (let x = this.x0; x < this.x0 + this.nx; x++, i++) { const c = this.cells[i]; if (!c) continue; const p = fn(x, y, z, c); if (p) this.cells[i] = p; } return this; }
   mirrorX() { for (let z = this.z0; z < this.z0 + this.nz; z++) for (let y = this.y0; y < this.y0 + this.ny; y++) for (let x = 1; x < this.x0 + this.nx; x++) { const c = this.get(x, y, z); if (c && !this.get(-x, y, z)) this.set(-x, y, z, c); } return this; }
 
+  _open(F, x, y, z, occ) {
+    const [nx, ny, nz] = F.n, lx = x + nx, ly = y + ny, lz = z + nz;
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+      if (!a && !b) continue;
+      if (nx ? occ(lx, ly + a, lz + b) : ny ? occ(lx + a, ly, lz + b) : occ(lx + a, ly + b, lz)) return false;
+    }
+    return true;
+  }
   // ---- mesh it into a Part: offset = where voxel (0,0,0)'s centre sits in part space
-  emit(P, ox = 0, oy = 0, oz = 0) {
+  // merge > 1: unshaded faces of one material in one plane are merged into tiles of up to merge×merge
+  // voxels (each tile keeps its own colour jitter), which cuts a large flat model's vertices several-fold
+  emit(P, ox = 0, oy = 0, oz = 0, merge = 1) {
     const u = this.u, lit = P.lit, glow = P.glow;
+    const l0 = lit.pos.length, g0 = glow.pos.length;
     const occ = (x, y, z) => { const c = this.get(x, y, z); return c && !this.pals[c].e ? 1 : 0; };
     const solid = (x, y, z) => this.get(x, y, z) !== 0;
     const col = new THREE.Color();
+    const planes = merge > 1 ? new Map() : null;   // "face|slice" -> Map("a,b" -> palette)
+    const lo = [this.x0, this.y0, this.z0];
     for (let z = this.z0; z < this.z0 + this.nz; z++) for (let y = this.y0; y < this.y0 + this.ny; y++) for (let x = this.x0; x < this.x0 + this.nx; x++) {
       const c = this.get(x, y, z); if (!c) continue;
       const pal = this.pals[c];
       const k = 1 + (hash3(x, y, z) - 0.5) * 2 * pal.jit;
       const B = pal.e ? glow : lit;
-      for (const F of FACES) {
+      for (let fi = 0; fi < 6; fi++) {
+        const F = FACES[fi];
         const [nx, ny, nz] = F.n;
         if (solid(x + nx, y + ny, z + nz)) continue;
+        if (planes && this._open(F, x, y, z, occ)) {
+          const na = nx ? 0 : ny ? 1 : 2, p = [x, y, z], key = fi * 4096 + (p[na] - lo[na]);
+          let m = planes.get(key); if (!m) planes.set(key, (m = new Map()));
+          m.set((p[(na + 1) % 3] - lo[(na + 1) % 3]) * 4096 + (p[(na + 2) % 3] - lo[(na + 2) % 3]), c);
+          continue;
+        }
         const first = B.pos.length / 3;
         const ao = [];
         for (const [cx, cy, cz] of F.c) {
@@ -122,9 +142,41 @@ export class Vox {
         else B.idx.push(first, first + 1, first + 2, first, first + 2, first + 3);
       }
     }
+    if (planes) for (const [key, m] of planes) {
+      const fi = Math.floor(key / 4096), F = FACES[fi], na = F.n[0] ? 0 : F.n[1] ? 1 : 2, ua = (na + 1) % 3, wa = (na + 2) % 3;
+      for (const [ab, c] of m) {
+        if (!c) continue;
+        const a = Math.floor(ab / 4096), b = ab % 4096;
+        let du = 1, dw = 1;
+        while (du < merge && m.get((a + du) * 4096 + b) === c) du++;
+        grow: while (dw < merge) { for (let i = 0; i < du; i++) if (m.get((a + i) * 4096 + b + dw) !== c) break grow; dw++; }
+        for (let i = 0; i < du; i++) for (let j = 0; j < dw; j++) m.set((a + i) * 4096 + b + j, 0);
+        const p = [0, 0, 0]; p[na] = (key % 4096) + lo[na]; p[ua] = a + lo[ua]; p[wa] = b + lo[wa];
+        const ext = [1, 1, 1]; ext[ua] = du; ext[wa] = dw;
+        const pal = this.pals[c], B = pal.e ? glow : lit, k = 1 + (hash3(p[0], p[1], p[2]) - 0.5) * 2 * pal.jit;
+        col.copy(pal.c).multiplyScalar(pal.e ? pal.e * k : AO[3] * k * (F.n[1] < 0 ? 0.82 : 1));
+        const first = B.pos.length / 3;
+        for (const cc of F.c) {
+          B.pos.push((p[0] + cc[0] * ext[0] - 0.5) * u + ox, (p[1] + cc[1] * ext[1] - 0.5) * u + oy, (p[2] + cc[2] * ext[2] - 0.5) * u + oz);
+          B.nor.push(F.n[0], F.n[1], F.n[2]); B.col.push(col.r, col.g, col.b);
+        }
+        B.idx.push(first, first + 1, first + 2, first, first + 2, first + 3);
+      }
+    }
+    // honour the batches' transform stacks (towers scale their heads by stage)
+    for (const [B, s0] of [[lit, l0], [glow, g0]]) {
+      const m = B.m; if (isIdent(m)) continue;
+      const nm = new THREE.Matrix3().getNormalMatrix(m), v = new THREE.Vector3();
+      for (let i = s0; i < B.pos.length; i += 3) {
+        v.set(B.pos[i], B.pos[i + 1], B.pos[i + 2]).applyMatrix4(m); B.pos[i] = v.x; B.pos[i + 1] = v.y; B.pos[i + 2] = v.z;
+        v.set(B.nor[i], B.nor[i + 1], B.nor[i + 2]).applyMatrix3(nm).normalize(); B.nor[i] = v.x; B.nor[i + 1] = v.y; B.nor[i + 2] = v.z;
+      }
+    }
     return P;
   }
 }
+const IDENT = new THREE.Matrix4().elements;
+const isIdent = (m) => m.elements.every((e, i) => e === IDENT[i]);
 
 // value noise for sculpting (fur clumps, rock, rust patches)
 const P8 = new Uint8Array(512); { let s = 1337; const p = [...Array(256).keys()]; for (let i = 255; i > 0; i--) { s = (s * 1103515245 + 12345) & 0x7fffffff; const j = s % (i + 1); [p[i], p[j]] = [p[j], p[i]]; } for (let i = 0; i < 512; i++) P8[i] = p[i & 255]; }

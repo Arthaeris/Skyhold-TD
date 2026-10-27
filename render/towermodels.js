@@ -1,0 +1,597 @@
+/* Skyhold TD — render/towermodels.js
+   Voxel sculpts for the Fire and Ice towers (and their two element plinths), built with the voxel kit
+   (render/voxkit.js) at one cube size, with baked corner AO and emissive voxels for the bloom.
+   They plug into render/towers.js under the same contract as the box-built heads:
+     PLINTH(p, st) draws into the base Part and returns the plinth top h;
+     HEAD(P, h, st) draws into {base, aim, spin, float} and returns the pivots + muzzle.
+   Stages (0 = Lv 1–3 … 3 = Lv 10) add structure; towers.js also scales the head a little per stage. */
+import { Vox, vnoise } from "./voxkit.js";
+import { rng, TAU } from "./kit.js";
+
+const U = 0.08;                       // one voxel, in world units (a 3×3 tower footprint ≈ 36 voxels)
+const h3 = (x, y, z) => { let h = (x * 374761393 + y * 668265263 + z * 1442695041) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+const vx = (x0, x1, y0, y1, z0, z1) => new Vox(U, x0, x1, y0, y1, z0, z1);
+const MERGE = 4;
+const onTop = (P, h, v) => v.emit(P, 0, h + U / 2, 0, MERGE);       // voxel y = 0 sits on height h
+const centred = (P, v) => v.emit(P, 0, 0, 0, MERGE);                // voxel (0,0,0) is the part's pivot
+// brick courses: rows `rh` voxels tall, bricks `bl` long, every other row offset
+const mortar = (along, y, rh = 3, bl = 6) => { const row = Math.floor(y / rh); return ((y % rh) + rh) % rh === rh - 1 || ((((along + (row & 1) * (bl >> 1)) % bl) + bl) % bl) === 0; };
+
+// ---------------------------------------------------------------------------
+// palettes
+// ---------------------------------------------------------------------------
+function firePal(v) {
+  return {
+    BAS: v.pal("#3a2e2b", 0, 0.08), BAS2: v.pal("#4b3934", 0, 0.08), ST: v.pal("#6e5244", 0, 0.08), STH: v.pal("#8f6c58", 0, 0.07),
+    MOR: v.pal("#2a201e", 0, 0.05), IRON: v.pal("#36302e", 0, 0.05), IRONH: v.pal("#564b47", 0, 0.05), ASH: v.pal("#4a4040", 0, 0.1), ASH2: v.pal("#5d5150", 0, 0.1),
+    BR: v.pal("#b07a45", 0, 0.05), BRH: v.pal("#e2b274", 0, 0.04), BRD: v.pal("#7a5030", 0, 0.05), RIV: v.pal("#f0c27a", 0, 0.02), COAL: v.pal("#2a1a16", 0, 0.2), CRUST: v.pal("#3a2420", 0, 0.12), CRUST2: v.pal("#4e2e24", 0, 0.12),
+    EMB: v.pal("#ff6a1e", 1.6, 0.1), EMB2: v.pal("#ff9a2e", 1.6, 0.1), HOT: v.pal("#ffcf6a", 1.8, 0.06), LAVA: v.pal("#ff5a14", 1.5, 0.12), LAVA2: v.pal("#ffa030", 1.8, 0.08), WHITE: v.pal("#fff1c0", 2.1, 0.03),
+  };
+}
+function icePal(v) {
+  return {
+    GR: v.pal("#56677c", 0, 0.08), GR2: v.pal("#6c7f95", 0, 0.08), GRH: v.pal("#8a9db2", 0, 0.06), MOR: v.pal("#3a475a", 0, 0.05),
+    SNOW: v.pal("#e4eef6", 0, 0.03), SNOW2: v.pal("#c6d8e6", 0, 0.04), ICE1: v.pal("#c4eafb", 0, 0.03), ICE2: v.pal("#8bcdef", 0, 0.04), ICE2B: v.pal("#6fbbe6", 0, 0.04),
+    ICE3: v.pal("#4c9bd3", 0, 0.05), ICE4: v.pal("#2f68a6", 0, 0.06), STEEL: v.pal("#7a8a9e", 0, 0.04), STEELH: v.pal("#c2d0de", 0, 0.03), STEELD: v.pal("#3e4a5a", 0, 0.05),
+    CY: v.pal("#4fd2ff", 1.35, 0.06), CY2: v.pal("#9eeaff", 1.6, 0.04), WG: v.pal("#e6faff", 1.8, 0.02),
+  };
+}
+const FLAME_COLS = ["#fff6dc", "#ffeaa8", "#ffd65a", "#ffb02e", "#ff7a1e", "#ff9a26", "#ff6a1a", "#e83c14", "#b8240e"];
+
+// ---------------------------------------------------------------------------
+// shared sculpting helpers
+// ---------------------------------------------------------------------------
+// a twisting voxel flame: seven tongues around a white-hot heart (k scales it; 1 ≈ 2.7 units tall)
+function flame(v, y0, k, seed, cols = FLAME_COLS, ember = 1, ox = 0, oz = 0) {
+  const R = rng(seed), T = [];
+  const P = cols.map((c, i) => v.pal(c, i < 2 ? 2.0 : i < 5 ? 1.55 : 1.2, 0.04));
+  for (let i = 0; i < 7; i++) { const a = (i / 7) * TAU + 0.3, ring = i === 0 ? 0 : (3.6 + R() * 1.6) * k; T.push({ x: i ? Math.cos(a) * ring : 0, z: i ? Math.sin(a) * ring : 0, h: (i ? 15 + R() * 13 : 34) * k, r: Math.max(1.1, (i ? 2.6 + R() * 1.2 : 5.6) * k), ph: R() * 6 }); }
+  const W = Math.ceil(12 * k) + 2, H = Math.ceil(34 * k) + 1, nk = 1 / Math.max(0.45, k);
+  v.fill((x, y, z) => {
+    const yy = y - y0; let best = 0, tip = 0;
+    for (const t of T) {
+      const tt = yy / t.h; if (tt < 0 || tt > 1) continue;
+      const cx = ox + t.x * (1 - tt * 0.75) + Math.sin(tt * 4 + t.ph) * 1.8 * k * tt, cz = oz + t.z * (1 - tt * 0.75) + Math.cos(tt * 3.4 + t.ph) * 1.4 * k * tt;
+      const r = t.r * Math.pow(1 - tt, 0.9) * (0.75 + 0.5 * Math.sin(tt * 3 + 0.4));
+      const d = Math.hypot(x - cx, z - cz) + (vnoise(x * 0.3 * nk + 5, y * 0.22 * nk, z * 0.3 * nk) - 0.5) * 3.6 * k;
+      const val = 1 - d / Math.max(0.7, r);
+      if (val > best) { best = val; tip = tt; }
+    }
+    if (best <= 0) return null;
+    if (best < 0.3 && vnoise(x * 0.7 * nk, y * 0.45 * nk, z * 0.7 * nk) > 0.66 - tip * 0.13) return null;   // ragged edge
+    if (best > 0.6 && tip < 0.7) return P[tip < 0.4 ? 0 : 1];
+    if (best > 0.35) return P[tip < 0.35 ? 2 : tip < 0.65 ? 3 : 4];
+    return P[tip < 0.3 ? 5 : tip < 0.6 ? 6 : tip < 0.82 ? 7 : 8];
+  }, ox - W, ox + W, y0, y0 + H, oz - W, oz + W);
+  // rising embers
+  const E1 = v.pal("#ffb23a", 1.6, 0.05), E2 = v.pal("#ffe08a", 1.7, 0.03);
+  for (let i = 0; i < Math.round(30 * k * ember); i++) {
+    const y = y0 + Math.round((10 + R() * 30) * k), a = R() * TAU, d = (3 + R() * 8) * k + (y - y0) * 0.12;
+    v.set(ox + Math.cos(a) * d, y, oz + Math.sin(a) * d, R() < 0.5 ? E1 : E2);
+  }
+}
+
+// a faceted crystal with a diamond cross-section; tones = [lit face, side, side, shade, ridge, tip glow]
+function crystal(v, cx, cy, cz, r, H, tones, o = {}) {
+  const lx = (o.lean && o.lean[0]) || 0, lz = (o.lean && o.lean[1]) || 0, sh = o.shoulder == null ? 0.66 : o.shoulder;
+  for (let y = 0; y <= H; y++) {
+    const t = y / H, rr = t < sh ? r * (1 - t * 0.12) : r * (1 - sh * 0.12) * (1 - (t - sh) / (1 - sh));
+    const ox = cx + lx * y, oz = cz + lz * y, W = Math.ceil(rr) + 1;
+    for (let x = Math.floor(ox - W); x <= Math.ceil(ox + W); x++) for (let z = Math.floor(oz - W); z <= Math.ceil(oz + W); z++) {
+      const dx = x - ox, dz = z - oz;
+      if (Math.abs(dx) + Math.abs(dz) > rr + 0.35) continue;
+      let p;
+      if (t > 0.9 || (t > sh && rr < 0.8)) p = tones[5];
+      else if (o.vein && Math.abs(dx) < 0.5 && dz > 0 && h3(x, cy + y, z) > 0.18) p = tones[5];
+      else if (Math.abs(Math.abs(dx) - Math.abs(dz)) > rr - 0.9 && rr > 1.5) p = tones[4];    // the four ridges
+      else p = dx >= 0 ? (dz >= 0 ? tones[0] : tones[2]) : (dz >= 0 ? tones[1] : tones[3]);
+      v.set(x, cy + y, z, p);
+    }
+  }
+}
+const iceTones = (C, tip) => [C.ICE1, C.ICE2, C.ICE2B, C.ICE3, C.ICE1, tip || C.CY2];
+
+// fill a part through a rotated local frame: f(X, Yb, Zb) is evaluated with the barrel axis pitched up by `pitch`
+function pitched(v, pitch, f, bounds) {
+  const s = Math.sin(pitch), c = Math.cos(pitch);
+  v.fill((x, y, z) => f(x, y * c - z * s, y * s + z * c), ...bounds);
+}
+const along = (L, pitch) => [0, L * Math.sin(pitch) * U, L * Math.cos(pitch) * U];
+
+// ---------------------------------------------------------------------------
+// PLINTHS
+// ---------------------------------------------------------------------------
+export const VOX_PLINTH = {
+  fire(p, st) {
+    const v = vx(-18, 18, 0, 22, -18, 18), C = firePal(v);
+    const top = st >= 1 ? 7 : 3;
+    const seam = (x, z) => Math.abs(vnoise(x * 0.2, 3.1, z * 0.2) - 0.5) < 0.035;
+    const course = (half, y0, y1, isTop) => v.fill((x, y, z) => {
+      const ax = Math.abs(x), az = Math.abs(z), m = Math.max(ax, az);
+      if (m > half || (ax === half && az === half && y === y1)) return null;
+      if (m === half) {
+        if (y === y1) return C.BR;
+        const al = ax === half ? z : x;
+        if (vnoise(al * 0.35, y * 0.6, (x > 0) + (z > 0) * 2 + 9) > 0.8) return C.LAVA;
+        return mortar(al, y - y0, 2, 6) ? C.MOR : h3(x, y, z) < 0.2 ? C.BAS : C.BAS2;
+      }
+      if (y < y1) return C.BAS;
+      if (!isTop) return m >= half - 1 ? C.STH : C.ST;
+      if (seam(x, z) && m < half - 2) return C.LAVA;
+      return m === half - 1 ? C.STH : vnoise(x * 0.5, 7, z * 0.5) > 0.62 ? C.ASH2 : C.ASH;
+    }, -half, half, y0, y1, -half, half);
+    course(17, 0, 3, st < 1);
+    if (st >= 1) course(13, 4, 7, true);
+    // corner braziers on bronze-banded pillars
+    const ch = st >= 2 ? 9 : 5;
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      const px = sx * 15, pz = sz * 15;
+      v.box(px - 1, 4, pz - 1, px + 1, 3 + ch, pz + 1, (x, y) => ((y - 4) % 4 === 3 ? C.BR : C.BAS2));
+      v.box(px - 2, 4 + ch, pz - 2, px + 2, 4 + ch, pz + 2, C.BRH);
+      v.box(px - 1, 5 + ch, pz - 1, px + 1, 5 + ch, pz + 1, C.COAL);
+      v.box(px, 5 + ch, pz, px, 5 + ch + (st >= 2 ? 1 : 0), pz, st >= 2 ? C.HOT : C.EMB);
+      for (const [dx, dz] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) if (h3(px + dx, ch, pz + dz) < 0.6) v.set(px + dx, 5 + ch, pz + dz, C.EMB);
+      if (st >= 3) v.box(px, 7 + ch, pz, px, 7 + ch, pz, C.WHITE);
+    }
+    v.emit(p, 0, U / 2, 0, MERGE);
+    return (top + 1) * U;
+  },
+  ice(p, st) {
+    const v = vx(-19, 19, 0, 24, -19, 19), C = icePal(v);
+    const top = st >= 1 ? 7 : 3;
+    const course = (half, y0, y1, isTop) => {
+      v.fill((x, y, z) => {
+        const ax = Math.abs(x), az = Math.abs(z), m = Math.max(ax, az);
+        if (m > half) return null;
+        if (m === half && y < y1) {
+          const al = ax === half ? z : x;
+          // a small glowing rune in the middle of each face
+          if (y0 === 0 && Math.abs(al) <= 2 && ((y === 1 && al % 2 === 0) || (y === 2 && Math.abs(al) === 1))) return C.CY;
+          return mortar(al, y - y0, 2, 7) ? C.MOR : h3(x, y, z) < 0.25 ? C.GR : C.GR2;
+        }
+        if (y < y1) return C.GR;
+        if (!isTop) return m >= half - 1 ? C.SNOW2 : C.GRH;
+        if (m === half) return C.SNOW;
+        const n = vnoise(x * 0.22, 1, z * 0.22);
+        return n > 0.64 ? C.ICE2 : n > 0.6 ? C.ICE1 : vnoise(x * 0.6, 4, z * 0.6) > 0.55 ? C.SNOW2 : C.SNOW;
+      }, -half, half, y0, y1, -half, half);
+      // icicles hanging from the course's top edge
+      for (let a = -half; a <= half; a++) for (const [sx, sz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const r = h3(a, y1, sx * 3 + sz * 7); if (r > 0.22) continue;
+        const x = sx ? sx * (half + 1) : a, z = sz ? sz * (half + 1) : a, L = r < 0.07 ? 2 : 1;
+        for (let k = 0; k <= L; k++) v.set(x, y1 - k, z, k === L ? C.ICE1 : C.ICE2);
+      }
+    };
+    course(17, 0, 3, st < 1);
+    if (st >= 1) course(13, 4, 7, true);
+    const H = st >= 2 ? 14 : 9;
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      crystal(v, sx * 15, 4, sz * 15, 2.4, H, iceTones(C), { lean: [sx * 0.07, sz * 0.07] });
+      crystal(v, sx * 15 - sx * 3, 4, sz * 15, 1.2, Math.round(H * 0.5), iceTones(C), { lean: [sx * 0.1, 0] });
+    }
+    v.emit(p, 0, U / 2, 0, MERGE);
+    return (top + 1) * U;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// HEADS
+// ---------------------------------------------------------------------------
+export const VOX_HEADS = {
+  // ===== FIRE ==============================================================
+  fire_0(P, h, st) { // Flame Tower: a brick furnace with an iron-barred fire door under a bronze brazier
+    const v = vx(-14, 14, 0, 34, -14, 14), C = firePal(v);
+    // footing
+    v.fill((x, y, z) => { const m = Math.max(Math.abs(x), Math.abs(z)); return m <= 9 ? (m === 9 ? (mortar(Math.abs(x) === 9 ? z : x, y, 2, 5) ? C.MOR : C.STH) : C.ST) : null; }, -9, 9, 0, 1, -9, 9);
+    const H0 = 2, H1 = 14, half = 7;
+    for (let y = H0; y <= H1; y++) for (let x = -half; x <= half; x++) for (let z = -half; z <= half; z++) {
+      const ax = Math.abs(x), az = Math.abs(z);
+      if (ax + az > half * 2 - 3) continue;
+      if (z >= half - 1 && ax <= 3 && y >= H0 + 2 && y <= H0 + 8 - (ax === 3 ? 1 : 0)) { // the fire door
+        if (z === half && ax % 2 === 1) v.set(x, y, z + 1, C.IRON);
+        continue;
+      }
+      const row = y - H0, al = az === half ? x : z;
+      let p = (row % 3 === 2 || (al + (row % 2) * 2 + 20) % 4 === 0) ? C.MOR : h3(x, y, z) < 0.18 ? C.STH : C.ST;
+      if (y === H0 || y === H1) p = C.BRD;
+      if (st >= 1 && ax + az >= half * 2 - 4 && (y === H0 + 4 || y === H0 + 8)) p = C.BR;   // bronze bands on the chamfers
+      v.set(x, y, z, p);
+    }
+    for (let y = H0 + 2; y <= H0 + 7; y++) for (let x = -3; x <= 3; x++) v.set(x, y, half - 2, y <= H0 + 3 ? C.HOT : y <= H0 + 5 ? C.EMB2 : C.EMB);
+    v.box(-1, H0 + 9, half + 1, 1, H0 + 9, half + 1, C.BR); v.set(0, H0 + 9, half + 1, C.BRH);
+    for (const s of [-1, 1]) for (let y = H0 + 4; y <= H0 + 7; y++) for (const z of [-2, 2]) v.set(s * half, y, z, C.EMB);
+    // bronze collar flaring into the brazier bowl
+    const B0 = H1 + 1;
+    for (let y = B0; y <= B0 + 5; y++) {
+      const t = (y - B0) / 5, r = 7.5 + t * t * 4.6, inner = r - 1.6;
+      v.fill((x, yy, z) => {
+        const d = Math.hypot(x, z); if (d > r || (y > B0 && d < inner)) return null;
+        const band = y === B0 || y === B0 + 5;
+        if (!band && y === B0 + 3 && Math.round(Math.atan2(z, x) / (Math.PI / 8)) % 2 === 0) return C.BRH;
+        return band ? C.BRH : y === B0 + 2 ? C.BRD : C.BR;
+      }, -13, 13, y, y, -13, 13);
+    }
+    for (let i = 0; i < 16; i++) { const a = (i / 16) * TAU; v.set(Math.cos(a) * 10.6, B0 + 4, Math.sin(a) * 10.6, C.RIV); }
+    v.fill((x, y, z) => {
+      const d = Math.hypot(x, z); if (d > 10.2) return null;
+      const top = B0 + 3 + Math.round(vnoise(x * 0.3, 2, z * 0.3) * 2.5 + (1 - d / 10) * 1.2);
+      if (y > top) return null;
+      if (y < top) return C.COAL;
+      return vnoise(x * 0.5, 9, z * 0.5) > 0.52 ? (h3(x, y, z) < 0.4 ? C.HOT : C.EMB2) : C.COAL;
+    }, -11, 11, B0 + 1, B0 + 6, -11, 11);
+    // forged arms from the footing to the bowl rim
+    for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      for (let y = H0; y <= B0 + 3; y++) {
+        const t = (y - H0) / (B0 + 3 - H0), r = 9.2 + Math.sin(t * Math.PI) * 1.4 - t;
+        v.set(sx * r * 0.7071, y, sz * r * 0.7071, y % 5 === 0 ? C.BRH : C.IRON);
+      }
+      v.set(sx * 8.5, B0 + 6, sz * 8.5, C.BRH); v.set(sx * 8.5, B0 + 7, sz * 8.5, C.HOT);
+    }
+    if (st >= 2) for (const s of [-1, 1]) { // side braziers on masonry arms
+      v.box(s * 8, H0 + 3, -1, s * 11, H0 + 4, 1, C.BAS2); v.box(s * 10, H0 + 5, -1, s * 10, H0 + 6, 1, C.ST);
+      v.box(s * 9, H0 + 7, -2, s * 12, H0 + 7, 2, C.BR); v.box(s * 10, H0 + 8, -1, s * 11, H0 + 8, 1, C.EMB2); v.set(s * 10, H0 + 9, 0, C.HOT); v.set(s * 11, H0 + 9, 0, C.EMB);
+    }
+    if (st >= 3) for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { // crown prongs on the rim
+      v.path([[sx * 8, B0 + 5, sz * 8], [sx * 9, B0 + 9, sz * 9], [sx * 8.4, B0 + 12, sz * 8.4]], 1.1, 0.6, (x, y) => (y > B0 + 10 ? C.RIV : C.BR));
+      v.set(sx * 8.4, B0 + 13, sz * 8.4, C.WHITE);
+    }
+    onTop(P.base, h, v);
+    const f = vx(-14, 14, 0, 40, -14, 14);
+    flame(f, 0, 0.5 + st * 0.07, 11);
+    centred(P.float, f);
+    return { fy: h + (B0 + 4) * U, bob: 0.035, muzzle: [0, h + 2.45 + st * 0.1, 0] };
+  },
+
+  fire_1(P, h, st) { // Fireball Tower: a bronze-banded siege cannon on a turntable, furnace glowing in the bore
+    const b = vx(-11, 11, 0, 6, -11, 11), C = firePal(b);
+    b.fill((x, y, z) => {
+      const d = Math.hypot(x, z);
+      if (y <= 2) return d <= 10 ? (d > 9 ? (mortar(Math.round(Math.atan2(z, x) * 10), y, 3, 3) ? C.MOR : C.BAS2) : C.BAS) : null;
+      if (y === 3) return d <= 10.4 ? (d > 9.6 && Math.round(Math.atan2(z, x) / (TAU / 24)) % 2 === 0 ? C.RIV : C.BR) : null;
+      return d <= 8 ? (y === 5 && d > 7 ? C.IRONH : C.IRON) : null;
+    });
+    onTop(P.base, h, b);
+    const v = vx(-12, 12, -10, 18, -10, 32), A = firePal(v);
+    const pitch = 0.38, steps = st >= 1 ? 6 : 5;
+    // yoke and trunnions (level, they hold the pitched gun)
+    for (const s of [-1, 1]) {
+      v.box(s * 8, -9, -3, s * 9, -1, 3, (x, y) => (y === -9 ? A.BR : A.IRON));
+      v.cyl(s * 7, 0, 0, 2.6, s * 10, A.BR, "x"); v.cyl(s * 7, 0, 0, 1.4, s * 11, A.BRH, "x");
+    }
+    pitched(v, pitch, (X, Y, Z) => {
+      const ax = Math.abs(X);
+      // the breech: a chamfered block with a bronze-framed hatch at the back
+      if (Z >= -7 && Z <= 5 && ax <= 6.5 && Y >= -4.5 && Y <= 5.5 && ax + Math.abs(Y - 0.5) <= 10) {
+        if (Z < -6.5 && ax <= 2.2 && Math.abs(Y - 0.5) <= 2.2) return A.EMB2;
+        if (Z < -6.5 && ax <= 3.4 && Math.abs(Y - 0.5) <= 3.4) return A.BR;
+        if (Math.abs(Z - 2) < 0.5 || Math.abs(Z + 4) < 0.5) return A.BR;
+        if (ax > 5.5 && Math.abs(Y - 0.5) < 3 && Z > -5 && Z < 1) return Math.abs(Y - 0.5) < 2 && Z > -4 && Z < 0 ? A.BRH : A.BRD;   // side plates
+        return Y > 4.5 ? A.IRONH : A.IRON;
+      }
+      if (Z < 4 || Z > 28) return null;
+      const r = Math.hypot(X, Y), R = Z > 25 ? 4.6 : 4.8 - (Z - 4) * 0.055;
+      const band = Z <= 25 && ((Z - 4) % steps) < 1;
+      if (r > R + (band ? 1 : 0)) return null;
+      if (r < 2.3 && Z > 20) return Z < 21 ? A.HOT : 0;                       // the bore with the furnace at its end
+      if (Z > 25) return r > R - 1 ? (Z > 27 ? A.BRH : A.BR) : A.IRON;
+      if (band) return A.BR;
+      if (Y > R - 1 && ax < 0.6) return A.BRH;                               // a top rib
+      if (Y > R - 1.2 && ax < 2 && Z > 7 && Z < 13 && Math.round(Z) % 2 === 0) return A.EMB;  // heat vents
+      return r > R - 1 && h3(Math.round(X), Math.round(Y), Math.round(Z)) < 0.15 ? A.IRONH : A.IRON;
+    }, [-12, 12, -10, 18, -10, 32]);
+    if (st >= 1) pitched(v, pitch, (X, Y, Z) => { // exhaust stacks on the breech
+      for (const s of [-1, 1]) if (Math.abs(X - s * 3.5) <= 1 && Math.abs(Z + 2) <= 1 && Y > 5 && Y <= 8.5) return Y > 7.6 ? A.EMB : A.BRD;
+      return null;
+    }, [-12, 12, -10, 18, -10, 32]);
+    if (st >= 2) pitched(v, pitch, (X, Y, Z) => { // fuel canisters with a glowing window
+      for (const s of [-1, 1]) { const d = Math.hypot(X - s * 6.6, Y + 0.5); if (d <= 2.1 && Z >= 7 && Z <= 15) return Z === 7 || Z === 15 ? A.BR : (d > 1.5 && Math.abs(Y + 0.5) < 0.6 && Z > 9 && Z < 13 ? A.EMB2 : A.BRD); }
+      return null;
+    }, [-12, 12, -10, 18, -10, 32]);
+    if (st >= 3) pitched(v, pitch, (X, Y, Z) => { // swept fins and a charge orb on the breech
+      for (const s of [-1, 1]) { const ax = X * s; if (ax > 6 && ax < 8 && Y > 0 && Y < 6 - (Z - 14) * 0.5 && Z > 12 && Z < 22) return ax > 7 ? A.BRH : A.IRON; }
+      const d = Math.hypot(X, Y - 7.5, Z + 1); return d <= 1.8 ? A.WHITE : d <= 2.6 && Y < 7 ? A.BR : null;
+    }, [-12, 12, -10, 18, -10, 32]);
+    centred(P.aim, v);
+    return { ay: h + 0.8, muzzle: along(28, pitch) };
+  },
+
+  fire_2(P, h, st) { // Magma Tower: a basalt crucible brimming with crusted magma, vent chimneys at its corners
+    const v = vx(-14, 14, 0, 24, -14, 14), C = firePal(v);
+    const half = 11, rim = 8, chH = st >= 2 ? 15 : 12;
+    v.fill((x, y, z) => {
+      const ax = Math.abs(x), az = Math.abs(z);
+      if (ax > half || az > half || ax + az > half * 2 - 4) return null;
+      const shell = ax >= half - 1 || az >= half - 1 || ax + az >= half * 2 - 6;
+      if (y === rim) return shell ? (ax + az >= half * 2 - 5 || ax === half || az === half ? C.STH : C.ST) : null;
+      if (y > rim) return null;
+      if (!shell) {
+        if (y < rim - 1) return C.BAS;
+        const n = vnoise(x * 0.28, 5, z * 0.28), d = Math.hypot(x, z);
+        if (n > 0.6) return n > 0.68 ? C.CRUST : C.CRUST2;                    // cooled crust plates
+        return d < 3 ? C.WHITE : d < 6 || n < 0.4 ? C.LAVA2 : C.LAVA;
+      }
+      if (y === rim - 2 || (st >= 1 && y === 2)) return C.BR;
+      const al = ax >= az ? z : x;
+      return mortar(al, y, 3, 5) ? C.MOR : h3(x, y, z) < 0.25 ? C.BAS : C.BAS2;
+    });
+    // a spout on the front pouring a lava fall down onto the plinth
+    v.box(-2, rim - 1, half - 1, 2, rim, half + 1, (x, y, z) => (Math.abs(x) === 2 || y === rim - 1 ? C.BAS2 : C.LAVA2));
+    v.box(-1, 0, half + 1, 1, rim - 1, half + 1, (x, y) => (Math.abs(x) === 1 && h3(x, y, 1) < 0.4 ? C.LAVA : C.LAVA2));
+    v.box(-2, 0, half + 2, 2, 0, half + 3, (x, y, z) => (h3(x, y, z) < 0.5 ? C.LAVA : C.CRUST));
+    for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      const cx = sx * 10, cz = sz * 10;
+      v.box(cx - 2, 0, cz - 2, cx + 2, chH, cz + 2, (x, y, z) => {
+        if (Math.abs(x - cx) < 2 && Math.abs(z - cz) < 2 && y > chH - 2) return y === chH ? C.LAVA2 : C.COAL;
+        return y === chH || y === chH - 4 ? C.BR : mortar(Math.abs(x - cx) === 2 ? z : x, y, 3, 4) ? C.MOR : C.BAS2;
+      });
+      const fv = 0.16 + st * 0.02;
+      flame(v, chH + 1, fv, 31 + sx * 3 + sz, FLAME_COLS, 0.4, cx, cz);
+    }
+    if (st >= 3) for (let i = 0; i < 8; i++) { const a = (i / 8) * TAU + 0.39; v.cap([Math.cos(a) * 9, rim, Math.sin(a) * 9], [Math.cos(a) * 10.5, rim + 4, Math.sin(a) * 10.5], 1.0, C.BAS2, 0.4); v.set(Math.cos(a) * 10.5, rim + 5, Math.sin(a) * 10.5, C.EMB2); }
+    onTop(P.base, h, v);
+    // the floating magma heart: crusted plates with glowing cracks, flames licking off its top
+    const f = vx(-10, 10, -10, 26, -10, 10), F = firePal(f), r = 4.5 + st * 0.5;
+    f.ell(0, 0, 0, r, r * 0.92, r, (x, y, z) => {
+      const n = vnoise(x * 0.45 + 3, y * 0.45, z * 0.45);
+      const d = Math.abs(n - 0.5);
+      return d < 0.05 ? F.HOT : d < 0.1 ? F.LAVA2 : d < 0.14 ? F.LAVA : n > 0.66 ? F.CRUST2 : F.CRUST;
+    });
+    for (let i = 0; i < 4; i++) { const a = i * 1.7; f.set(Math.cos(a) * 2, -r - 1 - (i % 2), Math.sin(a) * 2, F.LAVA2); }
+    flame(f, Math.round(r * 0.6), 0.26 + st * 0.03, 19);
+    centred(P.float, f);
+    return { fy: h + 1.7, bob: 0.04, muzzle: [0, h + 2.2, 0] };
+  },
+
+  fire_3(P, h, st) { // Inferno Tower: four lava-veined basalt pillars caging a twisting column of fire
+    const H = Math.round((2.6 + st * 0.35) / U);
+    const v = vx(-13, 13, 0, H + 8, -13, 13), C = firePal(v);
+    v.fill((x, y, z) => { const m = Math.max(Math.abs(x), Math.abs(z)); if (m > 11) return null; if (m === 11 || y === 2) return mortar(Math.abs(x) === 11 ? z : x, y, 3, 5) ? C.MOR : C.BAS2; return m > 4 ? C.BAS : C.COAL; }, -11, 11, 0, 2, -11, 11);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      v.box(sx * 5, 3, sz * 5, sx * 9, H - 1, sz * 9, (x, y, z) => {
+        const ox = Math.abs(x) === 9, oz = Math.abs(z) === 9;
+        if (ox && oz) return y % 6 === 0 ? C.BR : C.BAS;                      // the outer corner edge
+        if ((ox && Math.abs(z) === 7) || (oz && Math.abs(x) === 7)) return vnoise(x * 0.4, y * 0.25, z * 0.4) > 0.38 ? C.LAVA : C.BAS2;  // lava veins
+        return mortar(ox ? z : x, y, 3, 4) ? C.MOR : h3(x, y, z) < 0.2 ? C.STH : C.ST;
+      });
+    }
+    // bronze binding rings tying the pillars together, and iron grilles between the pillars' feet
+    for (const y of [Math.round(H / 3), Math.round((2 * H) / 3)]) v.fill((x, yy, z) => { const m = Math.max(Math.abs(x), Math.abs(z)); return m >= 8 && m <= 10 ? (yy === y ? C.BRH : yy === y - 2 ? C.BRD : C.BR) : null; }, -10, 10, y - 2, y, -10, 10);
+    v.fill((x, y, z) => { const ax = Math.abs(x), az = Math.abs(z), m = Math.max(ax, az), al = ax === m ? az : ax; if (m !== 8 || al > 4) return null; return y === 3 || y === 9 ? C.BR : al % 2 === 0 ? C.IRON : null; }, -8, 8, 3, 9, -8, 8);
+    // crown platform with a hot bowl and corner horns
+    v.fill((x, y, z) => {
+      const m = Math.max(Math.abs(x), Math.abs(z)), d = Math.hypot(x, z);
+      if (m > 11 || (Math.abs(x) === 11 && Math.abs(z) === 11)) return null;
+      if (d < 4.5) return y === H ? C.HOT : C.COAL;
+      return y === H + 1 ? (m >= 10 ? C.BRH : null) : y === H ? (m >= 10 ? C.BR : C.STH) : C.BAS2;
+    }, -11, 11, H - 1, H + 1, -11, 11);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      v.path([[sx * 9.5, H + 1, sz * 9.5], [sx * 10.5, H + 4, sz * 10.5], [sx * 9.6, H + 7, sz * 9.6]], 1.2, 0.5, (x, y) => (y > H + 5 ? C.BRH : C.BAS));
+      if (st >= 2) v.set(sx * 9.6, H + 8, sz * 9.6, C.HOT);
+    }
+    // the fire column: two tongues spiralling up inside the cage
+    v.fill((x, y, z) => {
+      const t = (y - 3) / (H - 4); if (t < 0 || t > 1) return null;
+      let best = 0;
+      for (const ph of [0, Math.PI]) {
+        const a = y * 0.32 + ph, cx = Math.cos(a) * 1.6, cz = Math.sin(a) * 1.6;
+        const d = Math.hypot(x - cx, z - cz) + (vnoise(x * 0.5, y * 0.3, z * 0.5) - 0.5) * 2.6;
+        best = Math.max(best, 1 - d / 3.4);
+      }
+      if (best <= 0) return null;
+      const n = vnoise(x * 0.6 + 9, y * 0.18, z * 0.6);
+      if (best < 0.25 && n > 0.58) return null;
+      return best > 0.6 ? (n > 0.5 ? C.WHITE : C.HOT) : best > 0.32 ? (n > 0.45 ? C.LAVA2 : C.EMB2) : n > 0.5 ? C.EMB : C.LAVA;
+    }, -5, 5, 3, H - 1, -5, 5);
+    onTop(P.base, h, v);
+    const f = vx(-14, 14, 0, 40, -14, 14);
+    flame(f, 0, 0.55 + st * 0.06, 23);
+    centred(P.float, f);
+    return { fy: h + H * U + 0.1, bob: 0.08, muzzle: [0, h + H * U + 1.2, 0] };
+  },
+
+  fire_4(P, h, st) { // Phoenix Spire: a firebird with spread wings over a burning nest
+    const v = vx(-12, 12, 0, 28, -12, 12), C = firePal(v);
+    v.fill((x, y, z) => { const m = Math.max(Math.abs(x), Math.abs(z)); const half = y <= 2 ? 10 : 8; if (m > half) return null; if (m === half) return y === 2 || y === 5 ? C.BR : mortar(Math.abs(x) === half ? z : x, y, 3, 5) ? C.MOR : C.BAS2; return C.BAS; }, -10, 10, 0, 5, -10, 10);
+    v.cyl(0, 6, 0, 5.6, 17, (x, y, z) => (y === 10 || y === 15 ? C.BR : (y + Math.round(Math.atan2(z, x) * 3)) % 3 === 0 && Math.hypot(x, z) > 5 ? C.MOR : C.ST));
+    v.cyl(0, 18, 0, 7.5, 19, (x, y, z) => (Math.hypot(x, z) > 6.8 ? C.BRH : C.BR));
+    // the nest: twigs woven round a bed of embers
+    const R = rng(77), TW = [v.pal("#4a3020", 0, 0.1), v.pal("#6a4428", 0, 0.1), v.pal("#2e1d14", 0, 0.1)];
+    for (let i = 0; i < 26; i++) {
+      const a = R() * TAU, r = 5.5 + R() * 2.2, y = 20 + R() * 3.2, L = 3 + R() * 3, b = a + Math.PI / 2 + (R() - 0.5) * 0.9;
+      v.cap([Math.cos(a) * r - Math.cos(b) * L, y - R(), Math.sin(a) * r - Math.sin(b) * L], [Math.cos(a) * r + Math.cos(b) * L, y + R(), Math.sin(a) * r + Math.sin(b) * L], 0.7, TW[i % 3]);
+    }
+    v.cyl(0, 20, 0, 4.5, 21, (x, y, z) => (h3(x, y, z) < 0.45 ? C.HOT : C.EMB));
+    flame(v, 21, 0.18 + st * 0.03, 41, FLAME_COLS, 0.5);
+    onTop(P.base, h, v);
+    // the phoenix
+    const f = vx(-20, 20, -16, 18, -12, 10), F = firePal(f);
+    const RED = f.pal("#b8301a", 0, 0.06), RED2 = f.pal("#d84a1e", 0, 0.06), OR = f.pal("#f07a26", 0, 0.05), BREAST = f.pal("#ff9a3a", 0, 0.05);
+    const GOLD = f.pal("#ffcf5a", 0, 0.03), TIP = f.pal("#ffd75a", 1.7, 0.04), TIP2 = f.pal("#fff1b0", 2.0, 0.02), MID = f.pal("#ff8a2a", 1.3, 0.05);
+    const feather = (d, len) => { const t = d / len; return t < 0.42 ? RED : t < 0.62 ? RED2 : t < 0.8 ? OR : t < 0.92 ? MID : TIP; };
+    f.ell(0, 0, 0, 3.6, 4.8, 3.8, (x, y, z) => (z > 1.4 && y < 2.5 ? BREAST : y > 2.5 ? RED2 : RED));
+    f.ell(0, 6, 2.2, 2.6, 2.5, 2.7, RED2);
+    f.cap([0, 6.1, 4.4], [0, 5, 7.4], 1.2, GOLD, 0.35);
+    for (const s of [-1, 1]) f.set(s * 1.8, 6.7, 3.8, TIP2);
+    const crest = 2 + Math.min(st, 2);
+    for (let i = 0; i < crest; i++) { const o = (i - (crest - 1) / 2) * 1.4; f.path([[o * 0.5, 8, 1.6], [o, 10.5, 0.2], [o * 1.4, 12.5, -1.8]], 0.8, 0.45, (x, y) => (y > 11.5 ? TIP : y > 10 ? MID : RED2)); }
+    const span = 1 + st * 0.06;
+    for (const s of [-1, 1]) {
+      // the wing's leading edge (shoulder, elbow, wrist, tip), raised; feathers hang from it, longest at the tip
+      const bone = [[s * 2.8, 2.5, 0], [s * 7, 5.5, -1], [s * 11.5 * span, 8, -2], [s * 16.5 * span, 9.5, -3]];
+      f.path(bone, 1.3, 0.7, RED2);
+      const at = (t) => { const k = Math.min(2.999, t * 3), i = Math.floor(k), u = k - i; return bone[i].map((c, j) => c + (bone[i + 1][j] - c) * u); };
+      for (let i = 0; i <= 12; i++) {
+        const t = 0.08 + (i / 12) * 0.92, A = at(t), len = (4.5 + t * t * 8) * span;
+        const d = [s * (0.25 + t * 0.55), -1, -0.3], L = Math.hypot(...d);
+        const B = A.map((c, j) => c + (d[j] / L) * len);
+        f.cap(A, B, 1.0, (x, y, z) => { const q = Math.hypot(x - A[0], y - A[1], z - A[2]) / len; return q < 0.5 ? (i % 2 ? RED : RED2) : q < 0.78 ? OR : q < 0.92 || t < 0.55 ? MID : TIP; }, 0.55);
+        if (i % 2 === 0) f.cap(A, A.map((c, j) => c + (d[j] / L) * len * 0.45 + (j === 2 ? 0.8 : 0)), 0.9, RED2, 0.6);   // coverts
+      }
+    }
+    for (let i = 0; i < 5; i++) {
+      const o = (i - 2) * 1.8, L = 12 + (2 - Math.abs(i - 2)) * 2;
+      const pts = [[0, -3, -2], [o * 0.6, -7, -4.5], [o, -11, -6], [o * 1.3, -3 - L, -6.5 + Math.abs(o) * 0.4]];
+      f.path(pts, 1.1, 0.5, (x, y) => feather(-y - 3, L));
+    }
+    for (const s of [-1, 1]) f.cap([s * 1.2, -3.5, 0.5], [s * 1.4, -5.5, 1.5], 0.6, GOLD);
+    if (st >= 2) for (let i = 0; i < 10; i++) { const a = i * 2.4, d = 6 + (i % 3) * 3; f.set(Math.cos(a) * d * 0.9, -6 - (i % 4) * 2, Math.sin(a) * d * 0.4 - 3, i % 2 ? TIP : TIP2); }
+    centred(P.float, f);
+    return { fy: h + 2.7 + st * 0.12, bob: 0.18, muzzle: [0, h + 3.0, 0] };
+  },
+
+  // ===== ICE ===============================================================
+  ice_0(P, h, st) { // Frost Tower: a tall vein-lit crystal spire rising from stepped granite and ice
+    const H = 26 + st * 4, v = vx(-13, 13, 0, H + 12, -13, 13), C = icePal(v);
+    v.fill((x, y, z) => { const m = Math.max(Math.abs(x), Math.abs(z)); if (m > 8) return null; if (y === 4) return m === 8 ? C.SNOW2 : C.SNOW; if (m === 8) return mortar(Math.abs(x) === 8 ? z : x, y, 2, 5) ? C.MOR : C.GR2; return C.GR; }, -8, 8, 0, 4, -8, 8);
+    v.fill((x, y, z) => { const ax = Math.abs(x), az = Math.abs(z); if (ax > 6 || az > 6 || ax + az > 10) return null; return y === 8 ? C.ICE1 : (ax === 6 || az === 6 || ax + az === 10) ? (y === 6 ? C.ICE2 : C.ICE3) : C.ICE4; }, -6, 6, 5, 8, -6, 6);
+    if (st >= 3) v.cyl(0, 15, 0, 5.4, 16, (x, y) => (y === 16 ? C.STEELH : C.STEEL));
+    crystal(v, 0, 6, 0, 4.4, H, iceTones(C), { vein: true, shoulder: 0.7 });
+    const n = 3 + Math.min(st, 2);
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * TAU + 0.5, d = 4;
+      crystal(v, Math.cos(a) * d, 7, Math.sin(a) * d, 1.9, 10 + (i % 2) * 3 + st, iceTones(C), { lean: [Math.cos(a) * 0.2, Math.sin(a) * 0.2] });
+    }
+    if (st >= 2) for (let i = 0; i < 8; i++) { const a = (i / 8) * TAU; crystal(v, Math.cos(a) * 8.5, 5, Math.sin(a) * 8.5, 1, 4, iceTones(C), { lean: [Math.cos(a) * 0.25, Math.sin(a) * 0.25] }); }
+    onTop(P.base, h, v);
+    return { muzzle: [0, h + (H + 6) * U, 0] };
+  },
+
+  ice_1(P, h, st) { // Icicle Tower: a crystal-limbed frost ballista loaded with a long glowing icicle
+    const b = vx(-10, 10, 0, 8, -10, 10), C = icePal(b);
+    b.fill((x, y, z) => {
+      const d = Math.hypot(x, z);
+      if (y <= 4) return d <= 8.5 ? (d > 7.5 ? (y === 4 ? C.SNOW : mortar(Math.round(Math.atan2(z, x) * 8), y, 2, 3) ? C.MOR : C.GR2) : y === 4 ? C.SNOW2 : C.GR) : null;
+      return d <= 6.5 ? (y === 5 ? C.STEELH : C.STEEL) : null;
+    });
+    onTop(P.base, h, b);
+    const v = vx(-18, 18, -9, 8, -12, 26), A = icePal(v);
+    const WOOD = v.pal("#46566a", 0, 0.08), WOODH = v.pal("#5d6f86", 0, 0.07);
+    // carriage and yoke
+    v.box(-5, -8, -6, 5, -2, 4, (x, y, z) => (y === -2 ? A.SNOW : Math.abs(x) === 5 && Math.abs(z) < 3 && y > -7 && y < -3 ? A.CY : (y + z) % 4 === 0 ? A.STEELD : A.GR2));
+    if (st >= 1) for (const s of [-1, 1]) { v.cyl(s * 6, -4, -1, 2.2, s * 8, A.STEEL, "x"); v.cyl(s * 6, -4, -1, 1, s * 9, A.STEELH, "x"); }
+    // the stock with frosted fittings
+    v.box(-2, -1, -9, 2, 1, 16, (x, y, z) => (z % 6 === 0 ? A.STEELH : y === 1 ? WOODH : WOOD));
+    v.box(-3, -2, 12, 3, 2, 15, A.STEEL);
+    // crystal limbs and the bowstring
+    for (const s of [-1, 1]) {
+      const pts = [[s * 2.5, 0.5, 13], [s * 7, 1, 13.5], [s * 11.5, 1.5, 11.5], [s * 15, 2, 7.5], [s * 16.5, 2.5, 4.5]];
+      v.path(pts, 1.6, 0.7, (x, y, z) => (Math.abs(x) > 15.5 ? A.CY2 : (y + Math.abs(x)) % 3 === 0 ? A.ICE1 : z > 11 ? A.ICE2 : A.ICE3));
+      v.path([[s * 16.5, 2.5, 4.5], [s * 8, 1.5, -1.5], [0, 1, -4]], 0.45, 0.45, A.SNOW2);
+    }
+    // the loaded icicle
+    const L0 = -4, L1 = 25 + (st >= 2 ? 1 : 0);
+    v.fill((x, y, z) => {
+      const t = (z - L0) / (L1 - L0); if (t < 0 || t > 1) return null;
+      const r = 1.9 * (t < 0.15 ? 1 : 1 - (t - 0.15) / 0.85), d = Math.hypot(x, y - 3);
+      if (d > r + 0.3) return null;
+      return t > 0.85 ? A.WG : d < r - 0.8 || Math.abs(x) + Math.abs(y - 3) < 1 ? A.CY2 : A.CY;
+    }, -3, 3, 0, 6, L0, L1);
+    for (const s of [-1, 1]) v.box(s * 1, 3 + s * 2, L0, s * 2, 3 + s * 2, L0 + 2, A.ICE2), v.box(s * 2, 3, L0, s * 3, 3, L0 + 2, A.ICE2);
+    if (st >= 2) for (const s of [-1, 1]) crystal(v, s * 4, 1, 4, 1.3, 6, iceTones(A), { lean: [s * 0.2, 0.15] });
+    if (st >= 3) v.box(-1, -1, -11, 1, 3, -10, (x, y) => (y === 3 ? A.WG : A.STEELH));
+    centred(P.aim, v);
+    return { ay: h + 0.75, muzzle: [0, 3 * U, L1 * U] };
+  },
+
+  ice_2(P, h, st) { // Glacier Tower: a heavy ice-block cannon driving a spiralled crystal drill
+    const b = vx(-11, 11, 0, 9, -11, 11), C = icePal(b);
+    b.fill((x, y, z) => {
+      const ax = Math.abs(x), az = Math.abs(z); if (ax > 10 || az > 10 || ax + az > 14) return null;
+      const edge = ax === 10 || az === 10 || ax + az === 14;
+      if (y === 8) return edge ? C.SNOW2 : C.SNOW;
+      if (y === 3 || y === 6) return edge ? C.STEEL : C.GR;
+      return edge ? (mortar(ax === 10 ? z : x, y, 3, 5) ? C.MOR : h3(x, y, z) < 0.3 ? C.ICE3 : C.GR2) : C.GR;
+    });
+    onTop(P.base, h, b);
+    const v = vx(-12, 12, -8, 16, -11, 33), A = icePal(v), pitch = 0.22;
+    // housing of ice blocks bound in steel
+    v.fill((x, y, z) => {
+      const ax = Math.abs(x); if (ax > 9 || y < -5 || y > 6 || z < -9 || z > 6 || ax + Math.abs(y) > 13) return null;
+      if (ax === 9 || y === 6 || z === -9) {
+        if (z === -8 || z === 4 || z === -2) return A.STEEL;
+        if (y === 6 && ax < 2) return A.STEELH;
+        const [a, b] = ax === 9 ? [z, y] : y === 6 ? [x, z] : [x, y], row = Math.floor((b + 12) / 4), sh = (row & 1) * 3;
+        if ((b + 12) % 4 === 3 || (((a + sh) % 6) + 6) % 6 === 0) return A.ICE3;
+        return h3(Math.floor((a + sh + 60) / 6), row, ax === 9 ? 1 : y === 6 ? 2 : 3) < 0.5 ? A.ICE2 : A.ICE1;
+      }
+      return A.ICE4;
+    });
+    v.box(-3, -2, -10, 3, 2, -10, (x, y) => (Math.abs(x) < 2 && Math.abs(y) < 1 ? A.CY2 : A.STEELD));
+    pitched(v, pitch, (X, Y, Z) => {
+      if (Z < 5 || Z > 32) return null;
+      const r = Math.hypot(X, Y);
+      if (Z <= 14) { const R = Z < 7 || Z > 12 ? 6 : 5.3; return r <= R ? (Z === 6 || Z === 13 ? A.STEELH : r > R - 0.9 && (Math.round(Math.atan2(Y, X) / (TAU / 8)) & 1) ? A.STEELD : A.STEEL) : null; }
+      const t = (Z - 14) / 18, R = 5.4 * (1 - t);
+      if (r > R + 0.4) return null;
+      if (t > 0.86) return A.WG;
+      const sp = (((Math.atan2(Y, X) / TAU) * 3 + Z * 0.13) % 1 + 1) % 1;       // three spiral flutes
+      return sp < 0.18 ? A.CY : sp < 0.55 ? A.ICE1 : A.ICE3;
+    }, [-12, 12, -8, 16, -11, 33]);
+    for (const s of [-1, 1]) crystal(v, s * 6.5, 6, -5, 1.8, 6 + st * 2, iceTones(A), { lean: [s * 0.18, -0.12] });
+    if (st >= 2) crystal(v, 0, 6, -6, 2.2, 8 + st, iceTones(A), { lean: [0, -0.2], vein: true });
+    if (st >= 1) for (const s of [-1, 1]) v.box(s * 10, -4, -6, s * 10, 3, 2, (x, y, z) => (y === -4 || y === 3 || z === -6 || z === 2 ? A.STEELD : (y === -2 || y === 1) && (z === -4 || z === 0) ? A.STEELH : A.STEEL));
+    centred(P.aim, v);
+    return { ay: h + 1.0, muzzle: along(32, pitch) };
+  },
+
+  ice_3(P, h, st) { // Blizzard Tower: a rune-carved frost obelisk under a whirling ring of snow
+    const H = Math.round((2.8 + st * 0.3) / U), v = vx(-11, 11, 0, H + 12, -11, 11), C = icePal(v);
+    v.fill((x, y, z) => { const m = Math.max(Math.abs(x), Math.abs(z)); if (m > 9) return null; if (y === 3) return m >= 8 ? C.SNOW2 : C.SNOW; if (m === 9) return mortar(Math.abs(x) === 9 ? z : x, y, 2, 5) ? C.MOR : C.GR2; return C.GR; }, -9, 9, 0, 3, -9, 9);
+    const RUNE = [[0, 0], [0, 1], [0, 2], [-1, 2], [1, 0], [0, 4], [-1, 5], [1, 5], [0, 6], [0, 8], [1, 9], [-1, 9], [0, 10]];
+    v.fill((x, y, z) => {
+      const t = (y - 4) / (H - 4), half = Math.round(6 - t * 2), ax = Math.abs(x), az = Math.abs(z), m = Math.max(ax, az);
+      const ledge = (y - 4) % 10 === 9;
+      if (m > half + (ledge ? 1 : 0)) return null;
+      if (ledge) return m >= half ? C.SNOW : C.GR;
+      if (m < half) return C.GR;
+      if (ax === half && az === half) return C.GRH;
+      const al = ax === half ? z * Math.sign(x) : x * -Math.sign(z), ry = (y - 6) % 22;
+      if (y > 5 && y < H - 2 && RUNE.some(([a, b]) => a === al && b === ry)) return C.CY;
+      return (y + al) % 7 === 0 ? C.GRH : C.GR2;
+    }, -7, 7, 4, H, -7, 7);
+    crystal(v, 0, H + 1, 0, 4, 10, iceTones(C), { shoulder: 0.25 });
+    onTop(P.base, h, v);
+    // the snow ring (spins): clumps of snow with a few glowing flakes
+    const s = vx(-25, 25, -12, 14, -25, 25), S = icePal(s), R = rng(5);
+    const ring = (r, y, n, size) => {
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * TAU, x = Math.cos(a) * r, z = Math.sin(a) * r;
+        s.ell(x, y + Math.sin(a * 3) * 1.2, z, size * 1.4, size, size * 1.4, (xx, yy, zz) => (yy > y + size * 0.3 ? S.SNOW : S.SNOW2));
+        const a2 = a + TAU / n / 2; if (i % 2) s.set(Math.cos(a2) * (r + (R() - 0.5) * 3), y + (R() - 0.5) * 4, Math.sin(a2) * (r + (R() - 0.5) * 3), S.WG);
+      }
+    };
+    ring(18, 0, 14, 1.4); ring(13, 11, 10, 1.2);
+    if (st >= 2) ring(22, -9, 16, 1.1);
+    centred(P.spin, s);
+    return { sy: h + 1.4, spinRate: 1.6, muzzle: [0, h + H * U, 0] };
+  },
+
+  ice_4(P, h, st) { // Absolute Zero: a cracked frozen orb held aloft by four crystal claws, shards orbiting it
+    const v = vx(-12, 12, 0, 34, -12, 12), C = icePal(v), H = 22 + st * 2;
+    v.fill((x, y, z) => { const m = Math.max(Math.abs(x), Math.abs(z)); if (m > 9) return null; if (y === 4) return m >= 8 ? C.SNOW2 : Math.hypot(x, z) < 4 ? C.CY : C.SNOW; if (m === 9) return mortar(Math.abs(x) === 9 ? z : x, y, 2, 5) ? C.MOR : C.GR2; return C.GR; }, -9, 9, 0, 4, -9, 9);
+    v.cyl(0, 5, 0, 3, 5, C.ICE2);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      // a claw: crystal pillar arcing inward, its tip curling toward the orb
+      crystal(v, sx * 7.5, 5, sz * 7.5, 2.3, Math.round(H * 0.65), iceTones(C), { lean: [sx * 0.08, sz * 0.08], vein: st >= 3 });
+      const y0 = 5 + Math.round(H * 0.55);
+      v.path([[sx * 8.5, y0, sz * 8.5], [sx * 8.4, y0 + 5, sz * 8.4], [sx * 6.5, y0 + 9, sz * 6.5], [sx * 4.5, y0 + 10, sz * 4.5]], 1.6, 0.6, (x, y) => ((x + y) % 3 === 0 ? C.ICE1 : C.ICE2));
+      v.set(sx * 4.5, y0 + 10, sz * 4.5, C.CY);
+    }
+    onTop(P.base, h, v);
+    const f = vx(-9, 9, -9, 9, -9, 9), F = icePal(f), r = 5.6 + st * 0.4;
+    f.ell(0, 0, 0, r, r, r, (x, y, z) => {
+      const L = Math.hypot(x, y, z) || 1, n = vnoise(x / L * 2.2 + 4, y / L * 2.2, z / L * 2.2);
+      if (Math.abs(n - 0.5) < 0.05) return F.CY2;                                   // glowing cracks
+      const fct = h3(Math.round(x / L * 2), Math.round(y / L * 2), Math.round(z / L * 2));   // facets
+      return fct < 0.3 ? F.ICE1 : fct < 0.6 ? F.ICE2 : fct < 0.85 ? F.ICE2B : F.ICE3;
+    });
+    centred(P.float, f);
+    const s = vx(-22, 22, -20, 20, -22, 22), S = icePal(s);
+    const shard = (x, y, z) => { s.set(x, y, z, S.ICE2); s.set(x, y + 1, z, S.ICE1); s.set(x, y - 1, z, S.ICE3); s.set(x, y + 2, z, S.CY); s.set(x + 1, y, z, S.ICE2B); };
+    for (let i = 0; i < 16; i++) { const a = (i / 16) * TAU; shard(Math.cos(a) * 18, 0, Math.sin(a) * 18); }
+    for (let i = 0; i < 12; i++) { const a = (i / 12) * TAU; shard(Math.cos(a) * 15, Math.sin(a) * 15, 0); }
+    if (st >= 2) for (let i = 0; i < 12; i++) { const a = (i / 12) * TAU + 0.26; shard(0, Math.sin(a) * 16, Math.cos(a) * 16); }
+    centred(P.spin, s);
+    return { fy: h + 2.0, sy: h + 2.0, spinRate: 1.1, bob: 0.12, muzzle: [0, h + 2.0, 0] };
+  },
+};

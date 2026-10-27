@@ -12,6 +12,7 @@
    The aim part's +z faces the target. */
 import * as THREE from "three";
 import { Part, rng, shade, mix, TAU } from "./kit.js";
+import { VOX_PLINTH, VOX_HEADS } from "./towermodels.js";
 
 const STAGE_OF = (level) => (level >= 10 ? 3 : level >= 7 ? 2 : level >= 4 ? 1 : 0);
 export const towerStage = STAGE_OF;
@@ -839,6 +840,10 @@ const HEADS = {
 // ---------------------------------------------------------------------------
 // ASSEMBLY + CACHE
 // ---------------------------------------------------------------------------
+// the Fire and Ice towers are voxel sculpts (render/towermodels.js)
+Object.assign(PLINTH, VOX_PLINTH);
+Object.assign(HEADS, VOX_HEADS);
+
 const cache = new Map();
 function assemble(def, stage, mutCount, E) {
   const P = { base: new Part(11), aim: new Part(12), spin: new Part(13), float: new Part(14) };
