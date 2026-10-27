@@ -58,20 +58,35 @@ export function createUI(opts) {
   function showRing(sx, sy, items, o) {
     const m = $("radial-menu"), stage = $("game-stage"); if (!m || !stage) return;
     m.innerHTML = "";
-    const W = stage.clientWidth, H = stage.clientHeight, R = items.length > 6 ? Math.min(124, 70 + items.length * 5) : 80;
-    const cx = Math.max(R + 40, Math.min(W - R - 40, sx));
-    const cy = Math.max(R + ringTop(), Math.min(H - R - 44, sy));
+    const W = stage.clientWidth, H = stage.clientHeight;
+    let R = items.length > 6 ? Math.min(124, 70 + items.length * 5) : 80;
+    const n = items.length;
+    // The ring stays centred on the spot you tapped, so the square never hides under a bubble. Near an
+    // edge the bubbles fan out to the open side instead of the whole ring sliding away from the spot.
+    const top = ringTop(), bottom = H - 44;
+    let arc = "full";
+    if (sy - R - 40 < top) arc = "down";
+    else if (sy + R > bottom) arc = "up";
+    else if (sx - R < 34) arc = "right";
+    else if (sx + R > W - 34) arc = "left";
+    const SPAN = { full: [-Math.PI / 2, 1.5 * Math.PI], down: [-0.1 * Math.PI, 1.1 * Math.PI], up: [0.9 * Math.PI, 2.1 * Math.PI], right: [-0.6 * Math.PI, 0.6 * Math.PI], left: [0.4 * Math.PI, 1.6 * Math.PI] }[arc];
+    if (arc !== "full") R = Math.max(R, ((n - 1) * 66) / (SPAN[1] - SPAN[0]));
+    const cx = arc === "right" || arc === "left" ? sx : Math.max(R * (arc === "full" ? 1 : 0.2) + 40, Math.min(W - R * (arc === "full" ? 1 : 0.2) - 40, sx));
+    const cy = arc === "full" ? Math.max(R + top, Math.min(H - R - 44, sy)) : Math.max(top - 54, Math.min(bottom, sy));
+    const angleOf = (i) => arc === "full" ? SPAN[0] + (i * 2 * Math.PI) / n : SPAN[0] + (n > 1 ? (i * (SPAN[1] - SPAN[0])) / (n - 1) : 0);
     const hub = document.createElement("div"); hub.className = "rad-hub"; hub.style.left = cx + "px"; hub.style.top = cy + "px"; m.appendChild(hub);
     const label = document.createElement("div");
     label.className = "rad-label";
-    label.style.left = cx + "px"; label.style.top = (cy - R - 40) + "px";
-    label.innerHTML = o.title || "";
+    label.style.left = cx + "px";
+    if (arc === "down") { label.style.top = (cy + R + 36) + "px"; label.classList.add("below"); }
+    else label.style.top = (cy - R - 40) + "px";
+    const titleOf = () => (typeof o.title === "function" ? o.title() : o.title) || "";
+    label.innerHTML = titleOf();
     m.appendChild(label);
-    _ring = { items: {}, focus: null, label, defTitle: o.title || "", cx, cy, R, anchor: o.anchor || null };
+    _ring = { items: {}, focus: null, label, titleOf, get defTitle() { return titleOf(); }, cx, cy, R, arc, anchor: o.anchor || null };
     m.style.transform = "";
-    const n = items.length;
     items.forEach((it, i) => {
-      const a = -Math.PI / 2 + (i * 2 * Math.PI) / n;
+      const a = angleOf(i);
       const b = document.createElement("button");
       b.className = "rad-item" + (it.cls ? " " + it.cls : "");
       if (it.color) b.style.setProperty("--ec", it.color);
@@ -89,12 +104,13 @@ export function createUI(opts) {
       b.addEventListener("pointerenter", (e) => { if (e.pointerType === "mouse") { if (it.onFocus) it.onFocus(); if (it.confirm) focus(); } });
       b.onclick = (ev) => {
         ev.stopPropagation();
+        if (!_ring || !b.isConnected) return; // a ring that has just closed
         if (it.isDisabled && it.isDisabled()) { sfx("reject"); return; }
         if (it.confirm && (!_ring || _ring.focus !== it.key)) { sfx("click"); focus(); return; }
         it.exec();
         if (_ring) render();
       };
-      _ring.items[it.key] = { el: b, render };
+      _ring.items[it.key] = { el: b, render, focusHtml: it.focusHtml };
       m.appendChild(b);
     });
     m.classList.add("show");
@@ -106,13 +122,24 @@ export function createUI(opts) {
     const navB = nav && nav.offsetParent !== null ? nav.getBoundingClientRect().bottom - st : 60;
     return Math.max(86, navB + 64);
   }
-  function refreshRing() { if (!_ring) return; for (const k in _ring.items) _ring.items[k].render(); }
+  function refreshRing() {
+    if (!_ring) return;
+    for (const k in _ring.items) _ring.items[k].render();
+    // the caption follows the tower (its level changes the moment an upgrade is paid for)
+    const f = _ring.focus && _ring.items[_ring.focus];
+    const h = f && f.focusHtml ? (typeof f.focusHtml === "function" ? f.focusHtml() : f.focusHtml) : _ring.titleOf();
+    if (_ring.label._h !== h) { _ring.label.innerHTML = h; _ring.label._h = h; }
+  }
   // keep the ring on its tower/tile while the camera glides (clamped above the open card)
   function trackRing(sx, sy, maxY) {
     if (!_ring) return;
     const stage = $("game-stage"); const W = stage.clientWidth, H = stage.clientHeight, R = _ring.R;
-    const cx = Math.max(R + 40, Math.min(W - R - 40, sx));
-    const cy = Math.max(R + ringTop(), Math.min(Math.min(H - R - 44, (maxY || H) - R - 30), sy));
+    let cx, cy;
+    if (_ring.arc && _ring.arc !== "full") { cx = sx; cy = Math.max(ringTop() - 54, Math.min(H - 44, sy)); }
+    else {
+      cx = Math.max(R + 40, Math.min(W - R - 40, sx));
+      cy = Math.max(R + ringTop(), Math.min(Math.min(H - R - 44, (maxY || H) - R - 30), sy));
+    }
     $("radial-menu").style.transform = `translate(${Math.round(cx - _ring.cx)}px, ${Math.round(cy - _ring.cy)}px)`;
   }
 
@@ -128,9 +155,12 @@ export function createUI(opts) {
     return { air, det, dt };
   }
   // Build ring: one bubble per unlocked tower of every element in this run
-  function openBuildRing(corr, tile, sx, sy) {
+  // Build ring: one bubble per unlocked tower of every element in this run, plus "move the builder here".
+  // The chosen square stays live: drag it to shift the spot (the ring follows), tap elsewhere to start over.
+  function openBuildRing(corr, tile, sx, sy, o = {}) {
     closeAllPanels();
     const v = getView(); v.buildTile = tile; v.buildMenuOpen = true;
+    const spot = { canBuild: o.canBuild !== false };
     const els = (v.player && v.player.buildable) || [corr.element];
     const list = [], lockedBy = [];
     for (const e of els) {
@@ -145,20 +175,38 @@ export function createUI(opts) {
         key: t.id, color: el.color, confirm: true,
         html: `<img class="ri-thumb" src="${thumb(t.id)}" alt=""><span class="ri-cost">${t.cost}</span>${els.length > 1 ? `<span class="ri-el">${sigil(t.element, "xs")}</span>` : ""}`,
         focusHtml: () => {
+          if (!spot.canBuild) return `<b>No room here</b><br><span class="rl-dim">Drag the square to a free spot</span>`;
           const tg = towerTags(t);
           const dps = t.archetype === "support" ? "aura" : `${Math.round(t.damage * t.fireRate * R.TUNE.towerDamage)} DPS`;
           const st = t.status ? ` · ${DB.STATUSES[t.status].icon} ${DB.STATUSES[t.status].name}` : "";
           return `<b>${t.name}</b> — ${t.cost} · ${dps}${st}<br><span class="rl-dim">${tg.dt.icon} ${tg.dt.name} · ${tg.air ? "🪽 hits air" : "ground only"}${tg.det ? " · 👁 sees stealth" : ""} · tap again to build</span>`;
         },
         onFocus: () => { v.buildPreview = { range: t.range }; },
-        exec: () => { cmd.build(corr.index, tile.c, tile.r, t.id); closeAllPanels(); },
-        isDisabled: () => curOf(v, t.element) < t.cost,
+        exec: () => { if (!spot.canBuild) { sfx("reject"); return; } cmd.build(corr.index, tile.c, tile.r, t.id); closeAllPanels(); },
+        isDisabled: () => !spot.canBuild || curOf(v, t.element) < t.cost,
       };
     });
+    if (corr.builder && cmd.moveBuilder) items.push({ key: "mv", cls: "rad-builder", confirm: false,
+      html: `${icon("pin")}<span class="ri-cost">Builder</span>`,
+      exec: () => { cmd.moveBuilder(corr.index, tile.c, tile.r); closeAllPanels(); } });
     items.push({ key: "x", cls: "rad-cancel", confirm: false, html: icon("close"), exec: closeAllPanels });
-    const cur = v.state.economy === "shared" ? `${curIcon(v, corr.element)} ${Math.floor(curOf(v, corr.element))}` : els.map((e) => `${sigil(e, "xs")} ${Math.floor(curOf(v, e))}`).join(" ");
-    showRing(sx, sy, items, { anchor: { u: tile.c + 0.5, v: tile.r + 0.5 }, title: `Build — ${cur}${lockedBy.length ? `<br><span class="rl-dim">${icon("lock", "xs")} ${lockedBy.join(", ")} more with Mastery</span>` : ""}` });
+    const title = () => {
+      const cur = v.state.economy === "shared" ? `${curIcon(v, corr.element)} ${Math.floor(curOf(v, corr.element))}` : els.map((e) => `${sigil(e, "xs")} ${Math.floor(curOf(v, e))}`).join(" ");
+      if (!spot.canBuild) return `<span class="rl-main">No room to build here</span><span class="rl-dim">${icon("move", "xs")} Drag the square · ${icon("pin", "xs")} or send your builder</span>`;
+      return `<span class="rl-main">Build · ${cur}</span><span class="rl-dim">${icon("move", "xs")} Drag the square to shift it${lockedBy.length ? ` · ${icon("lock", "xs")} ${lockedBy.join(", ")} with Mastery` : ""}</span>`;
+    };
+    showRing(sx, sy, items, { anchor: { u: tile.c + 0.5, v: tile.r + 0.5 }, title });
+    _ring.kind = "build"; _ring.tile = tile; _ring.corr = corr; _ring.spot = spot;
     if (opts.onPanels) opts.onPanels();
+  }
+  // drag the build square: same ring, new spot (the caller says whether a tower fits there)
+  function moveBuildSpot(c, r, canBuild) {
+    if (!_ring || _ring.kind !== "build") return;
+    const v = getView();
+    _ring.tile.c = c; _ring.tile.r = r; v.buildTile = _ring.tile;
+    _ring.anchor = { u: c + 0.5, v: r + 0.5 };
+    _ring.spot.canBuild = canBuild;
+    refreshRing();
   }
 
   // Tower ring: upgrade / target cycle / details / sell
@@ -185,7 +233,7 @@ export function createUI(opts) {
       { key: "x", cls: "rad-cancel", confirm: false, html: icon("close"), exec: closeAllPanels },
     ];
     const S = DB.CONFIG.towerSize;
-    showRing(sx, sy, items, { anchor: { u: tw.c + S / 2, v: tw.r + S / 2 }, title: `${sigil(def.element, "sm")} ${def.name} · Lv${tw.level}` });
+    showRing(sx, sy, items, { anchor: { u: tw.c + S / 2, v: tw.r + S / 2 }, title: () => `${sigil(def.element, "sm")} ${def.name} · Lv${tw.level}${tw.upT > 0 ? " · upgrading…" : tw.bState ? " · building…" : ""}` });
     renderTowerCard(corr, tw, false);
   }
 
@@ -261,7 +309,7 @@ export function createUI(opts) {
     const v = getView(), pl = v.field;
     let label = `${icon("play")} Start Wave ${pl.wave + 1}`;
     if (v.state.mode !== "endless" && pl.wave >= pl.totalWaves && pl.phase !== "prep") label = "Clear Enemies";
-    if (pl.phase === "prep") label = v.state.challenge ? `${icon("skull")} Summon the Boss` : `${icon("skull")} Bonus: the Sealed One`;
+    if (pl.phase === "prep") label = `${icon("skull")} Summon at the Vortex`;
     if (pl.phase === "endboss") label = "Boss Active";
     const b = $("quick-start-wave");
     if (v.online) { const sb0 = $("quick-speed-cycle"); if (sb0) sb0.style.display = "none"; updateWavePreview(); return; }
@@ -526,6 +574,7 @@ export function createUI(opts) {
     let acts = "";
     if (own) {
       acts += insp ? `<button class="sh-act" data-stopinsp>✕ Stop inspiring</button>` : `<button class="sh-act" data-inspire>✨ Inspire a tower</button>`;
+      acts += `<button class="sh-act" data-movebd>${icon("pin", "xs")} Move to…</button>`;
       if (v.versus) acts += `<button class="sh-act pink" data-sends>${icon("swords", "xs")} Sends</button>`;
     }
     if (acts) peek += `<div class="sh-acts">${acts}</div>`;
@@ -541,6 +590,7 @@ export function createUI(opts) {
     _bdSig = builderSig(corr);
     p.querySelectorAll("[data-cancel]").forEach((bt) => bt.onclick = (ev) => { ev.stopPropagation(); cmd.sell(corr.index, +bt.dataset.cancel); });
     const ib = p.querySelector("[data-inspire]"); if (ib) ib.onclick = (ev) => { ev.stopPropagation(); startPick("inspire", corr); };
+    const mb = p.querySelector("[data-movebd]"); if (mb) mb.onclick = (ev) => { ev.stopPropagation(); startPick("move", corr); };
     const sb = p.querySelector("[data-stopinsp]"); if (sb) sb.onclick = (ev) => { ev.stopPropagation(); cmd.inspire(corr.index, 0); };
     const se = p.querySelector("[data-sends]"); if (se) se.onclick = (ev) => { ev.stopPropagation(); toggleSendPanel(); };
     if (opts.onPanels) opts.onPanels();
@@ -557,6 +607,12 @@ export function createUI(opts) {
     if (!_pick) return false;
     const p = _pick; endPick();
     if (tw && p.kind === "inspire") { cmd.inspire(p.corr.index, tw.id); toast("✨ The builder heads over to inspire it"); sfx("click"); }
+    return true;
+  }
+  function pickSpot(c, r) {
+    if (!_pick || _pick.kind !== "move") return false;
+    const p = _pick; endPick();
+    cmd.moveBuilder(p.corr.index, c, r);
     return true;
   }
 
@@ -881,7 +937,7 @@ export function createUI(opts) {
   // Every choice explains itself right where it is made; the run estimate updates live.
   const MODE_DESC = {
     single: () => "One corridor, 10 waves — a bossy little sprint. Pick an element and a partner: together they set off reactions.",
-    loop: (n) => `${n} corridors in a ring, ${R.wavesFor("loop", n)} waves. A creep that escapes a corridor costs a life and roams on to the next. Every corridor can build all of your elements.`,
+    loop: (n) => `${n} corridors in a ring, ${R.wavesFor("loop", n)} waves. A creep that escapes walks on into the next corridor; it costs a life only once it has come all the way round. Every corridor can build all of your elements.`,
     endless: (n) => `${n === 1 ? "One corridor" : n + " corridors"}, no last wave — climb as high as you can. Endless waves count toward Mastery 5.`,
   };
   const MOD_DESCS = {
@@ -920,13 +976,23 @@ export function createUI(opts) {
       return `<button class="elbtn${ok ? "" : " locked"}${off ? " off" : ""}${sel === eid ? " sel" : ""}" style="--ec:${el.color}" data-${attr}="${eid}">${ok ? sigil(eid, "sm") : icon("lock", "sm")}<span>${el.name}</span></button>`;
     }).join("");
   }
+  // icon-only chips: eight to a row, the chosen one named in the row's label
+  function elementChips(sel, avail, attr, exclude) {
+    return DB.ELEMENT_ORDER.map((eid) => {
+      const el = DB.ELEMENTS[eid], ok = avail.includes(eid), off = eid === exclude;
+      return `<button class="elchip${ok ? "" : " locked"}${off ? " off" : ""}${sel === eid ? " sel" : ""}" style="--ec:${el.color}" data-${attr}="${eid}" aria-label="${el.name}${ok ? "" : " (locked)"}" title="${el.name}">${ok ? sigil(eid) : icon("lock")}</button>`;
+    }).join("");
+  }
+  const elName = (e) => (DB.ELEMENTS[e] ? DB.ELEMENTS[e].name : "—");
   function renderSetup(setup, availElements) {
     const vs = setup.gameMode === "versus";
     const sheet = $("setup-sheet"); if (sheet) sheet.dataset.gm = vs ? "versus" : "solo";
+    const scr = $("screen-setup"); if (scr) scr.dataset.gm = vs ? "versus" : "solo";
     const multi = !vs && setup.mode !== "single";
     if (multi && setup.corridors < 3) setup.corridors = 4;
     updateSetupDescs(setup);
-    document.querySelectorAll("[data-mode]").forEach((b) => b.classList.toggle("sel", b.dataset.mode === setup.mode));
+    const runKey = vs ? "versus" : setup.mode;
+    document.querySelectorAll("[data-run]").forEach((b) => b.classList.toggle("sel", b.dataset.run === runKey));
     document.querySelectorAll("[data-pacing]").forEach((b) => b.classList.toggle("sel", b.dataset.pacing === setup.pacing));
     document.querySelectorAll("[data-econ]").forEach((b) => b.classList.toggle("sel", b.dataset.econ === setup.economy));
     document.querySelectorAll("[data-sdiff]").forEach((b) => b.classList.toggle("sel", b.dataset.sdiff === setup.difficulty));
@@ -936,31 +1002,34 @@ export function createUI(opts) {
     setText("corr-count", setup.corridors);
     const ci = optsN.indexOf(setup.corridors);
     $("corr-minus").classList.toggle("disabled", ci <= 0); $("corr-plus").classList.toggle("disabled", ci >= optsN.length - 1);
-    setText("shape-name", DB.SHAPE_NAMES[setup.corridors] || "");
-    const dm = $("desc-mode"); if (dm) dm.textContent = MODE_DESC[setup.mode](multi ? setup.corridors : 1);
     setText("seats-count", setup.seats - 1);
-    setText("seats-note", setup.seats - 1 === 1 ? "NPC rival" : "NPC rivals");
+    setText("seats-note", setup.seats - 1 === 1 ? "rival" : "rivals");
     $("seats-minus").classList.toggle("disabled", setup.seats <= 3); $("seats-plus").classList.toggle("disabled", setup.seats >= 8);
-    setText("diff-lbl", vs ? "NPCs" : "Difficulty");
-    const dd = $("desc-diff");
-    if (dd) dd.textContent = vs ? ((opts.npcLevels && opts.npcLevels[setup.npc] || {}).desc || "") : (R.SOLO_DIFFICULTY[setup.difficulty] || {}).desc || "";
-    const pvh = $("pv-hint"); if (pvh) pvh.textContent = vs ? "Your island is the first — NPCs roll theirs" : multi ? "Tap an island to choose its element" : "Your corridor floats above the Vortex";
-    // run length
-    const est = $("run-est");
-    if (est) {
-      let t;
-      if (vs) t = `⏱ Usually 6–14 min · waves every 32 s until one seat is left`;
-      else if (setup.mode === "endless") t = "⏱ Open-ended · bank progress with Save in the pause menu";
-      else { const m = R.estimateRunMinutes(setup.mode, multi ? setup.corridors : 1); t = `⏱ About ${Math.round(m)} min at ×1 · ${Math.max(1, Math.round(m / 3))} min at ×3 · ${Math.max(1, Math.round(m / 5))} min at ×5`; }
-      est.textContent = t;
+    const pvh = $("pv-hint"); if (pvh) pvh.textContent = vs ? "Your island is the first — NPCs roll theirs" : multi ? "Tap an island in the world to pick it" : "Your corridor floats above the Vortex";
+    // one line says what you're in for: length, time, and what the difficulty means
+    const sum = $("su-summary");
+    if (sum) {
+      const dd = vs ? ((opts.npcLevels && opts.npcLevels[setup.npc]) || {}).desc || "" : (R.SOLO_DIFFICULTY[setup.difficulty] || {}).desc || "";
+      let len;
+      if (vs) len = `${setup.seats} seats · waves every 32 s · ~10–16 min`;
+      else if (setup.mode === "endless") len = `${multi ? setup.corridors + " islands" : "1 island"} · no last wave`;
+      else { const n = multi ? setup.corridors : 1; const m = R.estimateRunMinutes(setup.mode, n); len = `${R.wavesFor(setup.mode, n)} waves · ~${Math.round(m)} min (${Math.max(1, Math.round(m / 3))} at ×3)`; }
+      const html = `<b>⏱ ${len}</b><span>${dd}</span>`;
+      if (sum._h !== html) { sum.innerHTML = html; sum._h = html; sum.title = vs ? "" : MODE_DESC[setup.mode](multi ? setup.corridors : 1); }
     }
+    let changed = 0;
     document.querySelectorAll("[data-mod]").forEach((b) => {
       const k = b.dataset.mod, vsOnly = b.classList.contains("vs");
       b.style.display = vsOnly && !vs ? "none" : "";
       if (k === "goldMult") b.textContent = "💰 Gold ×" + setup.mods.goldMult;
       else if (k === "livesMult") b.textContent = "❤ Lives ×" + setup.mods.livesMult;
-      b.classList.toggle("on", k === "goldMult" || k === "livesMult" ? setup.mods[k] !== 1 : !!setup.mods[k]);
+      const on = k === "goldMult" || k === "livesMult" ? setup.mods[k] !== 1 : !!setup.mods[k];
+      b.classList.toggle("on", on);
+      if (!(vsOnly && !vs) && on !== (k === "builders" || k === "lifeSteal" || k === "sendStock")) changed++; // differs from the default
     });
+    if (!vs && setup.economy !== "shared") changed++;
+    if (!vs && setup.pacing !== "manual") changed++;
+    const mc = $("more-count"); if (mc) { mc.textContent = changed; mc.style.display = changed ? "" : "none"; }
     const skp = $("skin-picker");
     if (skp && opts.getSkins) {
       const cur = opts.getSkins().find((k) => k.id === opts.getSkin()) || { name: "Elemental" };
@@ -975,24 +1044,28 @@ export function createUI(opts) {
       let h = "";
       if (multi) {
         if (_pvSel == null || _pvSel >= n) _pvSel = 0;
-        h += `<div class="ep-head2">Corridor ${_pvSel + 1} of ${n}<span class="pv-nav"><button class="seg" id="pv-prev">${icon("left")}</button><button class="seg" id="pv-next">${icon("right")}</button></span></div>`;
-        h += `<div class="assign-opts">${elementPills(setup.elements[_pvSel], availElements, "pel")}</div>`;
+        // islands as small numbered chips in their element's colour; the chosen one is edited below
+        const isl = Array.from({ length: n }, (_, i) => { const e = setup.elements[i], el = DB.ELEMENTS[e]; return `<button class="islchip${i === _pvSel ? " sel" : ""}" style="--ec:${el ? el.color : "#888"}" data-isl="${i}" aria-label="Island ${i + 1}: ${elName(e)}">${sigil(e, "xs")}<b>${i + 1}</b></button>`; }).join("");
+        h += `<div class="su-el"><span class="su-lbl">Islands</span><div class="isl-row">${isl}</div></div>`;
+        h += `<div class="su-el"><span class="su-lbl">Island ${_pvSel + 1}<b style="color:${DB.ELEMENTS[setup.elements[_pvSel]].color}">${elName(setup.elements[_pvSel])}</b></span><div class="chip-row">${elementChips(setup.elements[_pvSel], availElements, "pel")}</div></div>`;
         const uniq = [...new Set(setup.elements.slice(0, n))];
-        const lines = []; for (let i = 0; i < uniq.length; i++) for (let j = i + 1; j < uniq.length; j++) lines.push(reactionLine(uniq[i], uniq[j]));
-        h += `<div class="rx-box"><div class="rx-head">${uniq.length} element${uniq.length > 1 ? "s" : ""} · ${lines.length} reaction${lines.length === 1 ? "" : "s"} in this run</div>${lines.slice(0, 3).join("")}${lines.length > 3 ? `<div class="rx-more">+${lines.length - 3} more — see Reactions in the pause menu</div>` : ""}${uniq.length === 1 ? `<div class="rx-more">Pick different elements for more corridors to unlock reactions.</div>` : ""}</div>`;
+        const lines = []; for (let i = 0; i < uniq.length; i++) for (let j = i + 1; j < uniq.length; j++) { const sy = R.synergyFor(uniq[i], uniq[j]); if (sy) lines.push(sy); }
+        h += `<button class="rx-strip" id="rx-strip">${lines.length ? `${lines.slice(0, 4).map((sy) => `<span style="color:${sy.color}">${sy.icon} ${sy.name}</span>`).join("")}${lines.length > 4 ? `<span class="dim">+${lines.length - 4}</span>` : ""}` : `<span class="dim">Mix elements across islands to unlock reactions</span>`}<i>${icon("info", "xs")}</i></button>`;
       } else {
         const a = setup.elements[0];
         if (!availElements.includes(setup.partner) || setup.partner === a) setup.partner = availElements.find((e) => e !== a) || null;
-        h += `<div class="ep-head2">${vs ? "Your element" : "Element"}</div><div class="assign-opts">${elementPills(a, availElements, "pel")}</div>`;
-        h += `<div class="ep-head2">Partner <span class="dim">· its towers join yours</span></div><div class="assign-opts">${elementPills(setup.partner, availElements, "ppa", a)}</div>`;
-        if (setup.partner) h += `<div class="rx-box">${reactionLine(a, setup.partner)}</div>`;
+        h += `<div class="su-el"><span class="su-lbl">${vs ? "You" : "Element"}<b style="color:${DB.ELEMENTS[a].color}">${elName(a)}</b></span><div class="chip-row">${elementChips(a, availElements, "pel")}</div></div>`;
+        h += `<div class="su-el"><span class="su-lbl">Partner<b style="color:${setup.partner ? DB.ELEMENTS[setup.partner].color : "inherit"}">${elName(setup.partner)}</b></span><div class="chip-row">${elementChips(setup.partner, availElements, "ppa", a)}</div></div>`;
+        const sy = setup.partner ? R.synergyFor(a, setup.partner) : null;
+        h += `<button class="rx-strip" id="rx-strip">${sy ? `${sigil(a, "xs")}<i>+</i>${sigil(setup.partner, "xs")}<i>→</i><span style="color:${sy.color}">${sy.icon} <b>${sy.name}</b></span><span class="rx-txt">${sy.text}</span>` : `<span class="dim">Pick a partner to unlock a reaction</span>`}</button>`;
       }
-      picker.innerHTML = h;
-      picker.querySelectorAll("[data-pel]").forEach((b) => b.onclick = () => { const e = b.dataset.pel; if (!availElements.includes(e)) { toast(unlockHint(e)); return; } setup.elements[multi ? _pvSel : 0] = e; if (!multi && setup.partner === e) setup.partner = availElements.find((x) => x !== e) || null; setup._lastTouched = "element"; sfx("click"); renderSetup(setup, availElements); });
-      picker.querySelectorAll("[data-ppa]").forEach((b) => b.onclick = () => { const e = b.dataset.ppa; if (!availElements.includes(e)) { toast(unlockHint(e)); return; } if (e === setup.elements[0]) return; setup.partner = e; sfx("click"); renderSetup(setup, availElements); });
-      const pp = $("pv-prev"), pn = $("pv-next");
-      if (pp) pp.onclick = () => selectSetupNode((_pvSel - 1 + n) % n, setup, availElements);
-      if (pn) pn.onclick = () => selectSetupNode((_pvSel + 1) % n, setup, availElements);
+      if (picker._h !== h) {
+        picker.innerHTML = h; picker._h = h;
+        picker.querySelectorAll("[data-pel]").forEach((b) => b.onclick = () => { const e = b.dataset.pel; if (!availElements.includes(e)) { toast(unlockHint(e)); return; } setup.elements[multi ? _pvSel : 0] = e; if (!multi && setup.partner === e) setup.partner = availElements.find((x) => x !== e) || null; setup._lastTouched = "element"; sfx("click"); renderSetup(setup, availElements); });
+        picker.querySelectorAll("[data-ppa]").forEach((b) => b.onclick = () => { const e = b.dataset.ppa; if (!availElements.includes(e)) { toast(unlockHint(e)); return; } if (e === setup.elements[0]) return; setup.partner = e; sfx("click"); renderSetup(setup, availElements); });
+        picker.querySelectorAll("[data-isl]").forEach((b) => b.onclick = () => { sfx("click"); selectSetupNode(+b.dataset.isl, setup, availElements); });
+        const rx = $("rx-strip"); if (rx) rx.onclick = () => openCodex();
+      }
     }
     if (opts.onSetupPreview) opts.onSetupPreview(setup, _pvSel || 0);
   }
@@ -1063,7 +1136,7 @@ export function createUI(opts) {
     return "";
   }
 
-  return { openBestiary, toast, setText, closeAllPanels, closeRing, updateTopBar, updateEnemyOverview, updateWavePanel, updateWavePreview, updateBossBar, toggleSendPanel, openBuildRing, openTowerRing, openTowerPanel, openEnemyPanel, openBuilderPanel, toggleWavePanel, trackRing, positionPortrait, pickTower, endPick, get picking() { return _pick ? _pick.kind : null; }, get ringAnchor() { return _ring ? _ring.anchor : null; }, bindSheets, renderSetup, updateSetupDescs, selectSetupNode, openMastery, openWardrobe, openCodex, refreshPanels, get ringOpen() { return !!_ring; } };
+  return { openBestiary, toast, setText, closeAllPanels, closeRing, updateTopBar, updateEnemyOverview, updateWavePanel, updateWavePreview, updateBossBar, toggleSendPanel, openBuildRing, openTowerRing, openTowerPanel, openEnemyPanel, openBuilderPanel, toggleWavePanel, trackRing, positionPortrait, pickTower, pickSpot, endPick, get picking() { return _pick ? _pick.kind : null; }, get ringAnchor() { return _ring ? _ring.anchor : null; }, bindSheets, renderSetup, updateSetupDescs, selectSetupNode, openMastery, openWardrobe, openCodex, refreshPanels, get ringOpen() { return !!_ring; }, get ringKind() { return _ring ? _ring.kind || null : null; }, get buildTile() { return _ring && _ring.tile ? _ring.tile : null; }, moveBuildSpot };
 }
 
 export default { createUI };

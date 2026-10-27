@@ -14,7 +14,8 @@ Open <http://localhost:8000>. three.js r186 and the fonts come from CDNs, so the
 
 - `?unlock` treats every element as mastered, which is handy for testing towers. Your saved progress is left untouched.
 - **PC controls:** Space starts a wave · W world map · Q/E or ←/→ switch corridors · 1, 2, 3, 5 game speed · Esc pause · mouse wheel zooms · drag pans.
-- **Touch controls:** tap to build and inspect · drag to pan · pinch to zoom.
+- **Touch controls:** tap an empty spot for the build ring (towers, plus 📍 *Builder* to send your builder there) · drag the green square to shift the spot · tap a tower for its ring · drag to pan · pinch to zoom.
+- **Settings** (gear on the main menu, or the pause menu): music and sound effects on/off with volume, graphics quality, frame rate.
 
 ## What's in this version
 
@@ -26,7 +27,7 @@ Open <http://localhost:8000>. three.js r186 and the fonts come from CDNs, so the
   - **Play Online:** Vs for 2–8 players over Firebase, with room codes, NPC seats, chat and emotes, and rejoin after a disconnect. Add `?mocknet` to test with two local tabs. Co-op and Compete are still *Soon*.
 - **Circle's shell:**
   - Menu, setup, HUD, survivors-by-origin panel, corridor nav and the wave dock with its next-wave preview.
-  - Radial build and tower rings with tap-again-to-confirm, and compact cards that expand: tower (level, expert progress, stats with upgrade delta, targeting, synergies, mutations), enemy (live portrait, follow cam, traits), builder (queue, Inspire, sends) and the ⓘ wave guide for the next three waves. Boss bar and toasts.
+  - Radial build and tower rings with tap-again-to-confirm (near an edge the bubbles fan out to the open side, so the spot is never covered), and compact cards that expand: tower (level, expert progress, stats with upgrade delta, targeting, synergies, mutations), enemy (live portrait, follow cam, traits), builder (queue, Inspire, sends) and the ⓘ wave guide for the next three waves. Boss bar and toasts.
   - Two field cameras: top-down and a close perspective view. Creeps enter at the top and walk towards you.
   - Pause, end screen with mastery progress, the Mastery and Synergy Codex screen, and Save / Import / Export. Circle's export files import here too.
   - Autosave after every wave, and Continue.
@@ -44,7 +45,7 @@ Open <http://localhost:8000>. three.js r186 and the fonts come from CDNs, so the
   - Match stats and a leak report, replays (export/import) and spectating.
   - Post-victory challenges that unlock builder skins, and a Bestiary.
 - **Skyhold rules (the default since the balance pass; Classic stays for old replays and parity):**
-  - **Win = hold every wave.** Run length follows the corridors: 10 waves for Quick (1 corridor), 20 for 3–4, 25 for 5–6, 30 for 7–8. Clearing the last wave is the win (it counts for Mastery); the End Boss is an optional bonus round that unlocks a *Sealbreaker* builder skin per element.
+  - **Win = hold every wave.** Run length follows the corridors: 10 waves for Quick (1 corridor), 20 for 3–4, 22 for 5–6, 25 for 7–8. Clearing the last wave is the win (it counts for Mastery). Then the Vortex glows: tap it (or *Summon at the Vortex* in the dock) to call out the Sealed One, an optional bonus fight that unlocks a *Sealbreaker* builder skin per element. The victory screen comes after that fight, or when you choose *Finish run*.
   - **Solo difficulty:** Chill, Normal, Hard and Brutal scale creep health and speed only — the rules stay the same. The setup screen estimates the run length.
   - **Percentage armour:** damage × 25 / (25 + armour), so armour matters but never makes a creep immune. Towers deal Physical, Blast, Magic or Chaos damage; creeps are Unarmored, Light, Medium, Heavy, Fortified, Ethereal or Boss, and the class table bends damage between 0.5× and 1.5×. Every card shows both.
   - **Reactions:** 28 two-element pairs, always *A + B → C*. A tower of one element hits a creep carrying the other element's status and sets off a named effect (Thermal Shock, Wildfire, Overload…). Each creep can react once per second. The codex lists them all, and the setup screen shows the pair you picked.
@@ -53,6 +54,9 @@ Open <http://localhost:8000>. three.js r186 and the fonts come from CDNs, so the
   - **Faster, clearer creeps:** creeps move about twice as fast (with HP and tower damage rebalanced to match), waves are staggered so creeps don't stack, enemies are drawn larger, and toasts sit above the dock instead of over the field. Speed goes up to ×5.
   - **Vs NPCs:** waves come on a shared timer, sent creeps leave after they leak, each corridor can only hold so much sent HP at once (no spam-wipes), life steal is capped, and wave HP ramps after 5 minutes so matches end. NPCs scout the next waves (air, stealth, armour) and build, upgrade and send accordingly.
   - **Challenges:** ten waves and a boss each, with the pool introduced gradually; winnable with any element pair, harder on Hard. Each challenge × element has its own builder look.
+  - **Towers build and upgrade over time:** a bar over the tower shows the progress. An upgrade re-raises the tower, and each level takes 10% longer than the last.
+  - **Your builder:** besides raising towers and Inspiring one, it can be sent anywhere (the ring's 📍 bubble, or *Move to…* on its card), so its lantern watches for stealth where you need it.
+  - **Loops are one go:** a creep that slips out of a corridor walks on into the next; it costs a life only once it has come all the way round your ring. Ordinary creeps in a ring carry more health (×3.2 at 3 corridors up to ×8.4 at 8; heals still count from their normal health) and move a little faster per extra corridor, so a ring stays a fight. In Vs, it costs a life once it has passed every corridor you hold.
   - **Guided tour:** a spotlight tutorial (dims the screen, rings the one thing to press) on first launch, replayable from the menu and the pause menu. The defeat screen says why the run slipped away.
 - **Audio:** Circle's music track plus synthesized sound effects.
 

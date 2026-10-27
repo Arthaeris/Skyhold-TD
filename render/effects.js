@@ -248,12 +248,12 @@ export function createBars(scene, max = 400) {
   const cBg = new THREE.Color("#120a1e");
   return {
     begin(camera) { nb = nf = np = nr = 0; camQ.copy(camera.quaternion); right.set(1, 0, 0).applyQuaternion(camQ); upv.set(0, 1, 0).applyQuaternion(camQ); },
-    bar(pos, frac, w, color) {
+    bar(pos, frac, w, color, h = 0.2) {
       if (nb >= max) return;
-      M.compose(pos, camQ, S.set(w + 0.08, 0.2, 1)); bg.setMatrixAt(nb, M); bg.setColorAt(nb++, cBg);
+      M.compose(pos, camQ, S.set(w + 0.08, h, 1)); bg.setMatrixAt(nb, M); bg.setColorAt(nb++, cBg);
       const fw = Math.max(0.001, w * frac);
       V.copy(pos).addScaledVector(right, -(w - fw) / 2);
-      M.compose(V, camQ, S.set(fw, 0.12, 1)); fill.setMatrixAt(nf, M); fill.setColorAt(nf++, C.set(color));
+      M.compose(V, camQ, S.set(fw, h * 0.6, 1)); fill.setMatrixAt(nf, M); fill.setColorAt(nf++, C.set(color));
     },
     pips(pos, n, color) { // small gold pips above the bar (loops survived)
       for (let i = 0; i < Math.min(n, 5); i++) {

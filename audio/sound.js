@@ -5,7 +5,7 @@
 const KEY = "skyhold_audio_v1";
 
 export function createSound() {
-  const pref = { muted: false, music: 0.4, sfx: 0.7 };
+  const pref = { muted: false, music: 0.4, sfx: 0.7, musicOn: true, sfxOn: true };
   try { Object.assign(pref, JSON.parse(localStorage.getItem(KEY)) || {}); } catch (e) { /* fine */ }
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(pref)); } catch (e) { /* fine */ } };
   let music = null, unlocked = false, wantMusic = false;
@@ -27,8 +27,13 @@ export function createSound() {
     apply();
   }
   function apply() {
-    if (music) { music.muted = pref.muted; music.volume = Math.max(0, Math.min(1, pref.music)); }
-    if (sfxBus) sfxBus.gain.value = pref.muted ? 0 : pref.sfx * 0.6;
+    const musicOff = pref.muted || !pref.musicOn;
+    if (music) {
+      music.muted = musicOff; music.volume = Math.max(0, Math.min(1, pref.music));
+      // switched off means stopped, not just silent
+      if (musicOff) { if (!music.paused) music.pause(); } else if (wantMusic && music.paused && unlocked) music.play().catch(() => {});
+    }
+    if (sfxBus) sfxBus.gain.value = pref.muted || !pref.sfxOn ? 0 : pref.sfx * 0.6;
   }
   function unlock() {
     if (unlocked) return;
@@ -36,9 +41,9 @@ export function createSound() {
     initCtx();
     try { music = new Audio("assets/audio/music.mp3"); music.loop = true; } catch (e) { music = null; }
     apply();
-    if (wantMusic && music) music.play().catch(() => {});
+    if (wantMusic && music && !pref.muted && pref.musicOn) music.play().catch(() => {});
   }
-  function playMusic(on) { wantMusic = on; if (!music) return; if (on) music.play().catch(() => {}); else music.pause(); }
+  function playMusic(on) { wantMusic = on; if (!music) return; if (on && !pref.muted && pref.musicOn) music.play().catch(() => {}); else music.pause(); }
 
   // ---- synth helpers ---------------------------------------------------------
   function throttle(key, ms) { const t = performance.now(); if (last[key] && t - last[key] < ms) return false; last[key] = t; return true; }
@@ -89,9 +94,11 @@ export function createSound() {
 
   return {
     unlock, playMusic, apply,
-    play(name, arg) { if (!ctx || pref.muted) return; const f = SFX[name]; if (f) try { f(arg); } catch (e) { /* audio is best-effort */ } },
+    play(name, arg) { if (!ctx || pref.muted || !pref.sfxOn) return; const f = SFX[name]; if (f) try { f(arg); } catch (e) { /* audio is best-effort */ } },
     get pref() { return pref; },
     setMuted(m) { pref.muted = !!m; save(); apply(); },
+    setMusicOn(on) { pref.musicOn = !!on; if (on) pref.muted = false; save(); apply(); },
+    setSfxOn(on) { pref.sfxOn = !!on; if (on) pref.muted = false; save(); apply(); },
     setMusic(v) { pref.music = v; if (v > 0) pref.muted = false; save(); apply(); },
     setSfx(v) { pref.sfx = v; if (v > 0) pref.muted = false; save(); apply(); },
   };

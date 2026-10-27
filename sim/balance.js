@@ -156,7 +156,7 @@ function buildSkyholdRules(DB, bal) {
     enemySpeed: F(T.enemySpeed), speedFloor: F(T.speedFloor), waveSpeedGrowth: F(T.waveSpeedGrowth), waveSpeedMax: F(T.waveSpeedMax),
     towerDamage: F(T.towerDamage),
     scaling: { damagePerLevel: F(T.scaling.damagePerLevel), fireRatePerLevel: F(T.scaling.fireRatePerLevel), rangePerLevel: F(T.scaling.rangePerLevel), upgradeCostBase: F(T.scaling.upgradeCostBase), costGrowth: F(T.scaling.costGrowth) },
-    hpPerCorridor: T.hpPerCorridor, hpStretchFrom: T.hpStretchFrom || 0, hpByCorridors: T.hpByCorridors || {}, countPerCorridor: T.countPerCorridor, waveHp: T.waveHp, waveGold: T.waveGold,
+    hpPerCorridor: T.hpPerCorridor, hpStretchFrom: T.hpStretchFrom || 0, hpByCorridors: T.hpByCorridors || {}, loopLeave: !!T.loopLeave, loopSpeed: F(T.loopSpeed || 0), loopCreepHp: Object.fromEntries(Object.entries(T.loopCreepHp || {}).map(([k, v]) => [k, F(v)])), countPerCorridor: T.countPerCorridor, waveHp: T.waveHp, waveGold: T.waveGold,
     waveClearBonus: T.waveClearBonus.slice(), bossLifeLoss: T.bossLifeLoss, endLifeLoss: T.endLifeLoss,
     bossHpMinor: T.bossHpMinor, endBoss: { hpMult: T.endBoss.hpMult, armor: F(T.endBoss.armor), perCorridor: T.endBoss.perCorridor },
     chBoss: Object.fromEntries(Object.entries(T.challengeBoss || {}).map(([k, v]) => [k, F(v)])),

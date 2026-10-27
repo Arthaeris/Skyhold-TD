@@ -235,6 +235,7 @@ function applyCommand(state, cmd) {
     case "SetTargetMode": cmdSetTargetMode(state, pl, cmd); break;
     case "UpgradeSend":  cmdUpgradeSend(state, pl, cmd); break;
     case "BuilderInspire": if (state.x) xInspire(state, pl, cmd); break; // [X]
+    case "BuilderMove":   if (state.x) xBuilderMove(state, pl, cmd); break; // [X] walk the builder (and its lantern) to a spot
     case "SetSpeed":     if (cmd.player === 0) { const sp = cmd.speed | 0; state.netSpeed = sp < 1 ? 1 : (sp > 3 ? 3 : sp); } break;
     case "Ack":          break; // heartbeat, no state change
   }
@@ -306,7 +307,7 @@ function cmdUpgrade(state, pl, cmd) {
   if (!canAfford(state, pl, cost, tw.def.element)) { state.events.push({ kind: "reject", player: pl.id, reason: "funds" }); return; }
   spend(state, pl, cost, tw.def.element);
   tw.level++;
-  if (state.x && state.x.builders) { tw.upT = F(0.8) + fx.mul(F(0.08), fx.fromInt(tw.level)); state.events.push({ kind: "upgrading", player: pl.id, corridor: corr.index, tower: tw.id }); } // [X] upgrades take time
+  if (state.x && state.x.builders) { tw.upT = xUpgradeTime(tw.level); tw.upMax = tw.upT; state.events.push({ kind: "upgrading", player: pl.id, corridor: corr.index, tower: tw.id }); } // [X] upgrades take time
 }
 
 function cmdMutate(state, pl, cmd) {
@@ -447,6 +448,13 @@ export function findBuildSpot(state, player, corridorId, gx, gy) {
   const pl = state.players[player]; if (!pl) return null;
   const corr = pl.corridors[corridorId]; if (!corr) return null;
   return findValidSpot(state, corr, gx, gy);
+}
+
+/** Exactly here (centre cell gx,gy), no snapping: used while the player drags the build square. */
+export function canBuildAt(state, player, corridorId, gx, gy) {
+  const pl = state.players[player]; if (!pl) return false;
+  const corr = pl.corridors[corridorId]; if (!corr) return false;
+  return validTowerArea(state, corr, gx - 1, gy - 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -658,16 +666,7 @@ function transferEnemy(state, e) {
   if (state.x && !e.alive) return;
   const pl = state.players[e.owner];
   const from = e.corridorIndex;
-  // [X] Loop with 2+ corridors: escaping its home corridor already costs a life (then it roams on,
-  // and costs again each time it comes all the way round). Each corridor has to hold its own.
-  if (state.x && pl.corridorCount > 1 && !e.breached && from === e.originIndex) {
-    e.breached = true;
-    if (e.tr && e.tr.treasure) { removeEnemy(state, e); state.events.push({ kind: "escape", player: pl.id, type: e.type }); return; }
-    xRecordLeak(state, pl, e, false);
-    loseLife(state, pl, xLifeCost(state, e));
-    state.events.push({ kind: "breach", player: pl.id, type: e.type, corridor: from });
-    if (!pl.alive) return;
-  }
+  // A loop is one go: a creep only costs a life once it has come all the way round (onLoopComplete).
   const next = (from + 1) % pl.corridorCount;
   e.transitions++;
   e.corridorIndex = next;
@@ -688,6 +687,16 @@ function transferEnemy(state, e) {
 // to the NEXT living corridor. Dead corridors are skipped entirely.
 function transferEnemyVersus(state, e) {
   const owner = state.players[e.owner];
+  // [X] a seat with several corridors: the creep walks through all of them before it costs a life
+  if (state.x && e.corridorIndex + 1 < owner.corridorCount) {
+    e.corridorIndex++;
+    e.corr = owner.corridors[e.corridorIndex];
+    e.fx = fx.fromInt(e.corr.entrance.c) + HALF;
+    e.fy = fx.fromInt(e.corr.entrance.r) + HALF;
+    if (e.tr) xEnterCorridor(e);
+    e.transitions++;
+    return;
+  }
   if (state.x && e.tr && e.tr.treasure) { removeEnemy(state, e); state.events.push({ kind: "escape", player: e.owner, type: e.type }); return; } // [X] treasure just runs off
   if (state.x) xRecordLeak(state, owner, e, true); // [X] leak report + life steal
   loseLife(state, owner, state.x ? xLifeCost(state, e) : state.bal.loopLifeLoss);
@@ -722,6 +731,7 @@ function onLoopComplete(state, pl, e) {
   if (state.x) xRecordLeak(state, pl, e, false); // [X]
   loseLife(state, pl, state.x ? xLifeCost(state, e) : state.bal.loopLifeLoss);
   if (pl.lives <= 0) return;
+  if (state.x && state.bal.rx.loopLeave && !e.def.end) { removeEnemy(state, e); return; } // [X] one go round the ring, then it's gone
   applyAdaptation(state, e);
   if (state.statusMode === "advanced") e.statusLocked = true;
 }
@@ -1215,7 +1225,7 @@ function summonEndBoss(state, pl) {
   pl.endBossId = state.enemies[state.enemies.length - 1].id;
   pl.phase = "endboss";
   pl.waveActive = true;
-  state.events.push({ kind: "endboss", player: pl.id });
+  state.events.push({ kind: "endboss", player: pl.id, corridor: origin });
 }
 
 function victory(state, pl) {
@@ -1301,6 +1311,9 @@ function xInitCorridor(state, corr) {
 }
 
 // ---- builders ----------------------------------------------------------------
+// [X] an upgrade re-raises the tower: 1.4 s to level 2, and each level after takes 10% longer
+const UP_BASE = F(1.4), UP_GROW = F(1.1);
+function xUpgradeTime(level) { let t = UP_BASE; for (let k = 2; k < level; k++) t = fx.mul(t, UP_GROW); return t; }
 function buildTime(cost) { return fx.min(F(5), F(1.2) + fx.div(fx.fromInt(cost), fx.fromInt(80))); }
 function xOnBuild(state, corr, tw, pl) {
   tw.dmgDone = 0;
@@ -1319,7 +1332,17 @@ function xInspire(state, pl, cmd) {
   const corr = pl.corridors[cmd.corridorId]; if (!corr || !corr.builder) return;
   const tw = cmd.towerId ? corr.towers.find((t) => t.id === cmd.towerId) : null;
   corr.builder.insp = tw ? tw.id : 0;
+  if (tw) corr.builder.goal = null;
   state.events.push({ kind: "inspire", player: pl.id, corridor: corr.index, tower: corr.builder.insp });
+}
+// the player parks the builder: it stops inspiring and walks there once it has nothing to build
+function xBuilderMove(state, pl, cmd) {
+  const corr = pl.corridors[cmd.corridorId]; if (!corr || !corr.builder) return;
+  const G = state.grid;
+  const c = fx.clamp(cmd.gx | 0, 0, G.cols - 1), r = fx.clamp(cmd.gy | 0, 0, G.rows - 1);
+  corr.builder.insp = 0;
+  corr.builder.goal = { x: fx.fromInt(c) + HALF, y: fx.fromInt(r) + HALF };
+  state.events.push({ kind: "builderMove", player: pl.id, corridor: corr.index, c, r });
 }
 // the spot beside a tower where the builder stands to inspire it (left side, else right)
 function besideTower(state, tw) {
@@ -1339,6 +1362,7 @@ function xBuilder(state, pl, corr, dt) {
     if (!insp) b.insp = 0;
     else { const p = besideTower(state, insp); tx = p.x; ty = p.y; }
   }
+  if (tx == null && b.goal) { tx = b.goal.x; ty = b.goal.y; } // [X] parked by the player
   b.at = 0;
   if (tx == null) { b.moving = 0; return; } // idle: wait right where the last job ended
   const dx = tx - b.x, dy = ty - b.y;
@@ -1347,6 +1371,7 @@ function xBuilder(state, pl, corr, dt) {
   if (d > stepFx) { if (d <= 0) d = 1; b.x += fx.div(fx.mul(dx, stepFx), d); b.y += fx.div(fx.mul(dy, stepFx), d); b.moving = 1; return; }
   b.x = tx; b.y = ty; b.moving = 0;
   if (insp) { b.at = insp.id; return; }
+  if (!tw) return; // arrived at the parking spot
   if (tw.bState === 1) { tw.bState = 2; state.events.push({ kind: "buildStart", player: pl.id, corridor: corr.index, tower: tw.id }); }
   tw.bT -= dt;
   if (tw.bT <= 0) { tw.bT = 0; tw.bState = 0; tw.cd = 0; b.cur = 0; state.events.push({ kind: "built", player: pl.id, corridor: corr.index, tower: tw.id }); }
@@ -1354,6 +1379,7 @@ function xBuilder(state, pl, corr, dt) {
 
 // ---- per-tick passes ------------------------------------------------------------
 function xDetects(state, tw) { return tw.def.element === "light" || tw.level >= 7 || towerStats(state, tw).archetype === "support"; }
+const HB = (e) => e.healBase || e.maxHp; // what heals and regen are a percentage of
 function xHeal(e, amt) { if (amt > 0 && e.alive) e.hp = fx.min(e.maxHp, e.hp + amt); }
 function xPreStep(state, dt) {
   for (const pl of state.players) for (const corr of pl.corridors) {
@@ -1380,7 +1406,7 @@ function xPreStep(state, dt) {
         if (t.flyerSpeedAura && o.fly && d2 <= sq(t.flyerSpeedAura.r)) o.auraSpeed = fx.max(o.auraSpeed, t.flyerSpeedAura.mult);
         if (t.warAura && d2 <= sq(t.warAura.r)) { o.auraArmor += t.warAura.armor; o.auraDmg = fx.min(o.auraDmg, t.warAura.dmg); }
         if (t.cloakAura && d2 <= sq(t.cloakAura)) o.cloaked = true;
-        if (t.regenAura && d2 <= sq(t.regenAura.r)) xHeal(o, fx.mul(fx.mul(o.maxHp, t.regenAura.pct), dt));
+        if (t.regenAura && d2 <= sq(t.regenAura.r)) xHeal(o, fx.mul(fx.mul(HB(o), t.regenAura.pct), dt));
       }
     }
     if (t.corrodeAura || t.chillAura || t.confuseAura) {
@@ -1416,7 +1442,7 @@ function xPostStep(state, dt) {
   for (let i = state.zones.length - 1; i >= 0; i--) {
     const z = state.zones[i];
     z.t -= dt;
-    for (const e of state.enemies) if (e.alive && e.corr === z.corr && e.owner === z.owner && fx.dist2(e.fx, e.fy, z.x, z.y) <= sq(z.r)) xHeal(e, fx.mul(fx.mul(e.maxHp, z.heal), dt));
+    for (const e of state.enemies) if (e.alive && e.corr === z.corr && e.owner === z.owner && fx.dist2(e.fx, e.fy, z.x, z.y) <= sq(z.r)) xHeal(e, fx.mul(fx.mul(HB(e), z.heal), dt));
     if (z.t <= 0) state.zones.splice(i, 1);
   }
   if (state.x.autoWave && state.gameMode === "versus") {
@@ -1521,11 +1547,16 @@ function xSpawnEnemy(state, pl, def, type, origin, wave, sent, sendLevel, sentBy
   if (def.end && !chBoss) maxHp = xEndBossHp(state, pl);
   else if (!sent) maxHp = xMulHp(maxHp, state.gameMode === "versus" ? xVsWaveHp(state) : D.hp);
   if (hpMult) maxHp = xMulHp(maxHp, hpMult);
+  // [X] a ring of n corridors is one long path: ordinary creeps need the health to get round it
+  // (healing still counts from the un-multiplied health, or regenerators would outheal a whole ring)
+  let healBase = 0;
+  if (!sent && !def.boss && state.gameMode !== "versus" && pl.corridorCount > 1 && RX.loopCreepHp[pl.corridorCount]) { healBase = maxHp; maxHp = xMulHp(maxHp, RX.loopCreepHp[pl.corridorCount]); }
   let armor = def.end && !chBoss ? RX.endBoss.armor : def.armor;
   // speeds are compressed toward 1 (slow creeps got much faster, fast ones a little), then grow with the wave
   const spd = RX.speedFloor + fx.mul(fx.ONE - RX.speedFloor, def.speed);
   let baseSpeed = fx.mul(spd, fx.ONE + fx.min(RX.waveSpeedMax, fx.mul(RX.waveSpeedGrowth, fx.fromInt(Math.max(0, wave - 1)))));
   if (!sent) baseSpeed = fx.mul(baseSpeed, D.speed);
+  if (RX.loopSpeed && state.gameMode !== "versus" && pl.corridorCount > 1) baseSpeed = fx.mul(baseSpeed, fx.ONE + fx.mul(RX.loopSpeed, fx.fromInt(pl.corridorCount - 1))); // [X] big rings: creeps hurry round
   let reward = Math.round(def.reward * (sc.reward / fx.ONE) * RX.waveGold);
   const affix = (!def.boss && !sent && !(X && X.minion)) ? waveAffix(state.seedBase, wave, state.bal.bossEvery) : null;
   if (affix) {
@@ -1546,7 +1577,7 @@ function xSpawnEnemy(state, pl, def, type, origin, wave, sent, sendLevel, sentBy
     owner: pl.id, originIndex: origin, corridorIndex: origin, corr,
     fx: fx.fromInt(corr.entrance.c) + HALF,
     fy: fx.fromInt(corr.entrance.r) + HALF,
-    maxHp, hp: maxHp, armor, baseSpeed, reward,
+    maxHp, hp: maxHp, healBase, armor, baseSpeed, reward,
     sendLevel: sent ? (sendLevel || 1) : 0,
     statuses: {}, statusKeys: [], buffs: 0,
     loopCount: 0, transitions: 0,
@@ -1677,9 +1708,9 @@ function xEnemyTick(state, e, dt) {
     if (e.shieldDelay > 0) e.shieldDelay -= dt;
     else { const mx = fx.mul(e.maxHp, t.shield.pct); if (e.shieldHp < mx) e.shieldHp = fx.min(mx, e.shieldHp + fx.mul(fx.mul(mx, t.shield.regen), dt)); }
   }
-  if (t.regen) xHeal(e, fx.mul(fx.mul(e.maxHp, t.regen), dt));
+  if (t.regen) xHeal(e, fx.mul(fx.mul(HB(e), t.regen), dt));
   if (t.healAura && pulseT(e, "heal", t.healAura.every, dt)) {
-    for (const o of E) if (o.alive && o.corr === e.corr && o.owner === e.owner && fx.dist2(e.fx, e.fy, o.fx, o.fy) <= sq(t.healAura.r)) xHeal(o, fx.mul(o.maxHp, t.healAura.pct));
+    for (const o of E) if (o.alive && o.corr === e.corr && o.owner === e.owner && fx.dist2(e.fx, e.fy, o.fx, o.fy) <= sq(t.healAura.r)) xHeal(o, fx.mul(HB(o), t.healAura.pct));
     state.events.push({ kind: "pulse", style: "heal", player: e.owner, enemy: e.id });
   }
   if (t.healWounded && pulseT(e, "mend", t.healWounded.every, dt)) {
@@ -1689,10 +1720,10 @@ function xEnemyTick(state, e, dt) {
       const ratio = fx.div(o.hp, o.maxHp);
       if (ratio < br) { br = ratio; best = o; }
     }
-    if (best) { xHeal(best, fx.mul(best.maxHp, t.healWounded.pct)); state.events.push({ kind: "pulse", style: "mend", player: e.owner, enemy: best.id }); }
+    if (best) { xHeal(best, fx.mul(HB(best), t.healWounded.pct)); state.events.push({ kind: "pulse", style: "mend", player: e.owner, enemy: best.id }); }
   }
   if (t.repairAura && pulseT(e, "repair", t.repairAura.every, dt)) {
-    for (const o of E) if (o.alive && o.x && o.x.mech && o.corr === e.corr && o.owner === e.owner && fx.dist2(e.fx, e.fy, o.fx, o.fy) <= sq(t.repairAura.r)) xHeal(o, fx.mul(o.maxHp, t.repairAura.pct));
+    for (const o of E) if (o.alive && o.x && o.x.mech && o.corr === e.corr && o.owner === e.owner && fx.dist2(e.fx, e.fy, o.fx, o.fy) <= sq(t.repairAura.r)) xHeal(o, fx.mul(HB(o), t.repairAura.pct));
     state.events.push({ kind: "pulse", style: "repair", player: e.owner, enemy: e.id });
   }
   if (t.barrier && pulseT(e, "barrier", t.barrier.every, dt)) {
@@ -2012,7 +2043,7 @@ function xOnKill(state, e, creditPl) {
     if (!ot.raiseDead && !ot.feast) continue;
     const d2 = fx.dist2(e.fx, e.fy, o.fx, o.fy);
     if (ot.raiseDead && d2 <= sq(ot.raiseDead.r) && !(o.tm.raise > 0) && e.type !== ot.raiseDead.into) { o.tm.raise = ot.raiseDead.cd; xQueueMinions(state, e, ot.raiseDead.into, 1); }
-    if (ot.feast && d2 <= sq(ot.feast.r)) xHeal(o, fx.mul(o.maxHp, ot.feast.pct));
+    if (ot.feast && d2 <= sq(ot.feast.r)) xHeal(o, fx.mul(HB(o), ot.feast.pct));
   }
 }
 function xRecordLeak(state, pl, e, versus) {

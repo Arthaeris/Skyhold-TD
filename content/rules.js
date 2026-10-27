@@ -136,7 +136,7 @@ export const SOLO_DIFFICULTY = {
 // ---------------------------------------------------------------------------
 // RUN LENGTH — waves before the End Boss, per corridor count
 // ---------------------------------------------------------------------------
-export const WAVES_BY_CORRIDORS = { 1: 10, 3: 20, 4: 20, 5: 25, 6: 25, 7: 30, 8: 30 };
+export const WAVES_BY_CORRIDORS = { 1: 10, 3: 20, 4: 20, 5: 22, 6: 22, 7: 25, 8: 25 };
 export function wavesFor(mode, corridors) {
   if (mode === "endless") return Infinity;
   if (mode === "single") return 10;
@@ -145,7 +145,7 @@ export function wavesFor(mode, corridors) {
 // bosses every 5th wave, and the final wave is always one
 export const BOSS_EVERY_X = 5;
 // measured by the balance harness (seconds per wave at 1×, by corridor count)
-export const SEC_PER_WAVE = { 1: 48, 3: 52, 4: 55, 5: 58, 6: 60, 7: 62, 8: 64 }; // wave + a human-paced build break, from the harness medians
+export const SEC_PER_WAVE = { 1: 48, 3: 72, 4: 74, 5: 85, 6: 90, 7: 100, 8: 105 }; // wave + a human-paced build break, from the harness medians
 export function estimateRunMinutes(mode, corridors) {
   const w = mode === "single" ? 10 : wavesFor(mode, corridors);
   if (!Number.isFinite(w)) return null;
@@ -164,7 +164,11 @@ export const TUNE = {
   towerDamage: 1.4,          // global tower damage multiplier
   scaling: { damagePerLevel: 0.2, fireRatePerLevel: 0.06, rangePerLevel: 0.3, upgradeCostBase: 0.6, costGrowth: 1.2 },
   hpPerCorridor: -0.02,      // creep HP per corridor beyond the first (big loops are hard enough to juggle)
-  hpByCorridors: { 1: 1, 3: 1, 4: 1, 5: 0.95, 6: 0.9, 7: 0.85, 8: 0.8 }, // extra relief for the biggest loops (eight mazes to tend)
+  // A ring is one long path: a creep only costs a life once it has passed every corridor. So ordinary creeps
+  // in a ring of n corridors carry this much more health (bosses already circle), and they hurry round a
+  // little faster per extra corridor so a wave still fits in about a minute.
+  loopCreepHp: { 3: 3.2, 4: 4.0, 5: 5.4, 6: 6.8, 7: 7.6, 8: 8.4 },
+  loopSpeed: 0.18,
   countPerCorridor: 0.45,    // extra creeps per wave per corridor beyond the first
   hpStretchFrom: 20,         // runs longer than this spread the HP curve over their length
   waveHp: { lin: 0.15, quad: 0.25 }, // hp scale = 1 + (w-1)·lin + (w/12)²·quad

@@ -34,9 +34,13 @@ export function createTutorial(opts) {
     if (t.getBoundingClientRect) { if (!t.isConnected || t.offsetParent === null && getComputedStyle(t).position !== "fixed") return null; const r = t.getBoundingClientRect(); return r.width || r.height ? r : null; }
     return t;
   }
+  const val = (x) => (typeof x === "function" ? x() : x) || "";
   function place() {
     if (!active) return;
     const s = steps[i]; if (!s) return;
+    // live copy: a step can change its words as the player acts (ring open / closed, etc.)
+    if (typeof s.text === "function") { const t = val(s.text); if (elText._h !== t) { elText.innerHTML = t; elText._h = t; } }
+    if (typeof s.title === "function") { const t = val(s.title); if (elTitle._h !== t) { elTitle.innerHTML = t; elTitle._h = t; } }
     const W = window.innerWidth, H = window.innerHeight;
     const r0 = rectOf(s.target ? s.target() : null);
     const pad = s.pad != null ? s.pad : 6;
@@ -69,8 +73,8 @@ export function createTutorial(opts) {
     const s = steps[i]; if (!s) { finish(false); return; }
     if (s.enter) s.enter();
     if (s.skipIf && s.skipIf()) { show(i + 1); return; }
-    elTitle.innerHTML = s.title || "";
-    elText.innerHTML = s.text || "";
+    elTitle.innerHTML = val(s.title); elTitle._h = elTitle.innerHTML;
+    elText.innerHTML = val(s.text); elText._h = elText.innerHTML;
     elProg.innerHTML = steps.map((_, k) => `<i class="${k < i ? "done" : k === i ? "on" : ""}"></i>`).join("");
     const waits = !!(s.done || s.on);
     bNext.style.display = s.next === false || (waits && !s.next) ? "none" : "";

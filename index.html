@@ -49,30 +49,50 @@
   <!-- MENU -->
   <section id="screen-menu" class="screen">
     <div class="menu-top">
-      <p class="eyebrow">Circle Tower Wars · Voxel Edition</p>
       <h1 class="brand big">Skyhold<span>TD</span></h1>
-      <p class="tag">A looping-battlefield tower defense. Enemies never leave — they cycle until destroyed.</p>
+      <p class="tag">Tower defense on floating islands</p>
+
     </div>
+<button id="btn-settings" class="icon-btn glass menu-gear" aria-label="Settings"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/></svg></button>
     <div class="menu-card glass">
       <div id="menu-progress" class="menu-progress"></div>
-      <button id="btn-continue" class="btn big disabled">Continue</button>
-      <button id="btn-new-run" class="btn big primary">New Run</button>
-      <div class="menu-row">
-        <button id="btn-tutorial" class="btn">🎓 How to Play</button>
-        <button id="btn-wardrobe" class="btn">🔨 Builders</button>
+      <div class="menu-main">
+        <button id="btn-continue" class="btn big disabled">Continue</button>
+        <button id="btn-new-run" class="btn big primary">New Run</button>
       </div>
-      <div class="menu-row">
-        <button id="btn-mastery" class="btn"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4.5h8v5a4 4 0 0 1-8 0zM8 6.5H5a3 3 0 0 0 3 4M16 6.5h3a3 3 0 0 1-3 4M12 13.5V17M8.5 19.5h7"/></svg>Mastery</button>
-        <button id="btn-menu-save" class="btn"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5h11l3 3v12H5z"/><path d="M8 4.5v5h7v-5M8 19.5v-5h8v5"/></svg>Save · Import</button>
+      <div class="menu-icons">
+        <button id="btn-challenges" class="mi"><i>☠</i><span>Challenges</span></button>
+        <button id="btn-multiplayer" class="mi"><i>🌐</i><span>Online</span></button>
+        <button id="btn-mastery" class="mi"><i>🏆</i><span>Mastery</span></button>
+        <button id="btn-wardrobe" class="mi"><i>🔨</i><span>Builders</span></button>
+        <button id="btn-tutorial" class="mi"><i>🎓</i><span>How to play</span></button>
+        <button id="btn-bestiary" class="mi"><i>📖</i><span>Bestiary</span></button>
+        <button id="btn-replays" class="mi"><i>▶</i><span>Replays</span><b class="pill">0</b></button>
+        <button id="btn-menu-save" class="mi"><i>💾</i><span>Save</span></button>
       </div>
-      <div class="menu-row three">
-        <button id="btn-challenges" class="btn">☠ Challenges</button>
-        <button id="btn-replays" class="btn">▶ Replays <i class="pill">0</i></button>
-        <button id="btn-bestiary" class="btn">📖 Bestiary</button>
-      </div>
-      <button id="btn-multiplayer" class="btn">🌐 Play Online</button>
     </div>
   </section>
+
+  <!-- SETTINGS (menu gear and pause menu) -->
+  <div id="settings-modal" class="modal-overlay">
+    <div class="modal glass settings-modal">
+      <button class="panel-close" id="settings-close" aria-label="Close"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      <h2>Settings</h2>
+      <div class="set-group"><div class="set-head">Audio</div>
+        <div class="set-row"><span>🎵 Music</span><button id="audio-music-on" class="toggle" role="switch" aria-checked="true"><i></i></button></div>
+        <div class="set-row sub"><span class="dim">Volume</span><input type="range" id="audio-music" min="0" max="100" value="40" aria-label="Music volume"></div>
+        <div class="set-row"><span>🔊 Sound effects</span><button id="audio-sfx-on" class="toggle" role="switch" aria-checked="true"><i></i></button></div>
+        <div class="set-row sub"><span class="dim">Volume</span><input type="range" id="audio-sfx" min="0" max="100" value="70" aria-label="Effects volume"></div>
+      </div>
+      <div class="set-group"><div class="set-head">Graphics</div>
+        <div class="set-row"><span>Quality</span>
+          <span class="opt-seg"><button class="seg" data-quality="auto">Auto</button><button class="seg" data-quality="high">High</button><button class="seg" data-quality="medium">Med</button><button class="seg" data-quality="low">Low</button></span></div>
+        <div class="set-row"><span>Frame rate</span>
+          <span class="opt-seg"><button class="seg" data-fps="30">30</button><button class="seg" data-fps="45">45</button><button class="seg sel" data-fps="60">60</button></span></div>
+      </div>
+      <p class="dim keys">PC: Space start wave · W world · Q/E or ←/→ corridors · 1/2/3/5 speed · Esc pause · wheel zoom · drag to pan</p>
+    </div>
+  </div>
 
   <!-- SETUP -->
   <section id="screen-setup" class="screen">
@@ -82,83 +102,81 @@
       <span class="pv-hint" id="pv-hint">Tap an island in the world to change its element</span>
     </div>
     <div class="setup-sheet glass" id="setup-sheet">
-      <div class="mt-cards two">
-        <button class="mt-card" data-gamemode="solo"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="8.5" r="3.6"/><path d="M5 20a7 7 0 0 1 14 0"/></svg><span>Solo</span><small>Defend your own islands</small></button>
-        <button class="mt-card" data-gamemode="versus"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="5" y="8" width="14" height="10" rx="2.5"/><path d="M12 4.5V8M9 12.5v1M15 12.5v1M3 12v3M21 12v3"/></svg><span>Vs NPCs</span><small>Last one standing</small></button>
+      <!-- one row picks the kind of run -->
+      <div class="run-tabs" role="tablist">
+        <button class="run-tab" data-run="single"><b>Quick</b><small>1 island</small></button>
+        <button class="run-tab" data-run="loop"><b>Standard</b><small>3–8 islands</small></button>
+        <button class="run-tab" data-run="endless"><b>Endless</b><small>no end</small></button>
+        <button class="run-tab" data-run="versus"><b>Vs NPCs</b><small>last standing</small></button>
       </div>
-      <div class="opt-block solo-only" id="blk-length">
-        <div class="opt-row"><span class="opt-lbl">Run</span>
-          <span class="opt-seg">
-            <button class="seg" data-mode="single">Quick</button>
-            <button class="seg" data-mode="loop">Standard</button>
-            <button class="seg" data-mode="endless">Endless</button>
-          </span></div>
-        <div class="opt-row sub" id="row-corridors"><span class="opt-lbl">Corridors</span>
-          <span class="opt-seg">
-            <button class="seg" id="corr-minus" aria-label="Fewer corridors">−</button>
-            <b id="corr-count">4</b>
-            <button class="seg" id="corr-plus" aria-label="More corridors">+</button>
-            <span class="opt-note" id="shape-name"></span>
-          </span></div>
-        <p class="opt-desc" id="desc-mode"></p>
+      <!-- difficulty, with the island / rival count beside it when the mode has one -->
+      <div class="su-row">
+        <span class="su-seg solo-only">
+          <button class="seg" data-sdiff="chill">Chill</button>
+          <button class="seg" data-sdiff="normal">Normal</button>
+          <button class="seg" data-sdiff="hard">Hard</button>
+          <button class="seg" data-sdiff="brutal">Brutal</button>
+        </span>
+        <span class="su-seg vs-only">
+          <button class="seg" data-diff="easy">Easy</button>
+          <button class="seg" data-diff="normal">Normal</button>
+          <button class="seg" data-diff="hard">Hard</button>
+          <button class="seg" data-diff="insane">Insane</button>
+        </span>
+        <span class="su-step" id="row-corridors" title="Islands in the loop">
+          <button class="seg" id="corr-minus" aria-label="Fewer islands">−</button>
+          <b><span id="corr-count">4</span><small>islands</small></b>
+          <button class="seg" id="corr-plus" aria-label="More islands">+</button>
+        </span>
+        <span class="su-step vs-only" title="NPC rivals">
+          <button class="seg" id="seats-minus" aria-label="Fewer rivals">−</button>
+          <b><span id="seats-count">3</span><small id="seats-note">rivals</small></b>
+          <button class="seg" id="seats-plus" aria-label="More rivals">+</button>
+        </span>
       </div>
-      <div class="opt-block vs-only" id="blk-seats">
-        <div class="opt-row"><span class="opt-lbl">Rivals</span>
-          <span class="opt-seg">
-            <button class="seg" id="seats-minus" aria-label="Fewer rivals">−</button>
-            <b id="seats-count">3</b>
-            <button class="seg" id="seats-plus" aria-label="More rivals">+</button>
-            <span class="opt-note" id="seats-note"></span>
-          </span></div>
-      </div>
-      <div class="opt-block" id="blk-diff">
-        <div class="opt-row"><span class="opt-lbl" id="diff-lbl">Difficulty</span>
-          <span class="opt-seg solo-only">
-            <button class="seg" data-sdiff="chill">Chill</button>
-            <button class="seg" data-sdiff="normal">Normal</button>
-            <button class="seg" data-sdiff="hard">Hard</button>
-            <button class="seg" data-sdiff="brutal">Brutal</button>
-          </span>
-          <span class="opt-seg vs-only">
-            <button class="seg" data-diff="easy">Easy</button>
-            <button class="seg" data-diff="normal">Normal</button>
-            <button class="seg" data-diff="hard">Hard</button>
-            <button class="seg" data-diff="insane">Insane</button>
-          </span></div>
-        <p class="opt-desc" id="desc-diff"></p>
-      </div>
+      <p class="su-summary" id="su-summary"></p>
       <div id="element-picker"></div>
-      <div class="run-est" id="run-est"></div>
-      <button class="opt-row opt-more" id="setup-more"><span class="opt-lbl">More options <i class="dim">economy · pacing · creeps · builder</i></span><span id="more-chev">▾</span></button>
-      <div id="more-body" class="more-body">
-        <div class="opt-row solo-only"><span class="opt-lbl">Economy</span>
-          <span class="opt-seg">
-            <button class="seg" data-econ="shared">Gold</button>
-            <button class="seg" data-econ="elemental">Essence</button>
-          </span></div>
-        <div class="opt-row solo-only"><span class="opt-lbl">Waves start</span>
-          <span class="opt-seg">
-            <button class="seg" data-pacing="manual">When I'm ready</button>
-            <button class="seg" data-pacing="auto">Automatically</button>
-          </span></div>
-        <div class="mod-chips" id="mod-chips">
-          <button class="mod-chip" data-mod="builders">🔨 Builders</button>
-          <button class="mod-chip vs" data-mod="lifeSteal">❤ Life steal</button>
-          <button class="mod-chip vs" data-mod="sendStock">⏳ Send stock</button>
-          <button class="mod-chip vs" data-mod="turbo">⚡ Turbo income</button>
-          <button class="mod-chip" data-mod="noFlyers">🪽 No flyers</button>
-          <button class="mod-chip" data-mod="noStealth">👁 No stealth</button>
-          <button class="mod-chip" data-mod="noDisruptors">🪨 No disruptors</button>
-          <button class="mod-chip vs" data-mod="randomLanes">🎲 Random lanes</button>
-          <button class="mod-chip vs" data-mod="doppel">👥 Doppelgängers</button>
-          <button class="mod-chip vs" data-mod="anonymous">🎭 Anonymous</button>
-          <button class="mod-chip" data-mod="goldMult">💰 Gold ×1</button>
-          <button class="mod-chip" data-mod="livesMult">❤ Lives ×1</button>
-        </div>
-        <p class="opt-desc" id="setup-hint"></p>
-        <div id="skin-picker"></div>
+      <div class="su-go">
+        <button class="btn ghost su-more" id="setup-more" aria-label="More options"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg><i class="pill" id="more-count" style="display:none">0</i></button>
+        <button id="btn-start-run" class="btn big primary start-btn">Begin Run</button>
       </div>
-      <button id="btn-start-run" class="btn big primary start-btn">Begin Run</button>
+      <span id="shape-name" hidden></span><span id="desc-mode" hidden></span><span id="desc-diff" hidden></span><span id="run-est" hidden></span><span id="diff-lbl" hidden></span>
+    </div>
+    <!-- everything else lives one tap away -->
+    <div id="more-modal" class="modal-overlay">
+      <div class="modal glass more-modal">
+        <button class="panel-close" id="more-close" aria-label="Close"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+        <h2>Run options</h2>
+        <div id="more-body" class="more-body open">
+          <div class="opt-row solo-only"><span class="opt-lbl">Economy</span>
+            <span class="opt-seg">
+              <button class="seg" data-econ="shared">Gold</button>
+              <button class="seg" data-econ="elemental">Essence</button>
+            </span></div>
+          <div class="opt-row solo-only"><span class="opt-lbl">Waves start</span>
+            <span class="opt-seg">
+              <button class="seg" data-pacing="manual">When I'm ready</button>
+              <button class="seg" data-pacing="auto">Automatically</button>
+            </span></div>
+          <div class="mod-chips" id="mod-chips">
+            <button class="mod-chip" data-mod="builders">🔨 Builders</button>
+            <button class="mod-chip vs" data-mod="lifeSteal">❤ Life steal</button>
+            <button class="mod-chip vs" data-mod="sendStock">⏳ Send stock</button>
+            <button class="mod-chip vs" data-mod="turbo">⚡ Turbo income</button>
+            <button class="mod-chip" data-mod="noFlyers">🪽 No flyers</button>
+            <button class="mod-chip" data-mod="noStealth">👁 No stealth</button>
+            <button class="mod-chip" data-mod="noDisruptors">🪨 No disruptors</button>
+            <button class="mod-chip vs" data-mod="randomLanes">🎲 Random lanes</button>
+            <button class="mod-chip vs" data-mod="doppel">👥 Doppelgängers</button>
+            <button class="mod-chip vs" data-mod="anonymous">🎭 Anonymous</button>
+            <button class="mod-chip" data-mod="goldMult">💰 Gold ×1</button>
+            <button class="mod-chip" data-mod="livesMult">❤ Lives ×1</button>
+          </div>
+          <p class="opt-desc" id="setup-hint"></p>
+          <div id="skin-picker"></div>
+        </div>
+        <button class="btn primary" id="more-done">Done</button>
+      </div>
     </div>
   </section>
 
@@ -196,6 +214,7 @@
       <div id="chat-input-row" class="glass"><input id="chat-input" maxlength="140" placeholder="Message everyone… (Enter)"><button class="btn small" id="chat-send">Send</button></div>
       <div id="emote-bar" class="glass"></div>
     </div>
+    <div id="summon-card" class="glass" role="status"></div>
     <div id="quick-wave-controls" class="glass">
       <button id="dock-handle" aria-label="Collapse controls">▾</button>
       <div id="wave-preview"></div>
@@ -219,16 +238,9 @@
           <button id="pause-stats" class="btn">Match Stats</button>
           <button id="pause-codex" class="btn">⚗ Reactions</button>
           <button id="pause-tutorial" class="btn">🎓 How to Play</button>
+          <button id="pause-settings" class="btn">⚙ Settings</button>
           <button id="pause-exit" class="btn ghost">Exit to Menu</button>
         </div>
-        <div class="set-row"><span class="dim">Graphics</span>
-          <span class="opt-seg"><button class="seg" data-quality="auto">Auto</button><button class="seg" data-quality="high">High</button><button class="seg" data-quality="medium">Med</button><button class="seg" data-quality="low">Low</button></span></div>
-        <div class="set-row"><span class="dim">Render FPS</span>
-          <span class="opt-seg"><button class="seg" data-fps="30">30</button><button class="seg" data-fps="45">45</button><button class="seg sel" data-fps="60">60</button></span></div>
-        <div class="set-row"><span class="dim">Sound</span><button id="audio-mute" class="btn small">On</button></div>
-        <div class="set-row"><span class="dim">Music</span><input type="range" id="audio-music" min="0" max="100" value="40" aria-label="Music volume"></div>
-        <div class="set-row"><span class="dim">Effects</span><input type="range" id="audio-sfx" min="0" max="100" value="70" aria-label="Effects volume"></div>
-        <p class="dim keys">PC: Space start wave · W world · Q/E or ←/→ corridors · 1–3 speed · Esc pause · wheel zoom · drag to pan</p>
       </div>
     </div>
     <div id="end-screen" class="modal-overlay">
@@ -284,6 +296,8 @@
   addEventListener("error", function (e) {
     var box = document.getElementById("startup-error");
     if (!box || !e.message) return;
+    // only while still loading: once the game is up, a hiccup is logged, not shown as a start failure
+    if (document.body.dataset.screen && document.body.dataset.screen !== "loading") { console.error(e.message); return; }
     box.hidden = false;
     box.textContent = "Skyhold couldn't start: " + e.message + " — three.js loads from a CDN, so the first run needs a connection.";
   });

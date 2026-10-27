@@ -52,7 +52,7 @@ Parity means these behave as they do in Circle, where the database describes the
   - Vs: shared wave timer offline too; wave HP ×0.8, then +30% a minute (compounding) after 5 minutes; per-target cap on sent HP; sent creeps leave after leaking; life steal capped at max lives + 5.
 - **Calibration** (`node tools/balance-sim.mjs`, Normal NPC brain as the player, Mastery 0; challenges at Mastery 3). Wins = every wave held:
   - Quick: Chill 100%, Normal ~81–88%, Hard ~67%, Brutal ~21–25%; End Boss ~46–57% on Normal. Every element wins on Normal.
-  - Standard: 4 corridors Normal ~69%, Hard ~38%; 6 corridors Normal ~81%, Hard ~38%; 8 corridors Normal ~100%, Hard 0% (the NPC can't tend eight mazes on Hard; a human should do better, but this is the one known cliff).
+  - Standard (Oct 27 rule: a creep costs a life only after a full lap of the ring; ordinary ring creeps carry `TUNE.loopCreepHp` × health and move `loopSpeed` faster per extra corridor; heals count from base health): 3 corridors Normal ~75%, Hard ~50%; 4 corridors Normal ~88%, Hard ~50%; 6 corridors Normal ~100%, Hard ~75%; 8 corridors Normal ~100%, Hard 0% (one seed each, so treat as rough). Rings are long: about 25 min at 3–4 corridors and 40–50 min at 6–8 (game time at ×1).
   - Challenges, Normal / Hard: Burrow 38% / 13%, Mire 69% / 19%, Foundry 50% / 25%, Eclipse 44% / 13%, with 5–8 of 8 elements winning each on Normal.
   - Vs NPCs: matches last ~12–16 min; a seat that dumps everything into sends doesn't wipe a Normal defender (2/4 outlive it).
   - The NPC builds a plain serpentine and rarely upgrades, so a human who mazes properly does noticeably better.

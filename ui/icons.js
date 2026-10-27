@@ -32,6 +32,14 @@ const P = {
   music: '<path d="M9 17.5V6l10-2v11.5"/><circle cx="6.5" cy="17.5" r="2.5"/><circle cx="16.5" cy="15.5" r="2.5"/>',
   sound: '<path d="M4.5 9.5h3l4.5-4v13l-4.5-4h-3z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
   mute: '<path d="M4.5 9.5h3l4.5-4v13l-4.5-4h-3z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>',
+  pin: '<path d="M12 21s-6.5-5.8-6.5-11a6.5 6.5 0 0 1 13 0c0 5.2-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/>',
+  hammer: '<path d="M13.5 5.5 17 2l4 4-3.5 3.5z"/><path d="M15.2 7.3 4.5 18a1.4 1.4 0 0 0 2 2L17.2 9.3"/>',
+  move: '<path d="M12 3v18M3 12h18"/><path d="M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/>',
+  music_off: '<path d="M9 17.5V6l10-2v11.5"/><circle cx="6.5" cy="17.5" r="2.5"/><path d="M3 3l18 18"/>',
+  grid: '<rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/>',
+  shirt: '<path d="M8 3.5 4 6l1.5 4H8v10.5h8V10h2.5L20 6l-4-2.5a4 4 0 0 1-8 0z"/>',
+  grad: '<path d="M2.5 9 12 4.5 21.5 9 12 13.5z"/><path d="M6.5 11v4.5c3 2.5 8 2.5 11 0V11M21.5 9v5"/>',
+  globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.6 2.6 14.4 0 17M12 3.5c-2.6 2.6-2.6 14.4 0 17"/>',
   eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
   sparkle: '<path d="M12 3.5l1.8 6.7 6.7 1.8-6.7 1.8L12 20.5l-1.8-6.7L3.5 12l6.7-1.8z" fill="currentColor" stroke="none"/>',
   flask: '<path d="M9.5 3.5h5M10.5 3.5v6L5 18.5a1.5 1.5 0 0 0 1.3 2h11.4a1.5 1.5 0 0 0 1.3-2L13.5 9.5v-6"/><path d="M7.5 14.5h9"/>',
@@ -62,5 +70,6 @@ export function setIconDB(DB) { DBref = DB; }
 export function sigil(el, cls = "") {
   const E = DBref && DBref.ELEMENTS[el];
   const c = E ? E.color : "#fff";
-  return `<svg class="sig${cls ? " " + cls : ""}" viewBox="0 0 24 24" fill="${c}" aria-label="${E ? E.name : el}" style="filter:drop-shadow(0 0 3px ${c}88)">${SIG[el] || SIG.abnormal}</svg>`;
+  // no CSS filter here: filtered SVGs inside a scrolling, backdrop-blurred sheet vanish on iOS after a scroll
+  return `<svg class="sig${cls ? " " + cls : ""}" viewBox="0 0 24 24" fill="${c}" aria-label="${E ? E.name : el}">${SIG[el] || SIG.abnormal}</svg>`;
 }

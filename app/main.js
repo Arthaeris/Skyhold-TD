@@ -10,7 +10,7 @@
  * still supports both, only the network lobby is not wired yet.
  * ===========================================================================*/
 import * as fx from "../sim/fx.js";
-import { createState, step, SIM_HZ, findBuildSpot, previewWaveX, isBossWaveX, hpReal, upgradeCost, totalInvested, sendLoad } from "../sim/core.js";
+import { createState, step, SIM_HZ, findBuildSpot, canBuildAt, previewWaveX, isBossWaveX, hpReal, upgradeCost, totalInvested, sendLoad } from "../sim/core.js";
 import { AFFIXES } from "../sim/waves.js";
 import { extendDB, MOB_BY_ID, CHALLENGES, mobTier } from "../content/mobs.js";
 import { BUILDER_SKINS, skinUnlocked as skinOk, LEGACY_SKINS, skinSwatch } from "../content/skins.js";
@@ -129,6 +129,7 @@ const cmd = {
   setTarget: (corridorId, towerId, mode) => emit(C.setTargetMode(game.me, corridorId, towerId, mode)),
   upgradeSend: (enemyType) => emit(C.upgradeSend(game.me, enemyType)),
   inspire: (corridorId, towerId) => emit(C.builderInspire(game.me, corridorId, towerId)),
+  moveBuilder: (corridorId, gx, gy) => { emit(C.builderMove(game.me, corridorId, gx, gy)); ui.toast("Builder on its way — its lantern lights up stealth nearby."); sound.play("click"); if (tutorial) tutorial.notify("builderMove"); },
   sendAuto: (enemyType) => {
     if (isVersus()) { emit(C.sendEnemy(game.me, 0, enemyType)); return; }
     const n = game.state.players.length;
@@ -231,8 +232,14 @@ function handleEvent(ev) {
       if (tutorial) tutorial.notify("waveClear", ev);
       break;
     case "wavesCleared": wavesWon(); break;
-    case "prep": ui.updateWavePanel(); break;
-    case "endboss": ui.toast("THE SEALED ONE awakens!", "boss"); sound.play("boss"); ui.updateWavePanel(); break;
+    case "prep": ui.updateWavePanel(); if (ev.player === game.me && game.state.challenge && !game.replay) showSummonCard(); break;
+    case "endboss": {
+      ui.toast(game.state.challenge ? "The boss walks out of the Vortex!" : "THE SEALED ONE awakens!", "boss"); sound.play("boss"); ui.updateWavePanel();
+      // follow it out of the portal into the corridor it chose
+      const ci = ev.corridor;
+      if (ev.player === game.me && ci != null && !isVersus()) setTimeout(() => { if (game.state && game.view === "world") enterCorridor(ci); }, 900);
+      break;
+    }
     case "life": case "breach": ui.updateTopBar(); flash(); sound.play("life"); break;
     case "escape": ui.toast("💰 The " + mobName(ev.type) + " got away with its loot"); break;
     case "victory": endScreen(true, { endboss: !game.state.challenge }); break;
@@ -277,7 +284,7 @@ function refreshWaveFab() {
 function refreshMenu() {
   const c = $("btn-continue"); if (c) c.classList.toggle("disabled", !hasRun());
   const ch = $("btn-challenges"); if (ch) { ch.classList.toggle("locked", !challengesOpen()); }
-  const rp = $("btn-replays"); if (rp) rp.querySelector("i") && (rp.querySelector("i").textContent = String(loadReplays().length));
+  const rp = $("btn-replays"); if (rp) { const n = loadReplays().length, pill = rp.querySelector(".pill"); if (pill) { pill.textContent = String(n); pill.style.display = n ? "" : "none"; } }
   const sub = $("menu-progress");
   if (sub) {
     const avail = DB.availableElements(masteryMap());
@@ -376,6 +383,7 @@ function startRun(cfg, seed, replay, online) {
   seenReactions.clear();
   document.body.dataset.spectate = replay ? "replay" : "";
   game.me = online ? online.me : 0; game.speed = 1; game.clock = 0; game.paused = false;
+  game.summoning = false; hideSummonCard();
   if (!online && game.online) stopOnline();
   game.view = "world"; game.activeCorridor = 0;
   game.selectedTowerId = game.selectedEnemyId = game.buildTile = null; game.buildPreview = null;
@@ -588,6 +596,7 @@ function continueRun() {
   if (!raw) return;
   let d; try { d = JSON.parse(raw); } catch (e) { return; }
   restoreRun(d);
+  if (game.state && myPlayer().phase === "prep") showSummonCard();
 }
 function restoreRun(d) {
   // the run's own elements (a Quick run's partner included), its difficulty and challenge come back exactly
@@ -663,8 +672,8 @@ function onTap(px, py) {
     if (!h) return;
     if (h.kind === "vortex") {
       const fp = isVersus() ? myPlayer() : pl;
-      if (fp.phase === "prep") { cmd.startWave(); return; }
-      ui.toast("The Vortex awaits — clear every wave to summon the End Boss.");
+      if (fp.phase === "prep") { summonViaPortal(); return; }
+      ui.toast(fp.phase === "endboss" ? "The seal is broken — find it in the corridors!" : "The Vortex is sealed — hold every wave first.");
       return;
     }
     if (h.kind === "gate") { enterCorridor(h.index); return; }
@@ -673,6 +682,11 @@ function onTap(px, py) {
   const h = renderer.pick(px, py, view);
   const corr = pl.corridors[isVersus() ? 0 : game.activeCorridor];
   const ownField = !isVersus() || game.activeCorridor === game.me;
+  if (ui.picking === "move") {   // "tap where the builder should go"
+    const G = game.state.grid;
+    if (h && h.kind === "cell" && ownField && h.c >= 0 && h.r >= 0 && h.c < G.cols && h.r < G.rows) ui.pickSpot(h.c, h.r); else { ui.endPick(); ui.toast("Move cancelled"); }
+    return;
+  }
   if (ui.picking) {   // "tap a tower" (Inspire)
     const tw = h && h.kind === "cell" && ownField && h.c >= 0 && h.r >= 0 && h.c < game.state.grid.cols && h.r < game.state.grid.rows ? towerAt(corr, h.c, h.r) : null;
     ui.pickTower(tw); if (!tw) ui.toast("Inspire cancelled"); return;
@@ -686,12 +700,42 @@ function onTap(px, py) {
   if (!ownField) { ui.closeAllPanels(); return; }
   const cell = corr.grid[r * G.cols + c];
   if (cell === 2) { const tw = towerAt(corr, c, r); if (tw) { ui.openTowerRing(corr, tw, px, py); keepClear(tw.c + DB.CONFIG.towerSize / 2, tw.r + DB.CONFIG.towerSize / 2); sound.play("click"); return; } }
-  if (cell === 0) {
-    game.buildSpot = findBuildSpot(game.state, fieldId(), corr.index, c, r);
-    if (game.buildSpot) { ui.openBuildRing(corr, { c, r }, px, py); sound.play("click"); return; }
-    ui.toast("No room — towers need 3×3 space and can’t fully block the path.", "warn"); sound.play("reject");
+  // an empty spot: the build ring (towers + "move the builder here"). A tap that misses a free 3×3 snaps to
+  // the nearest one; if nothing fits, the ring still opens (red square) so the builder can be sent there.
+  if (cell !== 2) {
+    const snap = cell === 0 ? findBuildSpot(game.state, fieldId(), corr.index, c, r) : null;
+    const tc = snap ? snap.c + 1 : c, tr = snap ? snap.r + 1 : r;
+    if (!snap && !corr.builder) { ui.toast("No room — towers need 3×3 space and can’t fully block the path.", "warn"); sound.play("reject"); ui.closeAllPanels(); return; }
+    game.buildSpot = snap || { c: c - 1, r: r - 1, bad: true };
+    const sp = snap ? renderer.cellScreen(tc + 0.5, tr + 0.5, 0.2) : { x: px, y: py };
+    ui.openBuildRing(corr, { c: tc, r: tr }, sp.x, sp.y, { canBuild: !!snap });
+    game.buildMenuOpen = true;
+    sound.play(snap ? "click" : "reject");
+    if (tutorial) tutorial.notify("ring");
+    return;
   }
   ui.closeAllPanels();
+}
+function reopenBuildRing() {
+  const t = ui.buildTile; if (!t || ui.ringKind !== "build") return;
+  const corr = fieldPlayer().corridors[isVersus() ? 0 : game.activeCorridor];
+  const ok = !(game.buildSpot && game.buildSpot.bad);
+  const sp = renderer.cellScreen(t.c + 0.5, t.r + 0.5, 0.2);
+  const keep = game.buildSpot;
+  ui.openBuildRing(corr, { c: t.c, r: t.r }, sp.x, sp.y, { canBuild: ok });
+  game.buildSpot = keep; game.buildMenuOpen = true;
+}
+// dragging the build square: follow the finger cell by cell, re-checking whether a tower fits
+function dragBuildSpot(px, py) {
+  const h = renderer.pick(px, py, view); if (!h || h.kind !== "cell") return;
+  const G = game.state.grid;
+  const c = Math.max(1, Math.min(G.cols - 2, h.c)), r = Math.max(1, Math.min(G.rows - 2, h.r));
+  const t = ui.buildTile; if (!t || (t.c === c && t.r === r)) return;
+  const corr = fieldPlayer().corridors[isVersus() ? 0 : game.activeCorridor];
+  const ok = corr.grid[r * G.cols + c] !== 2 && canBuildAt(game.state, fieldId(), corr.index, c, r);
+  game.buildSpot = ok ? { c: c - 1, r: r - 1 } : { c: c - 1, r: r - 1, bad: true };
+  ui.moveBuildSpot(c, r, ok);
+  game.buildMenuOpen = true;
 }
 // a selected tower glides clear of the card (never zooms); the ring follows it on screen
 function keepClear(u, v) {
@@ -719,7 +763,12 @@ function bindPointer() {
     sound.unlock();
     cv.setPointerCapture(e.pointerId);
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (pts.size === 1) { drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY }; moved = false; }
+    if (pts.size === 1) {
+      drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY }; moved = false;
+      // pressing on the build square (or right next to it) grabs it instead of panning the field
+      const t = ui.ringKind === "build" && game.view === "field" ? ui.buildTile : null;
+      if (t) { const h = renderer.pick(e.clientX, e.clientY, view); if (h && h.kind === "cell" && Math.abs(h.c - t.c) <= 2 && Math.abs(h.r - t.r) <= 2) drag.square = true; }
+    }
     if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) }; drag = null; moved = true; }
   });
   cv.addEventListener("pointermove", (e) => {
@@ -735,6 +784,12 @@ function bindPointer() {
     }
     if (!drag) return;
     const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (drag.square) {
+      if (!moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 6) moved = true;
+      if (moved) dragBuildSpot(e.clientX, e.clientY);
+      drag.x = e.clientX; drag.y = e.clientY;
+      return;
+    }
     if (!moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 9) { moved = true; if (game.view === "field") ui.closeRing(); }
     if (moved && game.screen === "game" && game.view === "field") renderer.panBy(dx, dy);
     drag.x = e.clientX; drag.y = e.clientY;
@@ -743,7 +798,11 @@ function bindPointer() {
     if (!pts.has(e.pointerId)) return;
     pts.delete(e.pointerId);
     if (pts.size < 2) pinch = null;
-    if (pts.size === 0) { if (drag && !moved) onTap(e.clientX, e.clientY); drag = null; }
+    if (pts.size === 0) {
+      if (drag && !moved) onTap(e.clientX, e.clientY);
+      else if (drag && drag.square) reopenBuildRing(); // re-fan the bubbles around where the square landed
+      drag = null;
+    }
   };
   cv.addEventListener("pointerup", end);
   cv.addEventListener("pointercancel", (e) => { pts.delete(e.pointerId); drag = null; pinch = null; });
@@ -794,29 +853,50 @@ function wavesWon() {
   lastUnlocks = recordRunWin();
   refreshMenu();
   sound.play("victory");
-  if (tutorial) { tutorial.notify("wavesCleared"); return; }
+  if (tutorial) tutorial.notify("wavesCleared");
+  showSummonCard();
+}
+// After the last wave: the win is banked, and the Vortex holds the Sealed One. No modal — the world view
+// flies in, the Vortex glows with a Summon chip, and a small card offers the bonus round or a clean finish.
+function showSummonCard() {
   const pl = myPlayer();
-  const m = $("bonus-modal"); if (!m) return;
+  const c = $("summon-card"); if (!c) return;
+  const ch = game.state.challenge;
   const els = runElementsOf(pl);
-  const skins = els.map((e) => BUILDER_SKINS.find((k) => k.id === "seal_" + e)).filter(Boolean);
-  const fresh = skins.filter((k) => !skinUnlocked(k));
+  const fresh = ch ? [] : els.map((e) => BUILDER_SKINS.find((k) => k.id === "seal_" + e)).filter((k) => k && !skinUnlocked(k));
   const diff = RULES.SOLO_DIFFICULTY[game.state.x ? game.state.x.difficulty : "normal"];
-  m.innerHTML = `<div class="modal glass bonus">
-    <h1 class="win">VICTORY</h1>
-    <p class="bonus-sub">Every wave held${diff && diff.id !== "normal" ? " on " + diff.name : ""}. The win is yours — it counts for Mastery.</p>
-    ${lastUnlocks.length ? `<div class="end-unlocks">${lastUnlocks.slice(0, 6).map((u) => `<span class="unlock">${u}</span>`).join("")}</div>` : ""}
-    <div class="bonus-card"><img src="${enemyThumb(DB, "endboss")}" alt=""><div><b>Bonus round: the Sealed One</b>
-      <span>${fresh.length ? `Beat it to unlock ${fresh.map((k) => `<em>${k.name}</em>`).join(", ")}.` : "You've broken this seal before — beat it again for glory."} If it gets away, you keep your win.</span></div></div>
-    <div class="end-actions"><button class="btn primary" id="bonus-fight">☠ Face the Sealed One</button><button class="btn" id="bonus-skip">Finish run</button></div></div>`;
-  m.classList.add("show");
-  $("bonus-fight").onclick = () => { m.classList.remove("show"); game.endChoice = true; cmd.startWave(); };
-  $("bonus-skip").onclick = () => { m.classList.remove("show"); endScreen(true, { skipped: true }); };
+  c.innerHTML = ch
+    ? `<div class="sc-head"><b>☠ The boss waits in the Vortex</b></div>
+       <p>Ten waves held. Tap the <b>Vortex</b> to call the boss out and finish the challenge.</p>
+       <div class="sc-acts"><button class="btn primary" id="sc-summon">${icon("skull", "xs")} Summon at the Vortex</button></div>`
+    : `<div class="sc-head"><b class="win">🏆 Victory — every wave held${diff && diff.id !== "normal" ? " on " + diff.name : ""}</b></div>
+       ${lastUnlocks.length ? `<div class="sc-unlocks">${lastUnlocks.slice(0, 4).map((u) => `<span class="unlock">${u}</span>`).join("")}</div>` : ""}
+       <p>Something stirs in the <b>Vortex</b>. Tap it to summon <b>the Sealed One</b> — ${fresh.length ? `beat it to unlock ${fresh.map((k) => `<em>${k.name}</em>`).join(", ")}` : "beat it again for glory"}. If it gets away, your win stands.</p>
+       <div class="sc-acts"><button class="btn primary" id="sc-summon">${icon("skull", "xs")} Summon at the Vortex</button><button class="btn ghost" id="sc-finish">Finish run</button></div>`;
+  c.classList.add("show");
+  $("sc-summon").onclick = () => summonViaPortal();
+  const fin = $("sc-finish"); if (fin) fin.onclick = () => { hideSummonCard(); endScreen(true, { skipped: true }); };
+  if (game.view !== "world") setView("world");
+  ui.updateWavePanel();
+}
+function hideSummonCard() { const c = $("summon-card"); if (c) c.classList.remove("show"); }
+// summoning happens at the portal: the camera shows the Vortex, the seal breaks, then it walks out
+function summonViaPortal() {
+  const fp = myPlayer();
+  if (!game.state || fp.phase !== "prep" || game.summoning) return;
+  hideSummonCard();
+  game.summoning = true;
+  if (game.view !== "world") setView("world");
+  sound.play("boss");
+  renderer.flashVortex && renderer.flashVortex();
+  setTimeout(() => { game.summoning = false; if (game.state && myPlayer().phase === "prep") { game.endChoice = true; cmd.startWave(); } }, 1300);
 }
 function endScreen(win, o = {}) {
   if (game.replay) return; // replays just play out
   if (game._endShown === game.state) return;
   game._endShown = game.state;
   const bm = $("bonus-modal"); if (bm) bm.classList.remove("show");
+  hideSummonCard();
   const pl = game.state.players[game.me];
   const ch = game.state.challenge;
   let unlockMsgs = o.endboss || o.bossEscaped || o.skipped ? lastUnlocks.slice() : [];
@@ -1083,6 +1163,22 @@ function cellRect(c0, r0, c1, r1) {
   const left = Math.min(...xs), top = Math.min(...ys);
   return { left, top, width: Math.max(...xs) - left, height: Math.max(...ys) - top };
 }
+// the open ring's bubbles and caption (plus the build square), as one spotlight rectangle
+function ringRect() {
+  // laid-out boxes (offset*), not on-screen rects: bubbles are still scaling in during their first frames
+  const menu = $("radial-menu"); if (!menu || !menu.classList.contains("show")) return null;
+  const els = [...menu.querySelectorAll(".rad-item, .rad-label, .rad-hub")];
+  if (!els.length) return null;
+  const o = menu.getBoundingClientRect();
+  const lab = menu.querySelector(".rad-label");
+  let l = 1e9, t = 1e9, r = -1e9, b = -1e9;
+  for (const e of els) {
+    let x = e.offsetLeft, y = e.offsetTop, w = e.offsetWidth, h = e.offsetHeight;
+    if (e === lab) { x -= w / 2; if (!lab.classList.contains("below")) y -= h; } // the caption is centred / hung above its point
+    l = Math.min(l, o.left + x); t = Math.min(t, o.top + y); r = Math.max(r, o.left + x + w); b = Math.max(b, o.top + y + h);
+  }
+  return r > l ? { left: l, top: t, width: r - l, height: b - t } : null;
+}
 function startTutorial() {
   if (tutorial && tutorial.active) tutorial.end();
   ["mastery-screen", "wardrobe-modal", "challenges-modal", "end-screen", "bonus-modal"].forEach((id) => { const m = $(id); if (m) m.classList.remove("show"); });
@@ -1099,19 +1195,30 @@ function startTutorial() {
     { title: "Gold", text: "Gold buys towers and upgrades. Kills, cleared waves and some reactions pay more.", target: q("#currency-display"), pause: true },
     { title: "Waves", text: "Hold all <b>10 waves</b> and the run is won. Every 5th wave brings a Warlord boss.", target: q("#wave-display"), pause: true },
     { title: "Your corridor", text: "Creeps come out of the portal at the <b>top</b> and walk to the portal at the <b>bottom</b>. They can't walk through towers — so your towers build the path. A longer path means more shots.", enter: () => { if (game.view !== "field") enterCorridor(0); }, target: () => cellRect(0, 0, G.cols, G.rows), pad: 2, pause: true },
-    { title: "Build a tower", text: "Tap the glowing spot near the entrance.", target: () => cellRect(spot.c, spot.r, spot.c + 3, spot.r + 3), allow: true, done: () => ui.ringOpen || corr().towers.length > 0 },
-    { title: "Pick a tower", text: "Each bubble is a tower — 🔥 Fire and ❄ Ice, your two elements. Tap one to see what it does, then tap it <b>again</b> to build.", target: () => { const m = $("radial-menu"); return m && m.classList.contains("show") ? m : null; }, pad: 14, allow: true, done: () => corr().towers.length > 0, enter: () => { if (!ui.ringOpen && corr().towers.length === 0) { const sp = renderer.cellScreen(spot.c + 1.5, spot.r + 1.5, 0.2); onTap(sp.x, sp.y); } } },
-    { title: "Your builder", text: "Your builder flies over and raises the tower — it can't fire until it's finished. Its lantern also reveals invisible creeps close to it — Inspire a tower to park it there.", target: () => { const b = corr().builder; if (!b) return null; const p = renderer.cellScreen(b.x / 65536, b.y / 65536, 1.5); return { left: p.x - 34, top: p.y - 44, width: 68, height: 68 }; }, pause: false },
-    { title: "Make a wall", text: "Build <b>two more towers</b> next to the first one. Mix Fire and Ice — you'll see why in a moment.", target: () => cellRect(0, spot.r - 6, G.cols, spot.r + 8), allow: true, done: () => corr().towers.length >= 3 },
+    { title: "Build a tower",
+      text: () => ui.ringOpen
+        ? "Each bubble is a tower — 🔥 Fire and ❄ Ice, your two elements. Tap one to see what it does, then tap it <b>again</b> to build."
+        : "Tap the glowing spot near the entrance.",
+      target: () => ui.ringOpen ? ringRect(spot) : cellRect(spot.c, spot.r, spot.c + 3, spot.r + 3), pad: 10, allow: true,
+      done: () => corr().towers.length > 0 },
+    { title: "Your builder", text: "Your builder flies over and raises the tower — a bar above it shows the progress, and it can't fire until it's finished.", target: () => { const b = corr().builder; if (!b) return null; const p = renderer.cellScreen(b.x / 65536, b.y / 65536, 1.5); return { left: p.x - 34, top: p.y - 44, width: 68, height: 68 }; }, pause: false, next: "Next" },
+    { title: "Make a wall",
+      text: () => ui.ringOpen
+        ? "Pick a tower — try the other element this time. Missed the spot by a row? <b>Drag the square</b> and the bubbles follow."
+        : `Build <b>two more towers</b> next to the first one (${Math.max(0, 3 - corr().towers.length)} to go). Mix Fire and Ice — you'll see why in a moment.`,
+      target: () => ui.ringOpen ? ringRect() : cellRect(0, Math.max(0, spot.r - 6), G.cols, Math.min(G.rows, spot.r + 9)), pad: 8, allow: true,
+      done: () => corr().towers.length >= 3 },
+    { title: "Spots and your builder", text: "Tapping an empty spot always opens this ring. Besides towers, the 📍 <b>Builder</b> bubble sends your builder there — its lantern reveals invisible creeps nearby. Tap the builder itself for more.", pause: true, enter: () => ui.closeAllPanels() },
     { title: "The next wave", text: "This line shows what comes next. 🪽 flies over your maze, 👁 is invisible. If your towers can't deal with them, a red warning appears right here.", target: q("#wave-preview"), pause: true },
     { title: "Start the wave", text: "Ready? Tap <b>Start Wave</b>.", target: q("#quick-start-wave"), allow: true, on: "wave" },
     { title: "Speed", text: "Speed the game up to ×2, ×3 or ×5 here — or slow it back down when it gets busy.", target: q("#quick-speed-cycle"), pause: true },
     { title: "Reactions", text: "Every pair of elements reacts. A creep <b>Burning</b> from Fire that gets hit by an Ice tower (or <b>Chilled</b> and hit by Fire) sets off 🌡 <b>Thermal Shock</b> — a big burst of damage. Names pop up where reactions happen.<br><br>All 28 pairs are in <b>⚗ Reactions</b> in the pause menu.", pause: true },
-    { title: "Tower cards", text: "Tap one of your towers to open its card.", target: () => cellRect(0, spot.r - 1, G.cols, spot.r + 4), allow: true, done: () => !!game.selectedTowerId },
-    { title: "Upgrades and tags", text: "⬆ upgrades it. The card shows its <b>damage type</b>, whether it <b>hits flyers</b> and whether it <b>sees stealth</b> — and which reactions it can set off.", target: () => { const p = $("tower-panel"); return p && p.classList.contains("show") ? p : null; }, pause: true },
+    { title: "Tower cards", text: "Tap one of your towers.", target: () => ui.ringOpen ? ringRect() : cellRect(0, Math.max(0, spot.r - 6), G.cols, Math.min(G.rows, spot.r + 9)), pad: 6, allow: true, done: () => !!game.selectedTowerId, enter: () => ui.closeAllPanels() },
+    { title: "Upgrades and tags", text: "⬆ upgrades it — the tower re-raises itself, a little slower each level. The card shows its <b>damage type</b>, whether it <b>hits flyers</b> and whether it <b>sees stealth</b> — and which reactions it can set off.", target: () => { const p = $("tower-panel"); return p && p.classList.contains("show") ? p : null; }, pause: true,
+      enter: () => { const tw = corr().towers.find((t) => t.id === game.selectedTowerId) || corr().towers[0]; if (tw && !($("tower-panel") || {}).classList?.contains("show")) ui.openTowerPanel(corr(), tw); } },
     { title: "Armour", text: "Creeps wear armour classes. 🗡 <b>Physical</b> shreds Light runners, 💥 <b>Blast</b> cracks Medium packs and Fortified walls, ✦ <b>Magic</b> melts Heavy and Ethereal foes. Tap any creep to see its class.", pause: true, enter: () => ui.closeAllPanels() },
     { title: "Wave guide", text: "ⓘ lists the next three waves and every creep's traits.", target: q("#btn-wave-info"), pause: true },
-    { title: "You're ready", text: "Clear all 10 waves to win. After that, the <b>Sealed One</b> waits as an optional bonus round — beat it for a new builder look.<br><br>Have fun!", next: "Let's play", pause: true },
+    { title: "You're ready", text: "Clear all 10 waves to win. Then the <b>Vortex</b> in the middle of the world starts to glow: tap it to summon the <b>Sealed One</b>, an optional bonus fight that unlocks a new builder look.<br><br>Have fun!", next: "Let's play", pause: true },
   ];
   tutorial = createTutorial({
     layer: $("tutorial-layer"), steps,
@@ -1132,11 +1239,26 @@ function insets() {
     if (sheet && sheet.left > vw * 0.4) return { top: head ? head.bottom + 6 : 60, bottom: 0, right: vw - sheet.left + 8 };
     return { top: head ? head.bottom + 6 : 60, bottom: sheet ? vh - sheet.top + 6 : vh * 0.5 };
   }
+  if (game.screen === "menu") {
+    // the world sits in the gap between the title and the menu card (beside the card on wide screens)
+    const tag = document.querySelector("#screen-menu .tag"), card = document.querySelector("#screen-menu .menu-card");
+    const tr = tag && tag.offsetParent !== null ? tag.getBoundingClientRect() : null, cr = card && card.offsetParent !== null ? card.getBoundingClientRect() : null;
+    if (cr && cr.left > vw * 0.5) { const br = document.querySelector("#screen-menu .brand"); const bb = br ? br.getBoundingClientRect() : null; return { top: 0, bottom: 0, right: vw - cr.left + 10, left: bb && bb.right < vw * 0.4 ? bb.right + 10 : 0 }; }
+    return { top: tr ? tr.bottom + 4 : 0, bottom: cr ? vh - cr.top + 4 : 0 };
+  }
   if (game.screen !== "game") return { top: 0, bottom: 0 };
   let top = 0, bottom = 0;
   const tb = r("topbar"); if (tb) top = tb.bottom + 4;
   if (game.view === "field") { const nav = r("field-nav"); if (nav) top = Math.max(top, nav.bottom + 4); }
-  const dock = r("quick-wave-controls"); if (dock) bottom = vh - dock.top + 4;
+  // the dock grows and shrinks (next-wave preview, timers): keep the tallest height seen at this window
+  // size, so a wave ending or starting never nudges the camera's framing
+  const dock = r("quick-wave-controls");
+  if (dock) {
+    const key = window.innerWidth + "x" + vh;
+    if (insets._key !== key) { insets._key = key; insets._dock = 0; }
+    insets._dock = Math.max(insets._dock || 0, vh - dock.top + 4);
+    bottom = insets._dock;
+  }
   // cards (tower / enemy / builder / sends) overlay the battlefield: they never move or zoom the camera
   const right = 0;
   return { top, bottom, right, baseBottom: bottom, baseRight: right };
@@ -1297,11 +1419,20 @@ function bindUI() {
   };
   bind("corr-minus", () => stepCorridors(-1));
   bind("corr-plus", () => stepCorridors(1));
-  const MORE_KEY = "skyhold_setupmore_v1";
-  const applyMore = (open) => { const m = $("more-body"); if (m) m.classList.toggle("open", open); const ch = $("more-chev"); if (ch) ch.textContent = open ? "▴" : "▾"; };
-  let moreOpen = false; try { moreOpen = localStorage.getItem(MORE_KEY) === "1"; } catch (e) { /* fine */ }
-  applyMore(moreOpen);
-  bind("setup-more", () => { moreOpen = !moreOpen; try { localStorage.setItem(MORE_KEY, moreOpen ? "1" : "0"); } catch (e) { /* fine */ } applyMore(moreOpen); });
+  // run options (economy, pacing, creep modifiers, builder look) sit in their own sheet, one tap away
+  const moreM = () => $("more-modal");
+  bind("setup-more", () => { const m = moreM(); if (m) m.classList.add("show"); sound.play("click"); });
+  bind("more-close", () => { const m = moreM(); if (m) m.classList.remove("show"); });
+  bind("more-done", () => { const m = moreM(); if (m) m.classList.remove("show"); sound.play("click"); });
+  // one tab row: Quick / Standard / Endless are solo run lengths, Vs NPCs is the other game mode
+  document.querySelectorAll("[data-run]").forEach((b) => b.onclick = () => {
+    const k = b.dataset.run;
+    if (k === "versus") { setup.gameMode = "versus"; if (setup.corridors < 3) setup.corridors = 4; }
+    else { setup.gameMode = "solo"; setup.mode = k; if (setup.corridors < 3) setup.corridors = 4; }
+    setup._lastTouched = "mode";
+    ui.renderSetup(setup, avail());
+    sound.play("click");
+  });
   document.querySelectorAll("[data-gamemode]").forEach((b) => b.onclick = () => {
     const mp = b.dataset.gamemode === "coop" || b.dataset.gamemode === "competitive";
     if (mp) { ui.toast("Multiplayer is coming to Skyhold soon — Solo and Vs NPCs are ready now.", "warn"); return; }
@@ -1316,7 +1447,14 @@ function bindUI() {
   document.querySelectorAll("[data-quality]").forEach((b) => b.onclick = () => { renderer.setQuality(b.dataset.quality); refreshQualityButtons(); ui.toast("Graphics: " + b.textContent + (b.dataset.quality === "auto" ? " (" + renderer.qualityLabel + ")" : "")); });
   refreshQualityButtons();
   // audio (pause menu)
-  bind("audio-mute", () => { sound.setMuted(!sound.pref.muted); refreshAudio(); });
+  // settings: from the menu's gear or the pause menu
+  const setM = () => $("settings-modal");
+  bind("btn-settings", () => { refreshAudio(); refreshQualityButtons(); setM().classList.add("show"); sound.play("click"); });
+  bind("pause-settings", () => { refreshAudio(); refreshQualityButtons(); setM().classList.add("show"); sound.play("click"); });
+  bind("settings-close", () => setM().classList.remove("show"));
+  setM().addEventListener("click", (e) => { if (e.target === setM()) setM().classList.remove("show"); });
+  bind("audio-music-on", () => { sound.setMusicOn(!(sound.pref.musicOn !== false) || sound.pref.muted); refreshAudio(); });
+  bind("audio-sfx-on", () => { sound.setSfxOn(!(sound.pref.sfxOn !== false) || sound.pref.muted); refreshAudio(); sound.play("click"); });
   const mv = $("audio-music"), sv = $("audio-sfx");
   if (mv) mv.oninput = () => { sound.setMusic((+mv.value || 0) / 100); refreshAudio(); };
   if (sv) sv.oninput = () => { sound.setSfx((+sv.value || 0) / 100); refreshAudio(); sound.play("click"); };
@@ -1324,7 +1462,7 @@ function bindUI() {
   bind("btn-world", () => setView("world"));
   bind("btn-prev-corridor", () => enterCorridor((game.activeCorridor - 1 + corridorNavCount()) % corridorNavCount()));
   bind("btn-next-corridor", () => enterCorridor((game.activeCorridor + 1) % corridorNavCount()));
-  bind("quick-start-wave", () => { game.autoT = null; cmd.startWave(); });
+  bind("quick-start-wave", () => { game.autoT = null; if (game.state && myPlayer().phase === "prep") { summonViaPortal(); return; } cmd.startWave(); });
   bind("wave-fab", () => { game.autoT = null; cmd.startWave(); });
   bind("btn-wave-info", () => ui.toggleWavePanel());
   { const wp = $("wave-preview"); if (wp) wp.addEventListener("click", () => ui.toggleWavePanel()); }
@@ -1375,8 +1513,8 @@ function bindUI() {
   // keyboard (Circle's keys + corridor arrows)
   window.addEventListener("keydown", (e) => {
     if (game.screen !== "game" || e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
-    if (e.key === " ") { e.preventDefault(); cmd.startWave(); }
-    else if (e.key === "Escape") { if (ui.ringOpen) ui.closeAllPanels(); else togglePause(); }
+    if (e.key === " ") { e.preventDefault(); if (game.state && myPlayer().phase === "prep") summonViaPortal(); else cmd.startWave(); }
+    else if (e.key === "Escape") { const open = ["settings-modal", "more-modal"].map($).find((m) => m && m.classList.contains("show")); if (open) open.classList.remove("show"); else if (ui.ringOpen) ui.closeAllPanels(); else togglePause(); }
     else if (e.key.toLowerCase() === "w") setView("world");
     else if (e.key === "ArrowLeft" || e.key.toLowerCase() === "q") enterCorridor((game.activeCorridor - 1 + corridorNavCount()) % corridorNavCount());
     else if (e.key === "ArrowRight" || e.key.toLowerCase() === "e") enterCorridor((game.activeCorridor + 1) % corridorNavCount());
@@ -1387,9 +1525,12 @@ function bindUI() {
 function bind(id, fn) { const e = $(id); if (e) e.onclick = (ev) => { sound.unlock(); fn(ev); }; }
 function refreshQualityButtons() { document.querySelectorAll("[data-quality]").forEach((x) => x.classList.toggle("sel", x.dataset.quality === renderer.quality)); }
 function refreshAudio() {
-  const b = $("audio-mute"); if (b) b.innerHTML = sound.pref.muted ? icon("mute") + " Off" : icon("sound") + " On";
-  const mv = $("audio-music"); if (mv) mv.value = Math.round(sound.pref.music * 100);
-  const sv = $("audio-sfx"); if (sv) sv.value = Math.round(sound.pref.sfx * 100);
+  const p = sound.pref;
+  const tg = (id, on) => { const b = $(id); if (b) { b.classList.toggle("on", on); b.setAttribute("aria-checked", on ? "true" : "false"); } };
+  tg("audio-music-on", !p.muted && p.musicOn !== false);
+  tg("audio-sfx-on", !p.muted && p.sfxOn !== false);
+  const mv = $("audio-music"); if (mv) mv.value = Math.round(p.music * 100);
+  const sv = $("audio-sfx"); if (sv) sv.value = Math.round(p.sfx * 100);
 }
 function rematchCfg() {
   const pacing = game.autoWave ? "auto" : "manual";

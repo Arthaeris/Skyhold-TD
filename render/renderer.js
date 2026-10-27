@@ -125,7 +125,9 @@ export function createRenderer(opts) {
   function shotMenu(t) {
     const b = L.bounds;
     const R = Math.max(b.x1 - b.x0, b.z1 - b.z0) / 2;
-    const cr = contentRect(); const ppu = Math.min(cr.w, H * 1.1) / (R * 2.0);
+    // fit the slowly turning ring into the space the title and the menu card leave free
+    const cr = contentRect();
+    const ppu = Math.min(cr.w / (R * 2.0), cr.h / (R * 2.0 * Math.sin(EL_MENU) + 8)) * 0.98;
     return { tx: 0, ty: 0, tz: 0, az: t * 0.05, el: EL_MENU, ppu };
   }
   function shotSetup() {
@@ -600,7 +602,19 @@ export function createRenderer(opts) {
         sparks.burst(tmpA.x, 1.4, tmpA.z, DB.ELEMENTS[tw.def.element].glow, 14, 5, 0.5, 0.4, 3);
         sfx("build");
       }
-      if (tw && tw.upT > 0) { r.upT = (r.upT || 0) + dt; if (r.upT > 0.1) { r.upT = 0; m.root.getWorldPosition(tmpA); sparks.spawn({ x: tmpA.x + (Math.random() - 0.5) * 1.4, y: 0.3, z: tmpA.z + (Math.random() - 0.5) * 1.4, vy: 2.4, color: DB.ELEMENTS[tw.def.element].glow, life: 0.7, size: 0.3, drag: 0.5, glow: 2 }); } }
+      if (tw && tw.upT > 0) {
+        // an upgrade re-raises the tower from its footing, as slowly as the upgrade takes
+        const prog = tw.upMax ? clamp(1 - tw.upT / tw.upMax, 0, 1) : 1;
+        m.root.scale.set(1, 0.15 + 0.85 * easeInOut(prog), 1);
+        r.upgrading = true; r.rise = 1;
+        r.upT = (r.upT || 0) + dt;
+        if (r.upT > 0.1) { r.upT = 0; m.root.getWorldPosition(tmpA); sparks.spawn({ x: tmpA.x + (Math.random() - 0.5) * 1.4, y: 0.3 + prog * 2, z: tmpA.z + (Math.random() - 0.5) * 1.4, vy: 2.4, color: DB.ELEMENTS[tw.def.element].glow, life: 0.7, size: 0.3, drag: 0.5, glow: 2 }); }
+      } else if (r.upgrading) {
+        r.upgrading = false; m.root.scale.set(1, 1, 1);
+        m.root.getWorldPosition(tmpA);
+        rings.add(tmpA.clone().setY(0.12), DB.ELEMENTS[tw.def.element].glow, 0.4, 2.6, 0.6, 2);
+        sparks.burst(tmpA.x, 1.6, tmpA.z, DB.ELEMENTS[tw.def.element].glow, 12, 5, 0.5, 0.4, 3);
+      }
       if (tw && (tw.stunT > 0 || tw.jamT > 0 || tw.curseT > 0 || tw.confused || (tw.xDmg && tw.xDmg < fx.ONE) || (tw.xRate && tw.xRate < fx.ONE))) {
         r.dbT = (r.dbT || 0) + dt;
         if (r.dbT > 0.18) {
@@ -684,6 +698,16 @@ export function createRenderer(opts) {
       if (e.sent) bars.ring(tmpB.set(p.x, 0.06, p.z), rad + 0.14, "#ff5fa2");
       if (e.boss) bars.ring(tmpB.set(p.x, 0.07, p.z), rad + 0.28, "#ffffff");
       if (id === view.selectedEnemyId) bars.ring(tmpB.set(p.x, 0.08, p.z), rad + 0.42 + Math.sin(clock * 6) * 0.05, "#ffe066");
+    }
+    // construction and upgrade progress over the towers of the corridor being watched
+    if (mode === "field") for (const r of trec.values()) {
+      const tw = r.tw; if (!tw || r.ri !== fieldIdx) continue;
+      let frac = -1, col = "#ffd27a";
+      if (tw.bState) frac = tw.bState === 2 && tw.bMax ? 1 - tw.bT / tw.bMax : 0;
+      else if (tw.upT > 0 && tw.upMax) { frac = 1 - tw.upT / tw.upMax; col = DB.ELEMENTS[tw.def.element].glow; }
+      if (frac < 0) continue;
+      r.model.root.getWorldPosition(tmpB); tmpB.y = 3.8;
+      bars.bar(tmpB, clamp(frac, 0, 1), 2.6, col, 0.5);
     }
     enemies.end();
     bars.end();
@@ -840,7 +864,7 @@ export function createRenderer(opts) {
     if (view.buildMenuOpen && view.buildSpot) {
       const S = DB.CONFIG.towerSize, sp = view.buildSpot;
       const p = corridorToWorld(L, fieldIdx, sp.c + S / 2, sp.r + S / 2, 0.06, tmpA);
-      previews.showFoot(p, yaw, true);
+      previews.showFoot(p, yaw, !sp.bad);
       if (view.buildPreview && view.buildPreview.range) previews.showRange(tmpB.copy(p).setY(0.02), view.buildPreview.range, "#9dffc0");
       else previews.hideRange();
     } else previews.hideFoot();
@@ -1041,6 +1065,15 @@ export function createRenderer(opts) {
   return {
     render, resize, snapshotPositions, onEvents, previewRing, pick, panBy, zoomAt, setMode, enterField, emote,
     setFollow(id) { follow = id; if (id != null) nudge = null; },
+    // the seal breaking: a shockwave and a fountain of sparks out of the Vortex
+    flashVortex() {
+      const v = L.vortex; if (!v) return;
+      const c = new THREE.Vector3(v.x, 0.4, v.z);
+      for (let k = 0; k < 3; k++) setTimeout(() => rings.add(c.clone(), "#ff2e7e", v.r * 0.3, v.r * (1.4 + k * 0.5), 0.9, 3), k * 220);
+      sparks.burst(v.x, 3, v.z, "#ff7ad0", 40, 9, 0.9, 0.6, 4);
+      sparks.burst(v.x, 2, v.z, "#ffe066", 24, 7, 0.7, 0.5, 3);
+      lifeFlash = Math.max(lifeFlash, 0.6);
+    },
     // screen position of a corridor cell of the field being viewed
     cellScreen(u, v, y = 1) { return toScreen(corridorToWorld(L, fieldIdx, u, v, y, new THREE.Vector3())); },
     // glide (never zoom) so that cell (u,v) sits inside the visible band [topPx, bottomPx]

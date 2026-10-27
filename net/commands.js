@@ -9,7 +9,7 @@
 
 export const CommandTypes = [
   "BuildTower", "SellTower", "UpgradeTower", "MutateTower",
-  "StartWave", "SendEnemy", "SetSpeed", "Ack", "SetTargetMode", "UpgradeSend", "BuilderInspire",
+  "StartWave", "SendEnemy", "SetSpeed", "Ack", "SetTargetMode", "UpgradeSend", "BuilderInspire", "BuilderMove",
 ];
 
 // Factory helpers (the shell builds these from local input, never mutating state).
@@ -33,6 +33,7 @@ export function setTargetMode(player, corridorId, towerId, mode) {
   return { type: "SetTargetMode", player, corridorId, towerId, mode };
 }
 export function builderInspire(player, corridorId, towerId) { return { type: "BuilderInspire", player, corridorId, towerId: towerId || 0 }; }
+export function builderMove(player, corridorId, gx, gy) { return { type: "BuilderMove", player, corridorId, gx, gy }; }
 export function upgradeSend(player, enemyType) {
   return { type: "UpgradeSend", player, enemyType };
 }
