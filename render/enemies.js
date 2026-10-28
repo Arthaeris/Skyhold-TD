@@ -346,6 +346,24 @@ export function createEnemyRenderer(scene) {
       bub.count = nBub; bub.visible = nBub > 0; bub.instanceMatrix.needsUpdate = true; if (bub.instanceColor) bub.instanceColor.needsUpdate = true;
       sh.count = nSh; sh.visible = nSh > 0; sh.instanceMatrix.needsUpdate = true;
     },
+    // points on the creature's own surface (model space, scale 1) with their colours, for deaths that break the
+    // creature into its own voxels: Float32Array of [x, y, z, r, g, b, glow] * n, cached per type
+    samples(type) {
+      const T = getType(type);
+      if (T.samples) return T.samples;
+      const pool = [];
+      for (const p of T.parts) for (const m of p.meshes) {
+        const pos = m.geo.attributes.position, col = m.geo.attributes.color; if (!pos) continue;
+        for (let k = 0; k < pos.count; k += 4) pool.push([pos.getX(k) + p.piv.x, pos.getY(k) + p.piv.y, pos.getZ(k) + p.piv.z, col ? col.getX(k) : 1, col ? col.getY(k) : 1, col ? col.getZ(k) : 1, m.lit ? 0 : 1]);
+      }
+      const n = Math.min(96, pool.length), out = new Float32Array(n * 7);
+      // spread the picks over the whole model (stride through a shuffled order)
+      let seed = type.length * 977;
+      const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      for (let i = 0; i < n; i++) out.set(pool[Math.floor(rnd() * pool.length)], i * 7);
+      T.samples = out;
+      return out;
+    },
     // build models ahead of their first appearance (the voxel bosses take a moment), one per slice
     warm(ids) { const q = ids.slice(); const next = () => { const id = q.shift(); if (!id) return; getType(id); setTimeout(next, 60); }; setTimeout(next, 200); },
     heightOf(type) { const M = MODELS[type] || MODELS.grunt; return M.height + (M.hover || 0); },

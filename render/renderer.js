@@ -15,6 +15,7 @@ import { createEnemyRenderer, enemyScale, setEnemyVisScale } from "./enemies.js"
 import { createSparks, createBits, createStreaks, createRings, createProjectiles, createBars, createRoute, createPreviews } from "./effects.js";
 import { createShotFx } from "./shotfx.js";
 import { createStatusFx } from "./statusfx.js";
+import { createDeathFx, deathStyle } from "./deathfx.js";
 import { createPost, QUALITY } from "./post.js";
 import { WORLD } from "./theme.js";
 import { WEATHER_U, setWeatherOpacity } from "./weather.js";
@@ -59,6 +60,8 @@ export function createRenderer(opts) {
   const projs = createProjectiles(scene), bars = createBars(scene), route = createRoute(scene), previews = createPreviews(scene);
   const shot = createShotFx(scene, { sparks, bits, streaks, rings });
   const sfxStatus = createStatusFx(scene, { sparks, bits, streaks, rings });
+  const dfx = createDeathFx(scene, { sparks, bits, streaks, rings });
+  let freshSync = true;   // the first snapshot after a (re)build: creeps already on the field just appear
   const post = createPost(renderer);
 
   // ---- quality (Riftfall's tiers + automatic step-down) ------------------
@@ -345,7 +348,7 @@ export function createRenderer(opts) {
   function clearEntities() {
     for (const r of trec.values()) r.model.root.parent && r.model.root.parent.remove(r.model.root);
     for (const b of brec.values()) { b.group.parent && b.group.parent.remove(b.group); b.ring && b.ring.parent && b.ring.parent.remove(b.ring); }
-    trec.clear(); erec.clear(); prec.clear(); brec.clear();
+    trec.clear(); erec.clear(); prec.clear(); brec.clear(); freshSync = true;
     route.clear(); routeSig = "";
   }
 
@@ -366,7 +369,13 @@ export function createRenderer(opts) {
       if (!r) {
         r = { pu: u, pv: v, cu: u, cv: v, pri: ri, ri, hp: e.hp, flash: 0, yaw: 0, walk: Math.random() * 6, world: new THREE.Vector3(), alive: true, type: e.type, h: 1, born: true, e };
         erec.set(e.id, r);
-        if (ri >= 0 && L.corridors[ri]) { const p = corridorToWorld(L, ri, u, v, 0.4); sparks.burst(p.x, p.y, p.z, WORLD.portal, 6, 3, 0.5, 0.4, 1); }
+        // arrivals rise out of the entrance portal (or pop up where they were born: splits, summons, hatchlings)
+        if (!freshSync && ri >= 0 && L.corridors[ri]) {
+          const p = corridorToWorld(L, ri, u, v, 0.05);
+          r.bornT = clock;
+          if (v > ROWS - 3) dfx.spawnAt(p, 1, WORLD.portal);
+          else dfx.spawnAt(p, 1, (DB.ENEMIES[e.type] && DB.ENEMIES[e.type].color) || "#c8d0ff");
+        }
       } else {
         r.pu = r.cu; r.pv = r.cv; r.pri = r.ri;
         r.cu = u; r.cv = v; r.ri = ri;
@@ -377,6 +386,7 @@ export function createRenderer(opts) {
       r.e = e; r.seen = true; r.alive = e.alive;
     }
     for (const [id, r] of erec) if (!r.seen) { if (!r.killed) deathFx(r, false); erec.delete(id); sfxStatus.forget(id); }
+    freshSync = false;
     for (const r of prec.values()) r.seen = false;
     for (const p of state.projectiles) {
       const ri = V ? (V.versus ? p.owner : (p.owner === V.fieldId ? p.corr.index : -1)) : p.corr.index;
@@ -436,13 +446,15 @@ export function createRenderer(opts) {
     sparks.burst(a.x, a.y, a.z, WORLD.portal, 8, 3, 0.5, 0.45, 0);
     sparks.burst(b.x, b.y, b.z, WORLD.portal, 8, 3, 0.5, 0.45, 0);
   }
+  // deaths break the creature into its own voxels (render/deathfx.js picks the recipe from what it is);
+  // creeps that vanish at the exit end without being killed are sucked into the exit portal
   function deathFx(r, killed) {
     if (r.ri < 0 || !L.corridors[r.ri]) return;
-    const p = r.world, s = enemyScale(DB, r.type);
-    const big = r.type === "boss" || r.type === "endboss" || !!(DB.ENEMIES[r.type] && DB.ENEMIES[r.type].boss);
-    bits.burst(p.x, p.y + 0.4 * s, p.z, mobColor(r.type) || (DB.ENEMIES[r.type] || {}).color || "#a33a26", big ? 26 : 8, big ? 7 : 4, big ? 0.32 : 0.18, 0.02);
-    sparks.burst(p.x, p.y + 0.5 * s, p.z, killed ? "#ffe9a8" : "#ff9a9a", big ? 30 : 8, big ? 7 : 4, 0.5, big ? 0.9 : 0.4, 3);
-    if (big) rings.add(p.clone().setY(0.1), "#ff5fa2", 0.5, 6, 0.9, 2);
+    const s = enemyScale(DB, r.type), M = enemies.MODELS[r.type] || enemies.MODELS.grunt;
+    const info = { type: r.type, pos: r.world.clone(), yaw: r.yaw, s, h: r.h || M.height * s, lift: (M.hover || 0) * s, samples: enemies.samples(r.type), style: deathStyle(r.type, DB, M) };
+    if (killed) { dfx.death(info, true); return; }
+    if (r.cv <= 1.5) dfx.leak(info, corridorToWorld(L, r.ri, COLS / 2, -3.2, 0.8, new THREE.Vector3()), WORLD.portal);
+    else dfx.death(info, false);
   }
   function impactFx(r) {
     if (r.ri < 0 || !L.corridors[r.ri]) return;
@@ -466,7 +478,7 @@ export function createRenderer(opts) {
         }
       }
       else if (ev.kind === "bounty") { const r = erec.get(ev.enemy); if (r && r.ri >= 0) popText(r.world, "+" + ev.gold + " ✦", "#ffd23d", true); }
-      else if (ev.kind === "life") lifeFlash = 1;
+      else if (ev.kind === "life") { lifeFlash = 1; if (mode === "field" && L.corridors[fieldIdx]) dfx.lifeLost(corridorToWorld(L, fieldIdx, COLS / 2, -3.2, 0.6, new THREE.Vector3())); }
       else abilityFx(ev);
     }
   }
@@ -692,7 +704,11 @@ export function createRenderer(opts) {
       const moved = Math.hypot(p.x - r.world.x, p.z - r.world.z);
       if (moved > 0.0005 && moved < 3) { const want = Math.atan2(p.x - r.world.x, p.z - r.world.z); let d = want - r.yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); r.yaw += d * Math.min(1, dt * 12); r.walk += moved * 4.5; }
       r.world.copy(p);
-      const s = enemyScale(DB, e.type);
+      let s = enemyScale(DB, e.type);
+      if (r.bornT != null) {
+        const f = (clock - r.bornT) / 0.38;
+        if (f < 1) { const c1 = 1.70158, x = f - 1; s *= Math.max(0.05, 1 + (c1 + 1) * x * x * x + c1 * x * x); } else r.bornT = null;
+      }
       r.h = enemies.heightOf(e.type) * s;
       const sk = e.statusKeys || [];
       let stat = null;
@@ -737,6 +753,7 @@ export function createRenderer(opts) {
       r.model.root.getWorldPosition(tmpB); tmpB.y = 3.8;
       bars.bar(tmpB, clamp(frac, 0, 1), 2.6, col, 0.5);
     }
+    dfx.update(dt, (type, pos, yaw, sc) => enemies.add(type, pos, yaw, 0, clock, sc, null, 0, false, null));
     enemies.end(); sfxStatus.end();
     bars.end();
   }
@@ -1143,7 +1160,7 @@ export function createRenderer(opts) {
     world.update(dt, clock, active);
     updateMood(dt);
     if (V) { syncEnemies(V, alpha, dt); syncProjectiles(alpha); syncOverlays(V); syncBuilders(V, alpha, dt); }
-    else { for (const b of brec.values()) { b.group.visible = false; b.ring.visible = false; } enemies.begin(); enemies.end(); sfxStatus.begin(0); sfxStatus.end(); bars.begin(camera); bars.end(); projs.begin(); projs.end(); previews.hideFoot(); previews.hideRange(); route.clear(); }
+    else { for (const b of brec.values()) { b.group.visible = false; b.ring.visible = false; } enemies.begin(); dfx.update(dt, () => {}); enemies.end(); sfxStatus.begin(0); sfxStatus.end(); bars.begin(camera); bars.end(); projs.begin(); projs.end(); previews.hideFoot(); previews.hideRange(); route.clear(); }
     route.update(clock, mode === "field" && V && V.field && (V.field.phase === "build" || (V.buildMenuOpen)) ? 1 : 0.45);
     sparks.update(dt); bits.update(dt); streaks.update(dt); rings.update(dt);
     syncLabels(V);
