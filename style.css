@@ -887,3 +887,13 @@ body[data-spectate="replay"] #deck-card, body[data-spectate="live"] #deck-card {
   #quick-start-wave { padding: 9px 12px; }
   .dock-btn { padding: 8px 10px; }
 }
+/* build ring, level 1: one bubble per element */
+.rad-item.rad-el .re-sig { display: grid; place-items: center; margin-top: -2px; }
+.rad-item.rad-el .re-sig svg { width: 30px; height: 30px; }
+.rad-item.rad-el .ri-cost { font-size: 10.5px; margin-top: 3px; }
+.rad-item.rad-back { width: 52px; height: 52px; margin: -26px 0 0 -26px; --ec: #9fb0ff; }
+.rad-item.rad-back svg.i { width: 20px; height: 20px; }
+.rad-item.rad-back .ri-cost { font-size: 9.5px; color: #dfe4ff; }
+.rad-label { max-width: min(92vw, 380px); white-space: normal; }
+.rad-label .rl-main { white-space: nowrap; }
+.rad-item .ri-n { position: absolute; top: -5px; right: -5px; min-width: 21px; height: 21px; padding: 0 5px; border-radius: 99px; display: grid; place-items: center; font-size: 11.5px; font-weight: 900; background: rgba(8, 8, 28, 0.92); border: 1.5px solid var(--ec); color: #fff; }

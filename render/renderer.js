@@ -157,8 +157,11 @@ export function createRenderer(opts) {
     pan.zoom = clamp(pan.zoom, 1, 4);
     const ppu = fieldPPU(), cr = contentRect(true);
     const halfX = (cr.w / 2) / ppu, halfZ = (cr.h / 2) / ppu / Math.sin(closeView ? EL_CLOSE : EL_FIELD) * (closeView ? 0.6 : 1);
-    const mx = Math.max(0, (COLS + 2) / 2 - halfX), mz = Math.max(0, (ROWS + 8) / 2 - halfZ);
-    pan.x = clamp(pan.x, -mx, mx); pan.z = clamp(pan.z, -mz, mz);
+    // along the corridor you can pan past both portal plazas far enough to see each portal whole (the
+    // entrance arch stands tall at the top of the screen, so that end gets a little more room)
+    const mx = Math.max(0, (COLS + 2) / 2 - halfX);
+    const up = Math.max(0, ROWS / 2 + 14 - halfZ), down = Math.max(0, ROWS / 2 + 10 - halfZ);
+    pan.x = clamp(pan.x, -mx, mx); pan.z = clamp(pan.z, -down, up);
   }
   // where a corridor view starts: when the whole length doesn't fit (portrait phones), lean toward the entrance a
   // little, so the creeps pouring out of the top portal are on screen from the first step

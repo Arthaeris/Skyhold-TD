@@ -133,6 +133,7 @@ export function createUI(opts) {
   // keep the ring on its tower/tile while the camera glides (clamped above the open card)
   function trackRing(sx, sy, maxY) {
     if (!_ring) return;
+    _ringSpot = { sx, sy };
     const stage = $("game-stage"); const W = stage.clientWidth, H = stage.clientHeight, R = _ring.R;
     let cx, cy;
     if (_ring.arc && _ring.arc !== "full") { cx = sx; cy = Math.max(ringTop() - 54, Math.min(H - 44, sy)); }
@@ -157,23 +158,37 @@ export function createUI(opts) {
   // Build ring: one bubble per unlocked tower of every element in this run
   // Build ring: one bubble per unlocked tower of every element in this run, plus "move the builder here".
   // The chosen square stays live: drag it to shift the spot (the ring follows), tap elsewhere to start over.
+  // With several elements in play the ring has two levels: first one bubble per element (its sigil, how many
+  // towers you can build and the cheapest price), tap one to open that element's towers; a back bubble returns
+  // to the elements. With a single element the towers show straight away.
+  let _ringSpot = null;
   function openBuildRing(corr, tile, sx, sy, o = {}) {
     closeAllPanels();
     const v = getView(); v.buildTile = tile; v.buildMenuOpen = true;
     const spot = { canBuild: o.canBuild !== false };
     const els = (v.player && v.player.buildable) || [corr.element];
-    const list = [], lockedBy = [];
+    const byEl = {}, locked = {};
     for (const e of els) {
       const slots = DB.unlockedTowerSlots(masteryLevel(e));
-      for (const t of DB.TOWERS) if (t.element === e && t.slot < slots) list.push(t);
-      const lk = DB.TOWERS.filter((t) => t.element === e && t.slot >= slots).length;
-      if (lk) lockedBy.push(`${lk} ${DB.ELEMENTS[e].name}`);
+      byEl[e] = DB.TOWERS.filter((t) => t.element === e && t.slot < slots).map((t0) => R.towerX(t0));
+      locked[e] = DB.TOWERS.filter((t) => t.element === e && t.slot >= slots).length;
     }
-    const items = list.map((t0) => {
-      const t = R.towerX(t0), el = DB.ELEMENTS[t.element];
+    const grouped = els.length > 1;
+    const cur = () => v.state.economy === "shared" ? `${curIcon(v, corr.element)} ${Math.floor(curOf(v, corr.element))}` : els.map((e) => `${sigil(e, "xs")} ${Math.floor(curOf(v, e))}`).join(" ");
+    const noRoom = () => `<span class="rl-main">No room to build here</span><span class="rl-dim">${icon("move", "xs")} Drag the square · ${icon("pin", "xs")} or send your builder</span>`;
+    const tail = () => {
+      const extra = [];
+      if (corr.builder && cmd.moveBuilder) extra.push({ key: "mv", cls: "rad-builder", confirm: false,
+        html: `${icon("pin")}<span class="ri-cost">Builder</span>`,
+        exec: () => { cmd.moveBuilder(corr.index, tile.c, tile.r); closeAllPanels(); } });
+      extra.push({ key: "x", cls: "rad-cancel", confirm: false, html: icon("close"), exec: closeAllPanels });
+      return extra;
+    };
+    const towerItem = (t) => {
+      const el = DB.ELEMENTS[t.element];
       return {
         key: t.id, color: el.color, confirm: true,
-        html: `<img class="ri-thumb" src="${thumb(t.id)}" alt=""><span class="ri-cost">${t.cost}</span>${els.length > 1 ? `<span class="ri-el">${sigil(t.element, "xs")}</span>` : ""}`,
+        html: `<img class="ri-thumb" src="${thumb(t.id)}" alt=""><span class="ri-cost">${t.cost}</span>`,
         focusHtml: () => {
           if (!spot.canBuild) return `<b>No room here</b><br><span class="rl-dim">Drag the square to a free spot</span>`;
           const tg = towerTags(t);
@@ -185,19 +200,40 @@ export function createUI(opts) {
         exec: () => { if (!spot.canBuild) { sfx("reject"); return; } cmd.build(corr.index, tile.c, tile.r, t.id); closeAllPanels(); },
         isDisabled: () => !spot.canBuild || curOf(v, t.element) < t.cost,
       };
-    });
-    if (corr.builder && cmd.moveBuilder) items.push({ key: "mv", cls: "rad-builder", confirm: false,
-      html: `${icon("pin")}<span class="ri-cost">Builder</span>`,
-      exec: () => { cmd.moveBuilder(corr.index, tile.c, tile.r); closeAllPanels(); } });
-    items.push({ key: "x", cls: "rad-cancel", confirm: false, html: icon("close"), exec: closeAllPanels });
-    const title = () => {
-      const cur = v.state.economy === "shared" ? `${curIcon(v, corr.element)} ${Math.floor(curOf(v, corr.element))}` : els.map((e) => `${sigil(e, "xs")} ${Math.floor(curOf(v, e))}`).join(" ");
-      if (!spot.canBuild) return `<span class="rl-main">No room to build here</span><span class="rl-dim">${icon("move", "xs")} Drag the square · ${icon("pin", "xs")} or send your builder</span>`;
-      return `<span class="rl-main">Build · ${cur}</span><span class="rl-dim">${icon("move", "xs")} Drag the square to shift it${lockedBy.length ? ` · ${icon("lock", "xs")} ${lockedBy.join(", ")} with Mastery` : ""}</span>`;
     };
-    showRing(sx, sy, items, { anchor: { u: tile.c + 0.5, v: tile.r + 0.5 }, title });
-    _ring.kind = "build"; _ring.tile = tile; _ring.corr = corr; _ring.spot = spot;
-    if (opts.onPanels) opts.onPanels();
+    const where = () => _ringSpot || { sx, sy };
+    const show = (el) => {
+      let items, title;
+      if (!grouped || el) {
+        const e = el || els[0];
+        items = byEl[e].map(towerItem);
+        if (grouped) items.push({ key: "back", cls: "rad-back", confirm: false, html: `${icon("back")}<span class="ri-cost">Elements</span>`, exec: () => { v.buildPreview = null; show(null); } });
+        items.push(...tail());
+        const lk = grouped ? locked[e] : els.reduce((a, x) => a + locked[x], 0);
+        title = () => spot.canBuild
+          ? `<span class="rl-main">${grouped ? `${sigil(e, "sm")} ${DB.ELEMENTS[e].name} · ` : "Build · "}${cur()}</span><span class="rl-dim">${icon("move", "xs")} Drag the square to shift it${lk ? ` · ${icon("lock", "xs")} ${lk} more with Mastery` : ""}</span>`
+          : noRoom();
+      } else {
+        items = els.map((e) => {
+          const E = DB.ELEMENTS[e], list = byEl[e];
+          const cheapest = list.length ? Math.min(...list.map((t) => t.cost)) : 0;
+          return {
+            key: "el:" + e, cls: "rad-el", color: E.color, confirm: false,
+            html: () => `<span class="re-sig">${sigil(e, "")}</span><span class="ri-cost">${cheapest}+</span><span class="ri-n">${list.length}</span>`,
+            isDisabled: () => !list.length,
+            exec: () => { v.buildPreview = null; show(e); },
+          };
+        });
+        items.push(...tail());
+        title = () => spot.canBuild ? `<span class="rl-main">Build · ${cur()}</span><span class="rl-dim">Pick an element · ${icon("move", "xs")} drag the square to shift it</span>` : noRoom();
+      }
+      const p = where();
+      showRing(p.sx, p.sy, items, { anchor: { u: tile.c + 0.5, v: tile.r + 0.5 }, title });
+      _ring.kind = "build"; _ring.tile = tile; _ring.corr = corr; _ring.spot = spot; _ring.group = el || null;
+      if (opts.onPanels) opts.onPanels();
+    };
+    _ringSpot = null;
+    show(null);
   }
   // drag the build square: same ring, new spot (the caller says whether a tower fits there)
   function moveBuildSpot(c, r, canBuild) {
