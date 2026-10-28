@@ -24,7 +24,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&family=Nunito:wght@600;700;800;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=3">
+  <link rel="stylesheet" href="style.css?v=4">
   <script type="importmap">
     { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.min.js" } }
   </script>
@@ -35,6 +35,7 @@
   <div id="world-labels"></div>
   <div id="screen-flash"></div>
   <div id="toast"></div>
+  <div id="safe-probe" aria-hidden="true"></div>
 
   <!-- LOADING -->
   <section id="screen-loading" class="screen active">
@@ -53,7 +54,6 @@
       <p class="tag">Tower defense on floating islands</p>
 
     </div>
-<button id="btn-settings" class="icon-btn glass menu-gear" aria-label="Settings"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/></svg></button>
     <div class="menu-card glass">
       <div id="menu-progress" class="menu-progress"></div>
       <div class="menu-main">
@@ -69,6 +69,7 @@
         <button id="btn-bestiary" class="mi"><i>📖</i><span>Bestiary</span></button>
         <button id="btn-replays" class="mi"><i>▶</i><span>Replays</span><b class="pill">0</b></button>
         <button id="btn-menu-save" class="mi"><i>💾</i><span>Save</span></button>
+        <button id="btn-settings" class="mi" aria-label="Settings"><i><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/></svg></i><span>Settings</span></button>
       </div>
     </div>
   </section>
@@ -89,6 +90,8 @@
           <span class="opt-seg"><button class="seg" data-quality="auto">Auto</button><button class="seg" data-quality="high">High</button><button class="seg" data-quality="medium">Med</button><button class="seg" data-quality="low">Low</button></span></div>
         <div class="set-row"><span>Frame rate</span>
           <span class="opt-seg"><button class="seg" data-fps="30">30</button><button class="seg" data-fps="45">45</button><button class="seg sel" data-fps="60">60</button></span></div>
+        <div class="set-row"><span>🌦 Weather &amp; atmosphere<small class="set-note">Embers, snow, rain, fireflies… over each island</small></span><button id="gfx-weather" class="toggle" role="switch" aria-checked="true"><i></i></button></div>
+        <div class="set-row"><span>💡 Mood lighting<small class="set-note">Each island lit in its own colours; waves and bosses shift the mood</small></span><button id="gfx-mood" class="toggle" role="switch" aria-checked="true"><i></i></button></div>
       </div>
       <p class="dim keys">PC: Space start wave · W world · Q/E or ←/→ corridors · 1/2/3/5 speed · Esc pause · wheel zoom · drag to pan</p>
     </div>
@@ -182,22 +185,7 @@
 
   <!-- GAME -->
   <section id="screen-game" class="screen">
-    <div id="topbar" class="glass">
-      <div class="tb-item lives"><svg class="i heart" viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.6-7.5-10.1A4.3 4.3 0 0 1 12 7.6a4.3 4.3 0 0 1 7.5 2.8c0 5.5-7.5 10.1-7.5 10.1z" fill="currentColor"/></svg><span id="lives">20/20</span></div>
-      <div class="tb-item" id="currency-display">0</div>
-      <button class="tb-item tb-btn" id="wave-display"><span class="tb-sm">Wave</span><b id="wave-num">0</b></button>
-      <div class="tb-item time"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><span id="match-time">00:00</span></div>
-      <button class="tb-item tb-btn icon-only" id="btn-settings-ingame" aria-label="Pause"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 6v12M15 6v12"/></svg></button>
-    </div>
     <div id="game-stage">
-      <div id="field-nav" class="glass">
-        <button id="btn-world" class="nav-btn"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.5 12 5l8 6.5"/><path d="M6.5 10v9h11v-9"/></svg><span>World</span></button>
-        <button id="btn-prev-corridor" class="nav-btn arrow" aria-label="Previous corridor">‹</button>
-        <span id="corridor-name">Corridor</span>
-        <button id="btn-next-corridor" class="nav-btn arrow" aria-label="Next corridor">›</button>
-        <button id="btn-camview" class="nav-btn" aria-label="Switch camera angle" title="Camera: top-down / close"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="13" height="10" rx="2.5"/><path d="m16 11 5-3v8l-5-3"/></svg><span id="camview-lbl">Top</span></button>
-      </div>
-      <div id="boss-bar" class="glass"><span id="boss-name"></span><div class="bb-track"><div id="boss-fill"></div></div></div>
       <div id="enemy-overview" class="overlay-panel glass"></div>
       <div id="tower-panel" class="bottom-panel glass"></div>
       <div id="enemy-panel" class="bottom-panel glass"></div>
@@ -215,17 +203,40 @@
       <div id="emote-bar" class="glass"></div>
     </div>
     <div id="summon-card" class="glass" role="status"></div>
-    <div id="quick-wave-controls" class="glass">
-      <button id="dock-handle" aria-label="Collapse controls">▾</button>
-      <div id="wave-preview"></div>
-      <div class="dock-row">
-        <button id="quick-auto-wave" class="btn ghost dock-btn" aria-label="Toggle automatic wave start">Auto</button>
-        <button id="quick-start-wave" class="btn primary">Start Wave</button>
-        <button id="btn-wave-info" class="btn ghost dock-btn" aria-label="Wave guide">ⓘ</button>
-        <button id="btn-send-panel" class="btn ghost dock-btn" style="display:none" aria-label="Open send menu"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M5 19l9.5-9.5M14.5 5H19v4.5L9.5 19M4 15l5 5"/><path d="M19 19 14 14M15 20l5-5"/></svg><span>Sends</span></button>
-        <button id="btn-chat" class="btn ghost dock-btn online-only" aria-label="Chat">💬</button>
-        <button id="btn-emote" class="btn ghost dock-btn online-only" aria-label="Emote">😀</button>
-        <button id="quick-speed-cycle" class="btn ghost dock-btn">×1</button>
+    <!-- the command deck: lives / gold / wave, the corridor switcher and the wave controls, all at the bottom
+         so the top of the screen (where creeps pour out of the entrance portal) stays clear -->
+    <div id="hud-deck">
+      <div id="boss-bar" class="glass"><span id="boss-name"></span><div class="bb-track"><div id="boss-fill"></div></div></div>
+      <div id="deck-card" class="glass">
+        <button id="dock-handle" aria-label="Collapse controls">▾</button>
+        <div class="deck-bars">
+          <div id="topbar">
+            <div class="tb-item lives"><svg class="i heart" viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.6-7.5-10.1A4.3 4.3 0 0 1 12 7.6a4.3 4.3 0 0 1 7.5 2.8c0 5.5-7.5 10.1-7.5 10.1z" fill="currentColor"/></svg><span id="lives">20/20</span></div>
+            <div class="tb-item" id="currency-display">0</div>
+            <button class="tb-item tb-btn" id="wave-display"><span class="tb-sm">Wave</span><b id="wave-num">0</b></button>
+            <div class="tb-item time"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><span id="match-time">00:00</span></div>
+            <button class="tb-item tb-btn icon-only" id="btn-settings-ingame" aria-label="Pause"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 6v12M15 6v12"/></svg></button>
+          </div>
+          <div id="field-nav">
+            <button id="btn-world" class="nav-btn"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.5 12 5l8 6.5"/><path d="M6.5 10v9h11v-9"/></svg><span>World</span></button>
+            <button id="btn-prev-corridor" class="nav-btn arrow" aria-label="Previous corridor">‹</button>
+            <span id="corridor-name">Corridor</span>
+            <button id="btn-next-corridor" class="nav-btn arrow" aria-label="Next corridor">›</button>
+            <button id="btn-camview" class="nav-btn" aria-label="Switch camera angle" title="Camera: top-down / close"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="13" height="10" rx="2.5"/><path d="m16 11 5-3v8l-5-3"/></svg><span id="camview-lbl">Top</span></button>
+          </div>
+        </div>
+        <div id="quick-wave-controls">
+          <div id="wave-preview"></div>
+          <div class="dock-row">
+            <button id="quick-auto-wave" class="btn ghost dock-btn" aria-label="Toggle automatic wave start">Auto</button>
+            <button id="quick-start-wave" class="btn primary">Start Wave</button>
+            <button id="btn-wave-info" class="btn ghost dock-btn" aria-label="Wave guide">ⓘ</button>
+            <button id="btn-send-panel" class="btn ghost dock-btn" style="display:none" aria-label="Open send menu"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M5 19l9.5-9.5M14.5 5H19v4.5L9.5 19M4 15l5 5"/><path d="M19 19 14 14M15 20l5-5"/></svg><span>Sends</span></button>
+            <button id="btn-chat" class="btn ghost dock-btn online-only" aria-label="Chat">💬</button>
+            <button id="btn-emote" class="btn ghost dock-btn online-only" aria-label="Emote">😀</button>
+            <button id="quick-speed-cycle" class="btn ghost dock-btn">×1</button>
+          </div>
+        </div>
       </div>
     </div>
     <div id="pause-overlay" class="modal-overlay">

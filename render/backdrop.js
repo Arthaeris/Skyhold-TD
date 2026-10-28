@@ -10,6 +10,7 @@ import * as THREE from "three";
 import { Batch, MAT, rng, noise, fbm, col, shade, mix, clamp, smooth, TAU, dotTexture } from "./kit.js";
 import { THEMES } from "./theme.js";
 import { TIME } from "./world.js";
+import { WEATHER_U } from "./weather.js";
 
 export const SEA_Y = -110;           // the sea lies far below the floating ring
 const SKY = "#040a24";
@@ -532,12 +533,12 @@ function buildSea() {
       uTime: TIME, uMask: { value: mask }, uMO: { value: new THREE.Vector2() }, uME: { value: 600 }, uMD: { value: 24 },
       uC: { value: new THREE.Vector2() }, uR: { value: 80 }, uVR: { value: 10 }, uWarm: { value: 0 },
       uDeep: { value: col("#03123e").clone() }, uSea: { value: col("#0c3d98").clone() }, uShal: { value: col("#2391e0").clone() },
-      uCur: { value: col("#3fb2ff").clone() }, uFoam: { value: col("#d8f1ff").clone() }, uHaze: { value: col(FOG).clone() },
+      uCur: { value: col("#3fb2ff").clone() }, uFoam: { value: col("#d8f1ff").clone() }, uHaze: { value: col(FOG).clone() }, uSky: { value: col("#5d79d8").clone() },
     },
     vertexShader: "varying vec3 vW; void main(){ vec4 w = modelMatrix*vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix*viewMatrix*w; }",
     fragmentShader: GLSL_NOISE + /* glsl */`
       uniform sampler2D uMask; uniform vec2 uMO, uC; uniform float uME, uMD, uTime, uR, uVR, uWarm;
-      uniform vec3 uDeep, uSea, uShal, uCur, uFoam, uHaze; varying vec3 vW;
+      uniform vec3 uDeep, uSea, uShal, uCur, uFoam, uHaze, uSky; varying vec3 vW;
       void main(){
         vec2 p = vW.xz;
         vec2 muv = (p - uMO)/uME + 0.5;
@@ -555,8 +556,14 @@ function buildSea() {
         vec3 c = mix(uDeep, uSea, smoothstep(0.15, 1.0, sw)*0.85);
         // glowing current veins
         float v1 = 1.0 - abs(fbm(w*3.0 + 5.0)*2.0 - 1.0);
+        #ifndef LOWQ
         float v2 = 1.0 - abs(fbm(w*5.6 - 2.0 + uTime*0.01)*2.0 - 1.0);
+        #endif
+        #ifdef LOWQ
+        c += uCur * pow(v1, 90.0) * (0.6 + 0.4*sin(uTime*0.7 + sw*12.0));
+        #else
         c += uCur * (pow(v1, 90.0)*1.0 + pow(v2, 140.0)*0.55) * (0.6 + 0.4*sin(uTime*0.7 + sw*12.0));
+        #endif
         // spiral arms of the whirlpool, braided by noise
         float th = atan(q0.y, q0.x);
         float arm = sin(th*3.0 + log(rr + 1.0)*5.5 - uTime*0.55);
@@ -566,8 +573,13 @@ function buildSea() {
         // shallows, ripples and foam around coasts
         float shal = smoothstep(16.0, 0.0, d);
         c = mix(c, uShal*(0.75 + 0.35*fbm(p*0.08 + uTime*0.03)), shal*0.62);
+        #ifndef LOWQ
         float caus = pow(1.0 - abs(fbm(p*0.16 + vec2(uTime*0.05, -uTime*0.04))*2.0 - 1.0), 10.0);
         c += uFoam * caus * shal * 0.25;
+        #endif
+        // long slow swells catching the light of the sky
+        float sw2 = sin(dot(q, vec2(0.021, 0.013)) + uTime*0.35 + sw*4.0);
+        c += uSky * smoothstep(0.82, 1.0, sw2) * (0.10 + 0.08*fbm(q*0.03 + uTime*0.02)) * (1.0 - shal);
         float rip = pow(0.5 + 0.5*cos((d/3.6 - uTime*0.35)*6.2832), 10.0) * exp(-d*0.24) * step(1.2, d) * smoothstep(0.3, 0.7, n2(p*0.07 + uTime*0.02));
         c += uCur * rip * 0.3;
         float foam = smoothstep(2.6, 0.4, d + (n2(p*0.6 + uTime*0.4) - 0.5)*1.6) * step(0.05, d);
@@ -577,6 +589,10 @@ function buildSea() {
         c += uFoam * step(0.9985, h21(sp)) * (0.5 + 0.5*sin(uTime*2.5 + h21(sp + 3.0)*20.0)) * 0.9;
         c *= 1.0 - sh*0.5;
         c = mix(c, c*vec3(1.5,0.65,0.45) + vec3(0.12,0.02,0.0), uWarm*exp(-rr/(uR*0.9)));
+        // the sky reflects off the sea at grazing angles (the close camera), barely at all from above
+        vec3 V = normalize(cameraPosition - vW);
+        float fres = pow(1.0 - clamp(V.y, 0.0, 1.0), 4.0);
+        c = mix(c, uSky * 1.2, fres * 0.55);
         // haze into the distance
         c = mix(c, uHaze, smoothstep(uR*2.4, uR*5.0, rr));
         gl_FragColor = vec4(c, 1.0);
@@ -721,6 +737,134 @@ function buildMotes(count, R, cx, cz, r) {
 }
 
 // ---------------------------------------------------------------------------
+// SKY: a painted dome (deep zenith, a glowing horizon band, nebulae and a faint aurora) baked once into a small
+// canvas texture, plus a few hundred twinkling stars. It follows the camera, so it costs one texture lookup
+// per pixel where it shows (the close camera and the menu) and nothing where the sea fills the view.
+// ---------------------------------------------------------------------------
+function skyTexture(r) {
+  const W = 1024, H = 512, cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+  const g = cv.getContext("2d");
+  const grd = g.createLinearGradient(0, 0, 0, H);
+  grd.addColorStop(0.0, "#010214"); grd.addColorStop(0.22, "#040829"); grd.addColorStop(0.38, "#0a1245");
+  grd.addColorStop(0.47, "#22357f"); grd.addColorStop(0.5, "#3a4f9e"); grd.addColorStop(0.53, "#1a2d6e"); grd.addColorStop(1.0, "#0e2a6a");
+  g.fillStyle = grd; g.fillRect(0, 0, W, H);
+  g.globalCompositeOperation = "lighter";
+  // nebulae: big soft colour clouds in the upper sky
+  const neb = [["#5a2aa8", 0.18], ["#1f6fd0", 0.16], ["#a83a8f", 0.12], ["#2aa8a0", 0.10]];
+  for (let i = 0; i < 14; i++) {
+    const [c, k] = neb[i % neb.length], x = r() * W, y = H * (0.12 + r() * 0.3), rad = 60 + r() * 150;
+    const rg = g.createRadialGradient(x, y, 0, x, y, rad);
+    rg.addColorStop(0, c + Math.round(k * 255).toString(16).padStart(2, "0")); rg.addColorStop(1, c + "00");
+    g.fillStyle = rg; g.beginPath(); g.ellipse(x, y, rad * 1.8, rad, 0, 0, Math.PI * 2); g.fill();
+  }
+  // a faint aurora ribbon above the horizon
+  for (let x = 0; x < W; x += 2) {
+    const y = H * (0.34 + 0.04 * Math.sin(x * 0.012) + 0.02 * Math.sin(x * 0.031 + 1.3));
+    const a = 0.05 + 0.05 * Math.max(0, Math.sin(x * 0.007 + 0.4));
+    const lg = g.createLinearGradient(0, y - 40, 0, y + 8);
+    lg.addColorStop(0, "rgba(93,255,176,0)"); lg.addColorStop(0.7, `rgba(93,255,176,${a})`); lg.addColorStop(1, "rgba(127,232,255,0)");
+    g.fillStyle = lg; g.fillRect(x, y - 40, 2, 48);
+  }
+  // fixed small stars (the twinkling ones are points)
+  for (let i = 0; i < 900; i++) {
+    const y = Math.pow(r(), 1.6) * H * 0.46, x = r() * W, b = r();
+    g.fillStyle = `rgba(${200 + b * 55 | 0},${210 + b * 45 | 0},255,${0.25 + b * 0.6})`;
+    g.fillRect(x, y, b > 0.93 ? 2 : 1, b > 0.93 ? 2 : 1);
+  }
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 2;
+  return t;
+}
+function buildSky() {
+  const r = rng(777), R = 1400;
+  const grp = new THREE.Group();
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(R, 40, 20), new THREE.MeshBasicMaterial({ map: skyTexture(r), side: THREE.BackSide, fog: false, depthWrite: false }));
+  dome.renderOrder = -10; dome.frustumCulled = false;
+  grp.add(dome);
+  // twinkling stars
+  const n = 260, pos = new Float32Array(n * 3), ph = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const a = r() * TAU, el = 0.12 + Math.pow(r(), 0.8) * 1.3;
+    pos.set([Math.cos(a) * Math.cos(el) * R * 0.95, Math.sin(el) * R * 0.95, Math.sin(a) * Math.cos(el) * R * 0.95], i * 3); ph[i] = r() * 100;
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(pos, 3)); g.setAttribute("ph", new THREE.BufferAttribute(ph, 1));
+  const sm = new THREE.ShaderMaterial({
+    uniforms: { uTime: TIME, uPx: { value: Math.min(2, (typeof devicePixelRatio !== "undefined" && devicePixelRatio) || 1) } },
+    vertexShader: "uniform float uTime, uPx; attribute float ph; varying float vA; void main(){ vA = 0.35 + 0.65*pow(0.5 + 0.5*sin(uTime*(0.8 + fract(ph)*1.6) + ph), 3.0); gl_PointSize = (1.6 + fract(ph*7.3)*2.2) * uPx; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }",
+    fragmentShader: "varying float vA; void main(){ float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.0, d)*vA; gl_FragColor = vec4(vec3(0.85, 0.9, 1.0)*a*1.6, a); }",
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+  });
+  const stars = new THREE.Points(g, sm); stars.frustumCulled = false; stars.renderOrder = -9;
+  grp.add(stars);
+  // the sky stays centred on the camera
+  dome.onBeforeRender = (rr, sc, cam) => { grp.position.copy(cam.position); grp.updateMatrixWorld(true); };
+  return grp;
+}
+
+// ---------------------------------------------------------------------------
+// CLOUDS: soft cumulus banks drifting far below the ring and out past its edge. Each bank is a handful of
+// big billboard puffs (one Points draw call for all of them) with a fluffy painted sprite: lit white tops,
+// blue-grey bellies, fading with distance. Kept out from under the islands so they never cover the play.
+// ---------------------------------------------------------------------------
+function puffTexture() {
+  const N = 128, cv = document.createElement("canvas"); cv.width = cv.height = N;
+  const g = cv.getContext("2d"), r = rng(31);
+  for (let i = 0; i < 18; i++) {
+    const a = r() * TAU, d = r() * N * 0.22, x = N / 2 + Math.cos(a) * d, y = N / 2 + Math.sin(a) * d * 0.7 - 4, rad = N * (0.14 + r() * 0.16);
+    const rg = g.createRadialGradient(x, y - rad * 0.3, 0, x, y, rad);
+    rg.addColorStop(0, "rgba(255,255,255,0.55)"); rg.addColorStop(0.6, "rgba(235,240,255,0.32)"); rg.addColorStop(1, "rgba(220,228,255,0)");
+    g.fillStyle = rg; g.beginPath(); g.arc(x, y, rad, 0, TAU); g.fill();
+  }
+  // shade the lower half (the belly of the cloud)
+  g.globalCompositeOperation = "source-atop";
+  const lg = g.createLinearGradient(0, N * 0.35, 0, N);
+  lg.addColorStop(0, "rgba(120,135,200,0)"); lg.addColorStop(1, "rgba(80,95,170,0.85)");
+  g.fillStyle = lg; g.fillRect(0, 0, N, N);
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+let PUFF_TEX = null;
+function buildClouds(R, cx, cz, avoid, r, count) {
+  const puffs = [];
+  for (let k = 0, tries = 0; k < count && tries < 400; tries++) {
+    const a = r() * TAU, d = R * (0.8 + r() * 2.1);
+    const x0 = cx + Math.cos(a) * d, z0 = cz + Math.sin(a) * d;
+    if (avoid(x0, z0)) continue;
+    const y0 = -58 - r() * 34, n = 5 + Math.floor(r() * 5), sz = 9 + r() * 7;
+    for (let i = 0; i < n; i++) puffs.push([x0 - cx + (r() - 0.5) * sz * 1.6, y0 + r() * 2.5, z0 - cz + (r() - 0.5) * sz, sz * (0.7 + r() * 0.6), r()]);
+    k++;
+  }
+  const pos = new Float32Array(puffs.length * 3), siz = new Float32Array(puffs.length), ph = new Float32Array(puffs.length);
+  puffs.forEach((p, i) => { pos.set([p[0], p[1], p[2]], i * 3); siz[i] = p[3]; ph[i] = p[4]; });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(pos, 3)); g.setAttribute("size", new THREE.BufferAttribute(siz, 1)); g.setAttribute("ph", new THREE.BufferAttribute(ph, 1));
+  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, -70, 0), R * 3.4);
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { uTex: { value: PUFF_TEX || (PUFF_TEX = puffTexture()) }, uScale: WEATHER_U.uScale, uPersp: WEATHER_U.uPersp, uTime: TIME, uTint: { value: col("#c8d2f4").clone() } },
+    vertexShader: /* glsl */`
+      uniform float uScale, uPersp, uTime; attribute float size, ph; varying float vA; varying float vR;
+      void main(){
+        vec3 p = position; p.y += sin(uTime*0.15 + ph*6.0) * 0.6;
+        vec4 mv = modelViewMatrix*vec4(p, 1.0);
+        gl_Position = projectionMatrix*mv;
+        gl_PointSize = clamp(size * uScale / mix(1.0, max(1.0, -mv.z), uPersp), 2.0, 420.0);
+        vA = 0.85; vR = ph * 6.2831;
+      }`,
+    fragmentShader: /* glsl */`
+      uniform sampler2D uTex; uniform vec3 uTint; varying float vA; varying float vR;
+      void main(){
+        vec2 q = gl_PointCoord - 0.5; float c = cos(vR*0.15), s = sin(vR*0.15);
+        vec4 t = texture2D(uTex, vec2(c*q.x - s*q.y, s*q.x + c*q.y) + 0.5);
+        float a = t.a * vA; if (a < 0.01) discard;
+        gl_FragColor = vec4(t.rgb * uTint, a);
+      }`,
+    transparent: true, depthWrite: false,
+  });
+  const pts = new THREE.Points(g, mat); pts.renderOrder = 2;
+  const grp = new THREE.Group(); grp.position.set(cx, 0, cz); grp.add(pts);
+  return grp;
+}
+
+// ---------------------------------------------------------------------------
 // THE BACKDROP
 // ---------------------------------------------------------------------------
 function disposeTree(o) { o.traverse((n) => { if (n.geometry) n.geometry.dispose(); }); }
@@ -730,9 +874,19 @@ export function createBackdrop(scene, DB) {
   scene.fog = new THREE.Fog("#0e2a6a", 700, 1250);
   const sea = buildSea();
   scene.add(sea);
-  let built = null, key = "";
+  const sky = buildSky();
+  scene.add(sky);
+  let built = null, key = "", level = 2;
   const floaters = [];
-  let mistLow = null, mistHigh = null, mistHigh2 = null, beam = null, motes = null;
+  let mistLow = null, mistHigh = null, mistHigh2 = null, beam = null, motes = null, clouds = null;
+  function applyLevel() {
+    // Low quality: one mist layer instead of three, and the cheaper sea
+    if (mistLow) mistLow.visible = level > 0;
+    if (mistHigh2) mistHigh2.visible = level > 0;
+    if (clouds) clouds.visible = level > 0;
+    const lowq = level === 0;
+    if (!!sea.material.defines.LOWQ !== lowq) { if (lowq) sea.material.defines.LOWQ = ""; else delete sea.material.defines.LOWQ; sea.material.needsUpdate = true; }
+  }
 
   function build(L, dims) {
     const b = L.bounds;
@@ -834,6 +988,10 @@ export function createBackdrop(scene, DB) {
       bakeMask(sea, new THREE.Vector2(cx, cz), E, land, shadows);
       // atmosphere
       for (const o of [mistLow, mistHigh, mistHigh2, beam, motes]) if (o) { scene.remove(o); o.geometry.dispose(); o.material.dispose(); }
+      if (clouds) { scene.remove(clouds); clouds.children[0].geometry.dispose(); clouds.children[0].material.dispose(); }
+      const vortexClear = (x, z) => { const rd = ringDist(x, z); return Math.hypot(x - vx, z - vz) < L.vortex.r * 4 || inMass(x, z, 10) || rd < 18; };
+      clouds = buildClouds(R, cx, cz, vortexClear, rng(99 + L.n), 16);
+      scene.add(clouds);
       mistLow = mistLayer(SEA_Y + 16, "#3f5cb8", 0.22, R * 0.9, R * 2.0, 0.014, 3.1);
       mistHigh2 = mistLayer(-30, "#3a4290", 0.55, R * 2.3, R * 3.4, 0.008, 7.7);
       mistHigh = mistLayer(-27, "#aeb8e8", 0.7, R * 2.4, R * 3.6, 0.008, 7.9);
@@ -843,13 +1001,17 @@ export function createBackdrop(scene, DB) {
       scene.add(beam);
       motes = buildMotes(520, R, cx, cz, r);
       scene.add(motes);
+      applyLevel();
     }
   }
 
   return {
     sea,
     build,
+    sky,
+    setQuality(l) { level = l; applyLevel(); },
     update(dt, t, warm) {
+      if (clouds) clouds.rotation.y = t * 0.0035;
       for (const f of floaters) { f.g.position.y = f.y + Math.sin(t * f.sp + f.ph) * 1.2; f.g.rotation.z = Math.sin(t * f.sp * 0.7 + f.ph) * 0.012; }
       const U = sea.material.uniforms;
       U.uWarm.value += ((warm ? 1 : 0) - U.uWarm.value) * Math.min(1, dt * 2);

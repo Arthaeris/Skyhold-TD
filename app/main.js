@@ -1253,11 +1253,11 @@ function insets() {
   }
   if (game.screen !== "game") return { top: 0, bottom: 0 };
   let top = 0, bottom = 0;
-  const tb = r("topbar"); if (tb) top = tb.bottom + 4;
-  if (game.view === "field") { const nav = r("field-nav"); if (nav) top = Math.max(top, nav.bottom + 4); }
-  // the dock grows and shrinks (next-wave preview, timers): keep the tallest height seen at this window
+  // all the round's bars live in the bottom deck now: the top only keeps clear of the notch / status bar
+  const probe = r("safe-probe"); top = probe ? probe.top + 4 : 12;
+  // the deck grows and shrinks (next-wave preview, boss bar): keep the tallest height seen at this window
   // size, so a wave ending or starting never nudges the camera's framing
-  const dock = r("quick-wave-controls");
+  const dock = r("hud-deck");
   if (dock) {
     const key = window.innerWidth + "x" + vh;
     if (insets._key !== key) { insets._key = key; insets._dock = 0; }
@@ -1452,6 +1452,8 @@ function bindUI() {
     sound.play("click");
   });
   document.querySelectorAll("[data-fps]").forEach((b) => b.onclick = () => { if (loop) loop.setRenderFps(+b.dataset.fps); document.querySelectorAll("[data-fps]").forEach((x) => x.classList.toggle("sel", x === b)); ui.toast("Render rate: " + b.dataset.fps + " fps"); });
+  bind("gfx-weather", () => { renderer.setWeather(!renderer.weather); refreshQualityButtons(); });
+  bind("gfx-mood", () => { renderer.setMood(!renderer.mood); refreshQualityButtons(); });
   document.querySelectorAll("[data-quality]").forEach((b) => b.onclick = () => { renderer.setQuality(b.dataset.quality); refreshQualityButtons(); ui.toast("Graphics: " + b.textContent + (b.dataset.quality === "auto" ? " (" + renderer.qualityLabel + ")" : "")); });
   refreshQualityButtons();
   // audio (pause menu)
@@ -1477,7 +1479,7 @@ function bindUI() {
   bind("btn-camview", () => { renderer.setCloseView(!renderer.closeView); refreshCamBtn(); });
   refreshCamBtn();
   ui.bindSheets();
-  { const dk = $("quick-wave-controls"); if (dk && window.ResizeObserver) new ResizeObserver(() => document.documentElement.style.setProperty("--dock-h", dk.offsetHeight + "px")).observe(dk); }
+  { const dk = $("hud-deck"); if (dk && window.ResizeObserver) new ResizeObserver(() => document.documentElement.style.setProperty("--dock-h", dk.offsetHeight + "px")).observe(dk); }
   bind("wave-display", () => { if (game.view === "field") setView("world"); else enterCorridor(game.activeCorridor); });
   bind("dock-handle", () => { dockCollapsed = !dockCollapsed; try { localStorage.setItem(DOCK_KEY, dockCollapsed ? "1" : "0"); } catch (e) { /* fine */ } applyDock(); });
   bind("quick-auto-wave", () => {
@@ -1531,7 +1533,11 @@ function bindUI() {
   });
 }
 function bind(id, fn) { const e = $(id); if (e) e.onclick = (ev) => { sound.unlock(); fn(ev); }; }
-function refreshQualityButtons() { document.querySelectorAll("[data-quality]").forEach((x) => x.classList.toggle("sel", x.dataset.quality === renderer.quality)); }
+function refreshQualityButtons() {
+  document.querySelectorAll("[data-quality]").forEach((x) => x.classList.toggle("sel", x.dataset.quality === renderer.quality));
+  const tg = (id, on) => { const b = $(id); if (b) { b.classList.toggle("on", on); b.setAttribute("aria-checked", String(on)); } };
+  tg("gfx-weather", renderer.weather); tg("gfx-mood", renderer.mood);
+}
 function refreshAudio() {
   const p = sound.pref;
   const tg = (id, on) => { const b = $(id); if (b) { b.classList.toggle("on", on); b.setAttribute("aria-checked", on ? "true" : "false"); } };

@@ -17,6 +17,7 @@ import { createShotFx } from "./shotfx.js";
 import { createStatusFx } from "./statusfx.js";
 import { createPost, QUALITY } from "./post.js";
 import { WORLD } from "./theme.js";
+import { WEATHER_U, setWeatherOpacity } from "./weather.js";
 import { clamp, lerp, easeInOut, TAU, Part } from "./kit.js";
 import { builderModel, mobColor } from "./mobmodels.js";
 
@@ -61,7 +62,7 @@ export function createRenderer(opts) {
   const post = createPost(renderer);
 
   // ---- quality (Riftfall's tiers + automatic step-down) ------------------
-  let prefs = { quality: "auto", autoLevel: 2 };
+  let prefs = { quality: "auto", autoLevel: 2, weather: true, mood: true };
   try { Object.assign(prefs, JSON.parse(localStorage.getItem(PREFS_KEY)) || {}); } catch (e) { /* fine */ }
   const look = { level: 2, slow: 0, watch: 0 };
   function qualityLevel() { return prefs.quality === "high" ? 2 : prefs.quality === "medium" ? 1 : prefs.quality === "low" ? 0 : (prefs.autoLevel != null ? prefs.autoLevel : 2); }
@@ -71,6 +72,9 @@ export function createRenderer(opts) {
     const Q = QUALITY[look.level];
     renderer.setPixelRatio(Math.min(devicePixelRatio || 1, Q.pr));
     sun.castShadow = Q.shadow > 0;
+    // weather density follows the quality tier (and the settings switch); the backdrop drops its costliest layers on Low
+    world.setWeatherCount(prefs.weather ? [80, 140, 200][look.level] : 0);
+    world.backdrop.setQuality(look.level);
     if (Q.shadow && sun.shadow.mapSize.x !== Q.shadow) { sun.shadow.mapSize.set(Q.shadow, Q.shadow); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; } }
     resize();
   }
@@ -156,6 +160,15 @@ export function createRenderer(opts) {
     const mx = Math.max(0, (COLS + 2) / 2 - halfX), mz = Math.max(0, (ROWS + 8) / 2 - halfZ);
     pan.x = clamp(pan.x, -mx, mx); pan.z = clamp(pan.z, -mz, mz);
   }
+  // where a corridor view starts: when the whole length doesn't fit (portrait phones), lean toward the entrance a
+  // little, so the creeps pouring out of the top portal are on screen from the first step
+  function homeZ() {
+    if (closeView) return 0;
+    const ppu = fieldPPU() / pan.zoom * (pan.zoom || 1), cr = contentRect(true);
+    const halfZ = (cr.h / 2) / ppu / Math.sin(EL_FIELD);
+    const mz = Math.max(0, (ROWS + 8) / 2 - halfZ);
+    return mz * 0.55;
+  }
   function shotField(i) {
     // following a selected enemy: glide the view onto it (any manual pan ends the follow)
     if (follow != null) {
@@ -195,7 +208,7 @@ export function createRenderer(opts) {
   }
   function enterField(i, instant, keepZoom) {
     const changing = mode !== "field" || i !== fieldIdx;
-    fieldIdx = i; pan.x = 0; pan.z = 0; nudge = null; if (!keepZoom) pan.zoom = 1;
+    fieldIdx = i; pan.x = 0; nudge = null; if (!keepZoom) pan.zoom = 1; pan.z = homeZ();
     mode = "field";
     if (instant) { Object.assign(cam, goal()); fly = null; } else if (changing) startFly(0.85);
   }
@@ -249,6 +262,7 @@ export function createRenderer(opts) {
     if (sc.right !== half) { sc.left = -half; sc.right = half; sc.top = half; sc.bottom = -half; sc.near = 10; sc.far = 400; sc.updateProjectionMatrix(); }
     sparks.mat.uniforms.uScale.value = (persp ? (H / 2) / tanH : cam.ppu) * renderer.getPixelRatio();
     sparks.mat.uniforms.uPersp.value = persp ? 1 : 0;
+    WEATHER_U.uScale.value = sparks.mat.uniforms.uScale.value; WEATHER_U.uPersp.value = persp ? 1 : 0;
   }
 
   // ---- input helpers -------------------------------------------------------
@@ -1044,6 +1058,72 @@ export function createRenderer(opts) {
   }
   const tmpC = new THREE.Vector3();
 
+  // ---- mood lighting ------------------------------------------------------------
+  // Each island is lit in its own colours while you look at it (warm forge light on Fire, cold daylight on Ice,
+  // violet dusk on Darkness …); a running wave tightens the frame a little, a boss on the field reddens the rim
+  // light and darkens the surroundings, and storms flicker with lightning. All shifts are small on purpose: the
+  // key light on towers and creeps never drops much, so the battlefield stays easy to read. Cheap: a few colour
+  // lerps per frame (plus the colour grade in the post pass when it is on).
+  const MOODS = {
+    neutral:  { key: WORLD.key, keyK: 1, sky: WORLD.hemiSky, gnd: WORLD.hemiGround, hemiK: 1, rim: WORLD.rim, rimI: 0.55, grade: [1.02, 1.0, 1.04], sat: 1.1, vig: 0.38 },
+    fire:     { key: "#ffd9b0", keyK: 1.0, sky: "#ffc2a6", gnd: "#3a1a22", hemiK: 0.98, rim: "#ff8a4a", rimI: 0.95, grade: [1.06, 0.99, 0.95], sat: 1.12, vig: 0.4 },
+    ice:      { key: "#f2f8ff", keyK: 1.02, sky: "#c4e2ff", gnd: "#2a3a6a", hemiK: 1.02, rim: "#8aeaff", rimI: 0.85, grade: [0.97, 1.0, 1.06], sat: 1.03, vig: 0.36 },
+    nature:   { key: "#fff1c6", keyK: 1.0, sky: "#cff2b8", gnd: "#26361c", hemiK: 1.0, rim: "#c2ff8f", rimI: 0.6, grade: [1.01, 1.03, 0.96], sat: 1.13, vig: 0.38 },
+    storm:    { key: "#dde1ff", keyK: 0.93, sky: "#a3abea", gnd: "#1e1a40", hemiK: 0.95, rim: "#c98aff", rimI: 0.95, grade: [0.97, 0.98, 1.06], sat: 1.0, vig: 0.42 },
+    light:    { key: "#fff3d2", keyK: 1.06, sky: "#fff1c4", gnd: "#4a3a20", hemiK: 1.03, rim: "#ffe27a", rimI: 0.75, grade: [1.05, 1.02, 0.94], sat: 1.08, vig: 0.33 },
+    darkness: { key: "#e6dcff", keyK: 0.95, sky: "#a598ea", gnd: "#1a1030", hemiK: 0.92, rim: "#b096ff", rimI: 1.05, grade: [1.0, 0.97, 1.07], sat: 1.05, vig: 0.44 },
+    mech:     { key: "#ffe4bc", keyK: 1.0, sky: "#c4ccd8", gnd: "#2a2620", hemiK: 1.0, rim: "#86eaff", rimI: 0.7, grade: [1.03, 1.0, 0.97], sat: 0.99, vig: 0.38 },
+    abnormal: { key: "#ffe4f2", keyK: 1.0, sky: "#e2aeea", gnd: "#173a30", hemiK: 0.98, rim: "#6effba", rimI: 0.95, grade: [1.03, 0.97, 1.04], sat: 1.1, vig: 0.4 },
+  };
+  const C3 = (h) => new THREE.Color(h);
+  const moodNow = { key: C3(WORLD.key), keyK: 1, sky: C3(WORLD.hemiSky), gnd: C3(WORLD.hemiGround), hemiK: 1, rim: C3(WORLD.rim), rimI: 0.55, grade: new THREE.Vector3(1.02, 1, 1.04), sat: 1.1, vig: 0.38 };
+  const moodTgt = { key: new THREE.Color(), sky: new THREE.Color(), gnd: new THREE.Color(), rim: new THREE.Color(), grade: new THREE.Vector3() };
+  const BOSS_RIM = C3("#ff4a6a"), STORM_FLASH = C3("#dcd6ff");
+  let bossK = 0, waveK = 0, flash = 0, nextBolt = 6;
+  function bossOnField() {
+    for (const r of erec.values()) {
+      if (r.ri !== fieldIdx || !r.alive) continue;
+      if (r.type === "boss" || r.type === "endboss" || (DB.ENEMIES[r.type] && DB.ENEMIES[r.type].boss)) return true;
+    }
+    return false;
+  }
+  function updateMood(dt) {
+    const ring = world.ring;
+    const el = prefs.mood && mode === "field" && ring ? ring.elements[fieldIdx] : null;
+    const M = MOODS[el] || MOODS.neutral;
+    const inWave = !!(prefs.mood && mode === "field" && V && V.field && V.field.phase === "wave");
+    const boss = !!(prefs.mood && mode === "field" && V && bossOnField());
+    const k = 1 - Math.exp(-dt * 2.2);
+    waveK += ((inWave ? 1 : 0) - waveK) * k; bossK += ((boss ? 1 : 0) - bossK) * (1 - Math.exp(-dt * 1.4));
+    moodTgt.key.set(M.key); moodTgt.sky.set(M.sky); moodTgt.gnd.set(M.gnd); moodTgt.rim.set(M.rim).lerp(BOSS_RIM, bossK * 0.8);
+    moodTgt.grade.set(M.grade[0] * (1 + bossK * 0.04), M.grade[1] * (1 - bossK * 0.04), M.grade[2] * (1 - bossK * 0.03));
+    moodNow.key.lerp(moodTgt.key, k); moodNow.sky.lerp(moodTgt.sky, k); moodNow.gnd.lerp(moodTgt.gnd, k); moodNow.rim.lerp(moodTgt.rim, k);
+    moodNow.grade.lerp(moodTgt.grade, k);
+    moodNow.keyK += (M.keyK - moodNow.keyK) * k; moodNow.hemiK += (M.hemiK * (1 - bossK * 0.1) - moodNow.hemiK) * k;
+    moodNow.rimI += (M.rimI + waveK * 0.15 + bossK * 0.45 - moodNow.rimI) * k;
+    moodNow.sat += (M.sat + waveK * 0.03 - moodNow.sat) * k; moodNow.vig += (M.vig + waveK * 0.05 + bossK * 0.1 - moodNow.vig) * k;
+    // storms: now and then a lightning flicker over the island (with a bolt striking the rim), if weather is on
+    flash = Math.max(0, flash - dt * 3.2);
+    if (el === "storm" && prefs.weather && L.corridors[fieldIdx]) {
+      nextBolt -= dt;
+      if (nextBolt <= 0) {
+        nextBolt = 7 + Math.random() * 9; flash = 1;
+        const side = Math.random() < 0.5 ? -2.2 : COLS + 2.2;
+        const to = corridorToWorld(L, fieldIdx, side, Math.random() * ROWS, 0.3, new THREE.Vector3());
+        const from = to.clone(); from.x += (Math.random() - 0.5) * 8; from.y += 34; from.z += (Math.random() - 0.5) * 8;
+        streaks.bolt(from, to, "#e2c8ff", 0.22, 0.22, 9);
+        sparks.burst(to.x, to.y + 0.3, to.z, "#ecd1ff", 10, 5, 0.4, 0.35, 2);
+      }
+    }
+    const fl = flash > 0 ? flash * (0.6 + 0.4 * Math.sin(flash * 40)) : 0;   // a double flicker, never a white-out
+    sun.color.copy(moodNow.key); sun.intensity = 2.4 * moodNow.keyK;
+    hemi.color.copy(moodNow.sky).lerp(STORM_FLASH, fl * 0.35); hemi.groundColor.copy(moodNow.gnd); hemi.intensity = 1.55 * moodNow.hemiK + fl * 0.55;
+    rim.color.copy(moodNow.rim); rim.intensity = moodNow.rimI;
+    const U = post.final.uniforms;
+    U.grade.value.copy(moodNow.grade); U.sat.value = moodNow.sat; U.vig.value = moodNow.vig;
+    setWeatherOpacity(prefs.weather ? 1 : 0);
+  }
+
   function render(view, alpha = 1) {
     const now = performance.now();
     const rawDt = Math.min(0.25, (now - last) / 1000); last = now;
@@ -1058,6 +1138,7 @@ export function createRenderer(opts) {
     updateCamera(rawDt); // camera flights run on wall-clock time so slow devices still arrive
     const active = V ? ((V.versus ? V.state.players[V.me] : V.field).phase === "prep") : false;
     world.update(dt, clock, active);
+    updateMood(dt);
     if (V) { syncEnemies(V, alpha, dt); syncProjectiles(alpha); syncOverlays(V); syncBuilders(V, alpha, dt); }
     else { for (const b of brec.values()) { b.group.visible = false; b.ring.visible = false; } enemies.begin(); enemies.end(); sfxStatus.begin(0); sfxStatus.end(); bars.begin(camera); bars.end(); projs.begin(); projs.end(); previews.hideFoot(); previews.hideRange(); route.clear(); }
     route.update(clock, mode === "field" && V && V.field && (V.field.phase === "build" || (V.buildMenuOpen)) ? 1 : 0.45);
@@ -1121,6 +1202,10 @@ export function createRenderer(opts) {
     get quality() { return prefs.quality; },
     setQuality(q) { prefs.quality = q; if (q === "auto") prefs.autoLevel = 2; savePrefs(); applyQuality(); },
     get qualityLabel() { return QUALITY[look.level].label; },
+    get weather() { return prefs.weather !== false; },
+    setWeather(on) { prefs.weather = !!on; savePrefs(); applyQuality(); },
+    get mood() { return prefs.mood !== false; },
+    setMood(on) { prefs.mood = !!on; savePrefs(); },
     dispose() { renderer.dispose(); },
     renderer, scene, camera,
   };

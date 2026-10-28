@@ -117,10 +117,10 @@ export function createUI(opts) {
   }
   // the ring's caption sits above it, so keep the ring low enough that the caption clears the top bars
   function ringTop() {
-    const stage = $("game-stage"), nav = $("field-nav");
+    const stage = $("game-stage"), probe = $("safe-probe");
     const st = stage ? stage.getBoundingClientRect().top : 0;
-    const navB = nav && nav.offsetParent !== null ? nav.getBoundingClientRect().bottom - st : 60;
-    return Math.max(86, navB + 64);
+    const safeB = probe ? probe.getBoundingClientRect().top - st : 12;
+    return Math.max(86, safeB + 70);
   }
   function refreshRing() {
     if (!_ring) return;
@@ -399,11 +399,27 @@ export function createUI(opts) {
       });
     }
   }
-  function fillSheet(p, html) {
-    const sc = p.querySelector(".sh-scroll"); const k = sc ? sc.scrollTop : 0;
-    p.innerHTML = html;
-    const s2 = p.querySelector(".sh-scroll"); if (s2) s2.scrollTop = k;
+  // live cards refresh several times a second: patch the DOM in place instead of rebuilding it, so a finger
+  // that is mid-swipe on a list (or a button being pressed) is never interrupted by a refresh
+  function morphChildren(a, b) {
+    const bn = Array.from(b.childNodes);
+    for (let i = 0; i < bn.length; i++) {
+      const x = a.childNodes[i], y = bn[i];
+      if (!x) { a.appendChild(y); continue; }
+      if (x.nodeType !== y.nodeType || x.nodeName !== y.nodeName) { a.replaceChild(y, x); continue; }
+      if (x.nodeType !== 1) { if (x.nodeValue !== y.nodeValue) x.nodeValue = y.nodeValue; continue; }
+      for (const at of Array.from(x.attributes)) if (!y.hasAttribute(at.name)) x.removeAttribute(at.name);
+      for (const at of Array.from(y.attributes)) if (x.getAttribute(at.name) !== at.value) x.setAttribute(at.name, at.value);
+      morphChildren(x, y);
+    }
+    while (a.childNodes.length > bn.length) a.removeChild(a.lastChild);
   }
+  function morph(el, html) {
+    if (!el.firstChild) { el.innerHTML = html; return; }
+    const t = document.createElement("div"); t.innerHTML = html;
+    morphChildren(el, t);
+  }
+  function fillSheet(p, html) { morph(p, html); }
   function sheetHTML(head, peek, more) {
     return `<div class="sh-grip" data-grip><span></span></div><div class="sh-scroll">${head}${peek}${more ? `<div class="sh-more">${more}</div>` : ""}</div>${more ? `<button class="sh-toggle" data-more><span class="m1">More ▾</span><span class="m2">Less ▴</span></button>` : ""}`;
   }
@@ -798,7 +814,7 @@ export function createUI(opts) {
     let html = `<button class="panel-close" id="sp-close">${icon("close")}</button>
       <div class="panel-head">${icon("swords")} Send Mobs <span class="cur">${icon("coins", "gold xs")} Income +${pl.income || 0}/5s</span></div>
       <p class="sp-note">${v.versus ? "Sends march into the NEXT corridor. Leaked mobs cost a life and travel on." : "Sends spawn on your opponent's field."} Flat cost per level — upgrade a type to make it stronger (and pricier).</p>
-      <div class="sp-rows">`;
+      <div class="sp-rows scroll">`;
     for (const t in DB.SENDS) {
       const s = DB.SENDS[t], en = DB.ENEMIES[t] || { name: t };
       const lvl = (pl.sendLevels && pl.sendLevels[t]) || 1;
@@ -818,10 +834,19 @@ export function createUI(opts) {
       </div>`;
     }
     html += `</div>`;
-    p.innerHTML = html;
-    $("sp-close").onclick = closeAllPanels;
-    p.querySelectorAll("[data-send]").forEach((b) => b.onclick = () => cmd.sendAuto(b.dataset.send));
-    p.querySelectorAll("[data-up]").forEach((b) => b.onclick = () => cmd.upgradeSend(b.dataset.up));
+    morph(p, html);
+    bindSendPanel(p);
+  }
+  // one delegated handler: rows are patched in place, so buttons keep working without re-binding
+  function bindSendPanel(p) {
+    if (p._sendBound) return; p._sendBound = true;
+    p.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-send],[data-up],[data-tier],#sp-close"); if (!b || !p.contains(b)) return;
+      if (b.id === "sp-close") closeAllPanels();
+      else if (b.dataset.tier) { _sendTier = +b.dataset.tier; renderSendPanel(true); }
+      else if (b.dataset.send) cmd.sendAuto(b.dataset.send);
+      else if (b.dataset.up) cmd.upgradeSend(b.dataset.up);
+    });
   }
 
   // how full your target's corridor is with your sends (a corridor holds only so much sent health)
@@ -884,13 +909,10 @@ export function createUI(opts) {
       </div>`;
     }
     html += `</div>`;
-    const sc = p.querySelector(".sp-rows"); const keep = sc ? sc.scrollTop : 0;
-    p.innerHTML = html;
-    const sc2 = p.querySelector(".sp-rows"); if (sc2) sc2.scrollTop = keep;
-    $("sp-close").onclick = closeAllPanels;
-    p.querySelectorAll("[data-tier]").forEach((b) => b.onclick = () => { _sendTier = +b.dataset.tier; renderSendPanel(true); });
-    p.querySelectorAll("[data-send]").forEach((b) => b.onclick = () => cmd.sendAuto(b.dataset.send));
-    p.querySelectorAll("[data-up]").forEach((b) => b.onclick = () => cmd.upgradeSend(b.dataset.up));
+    // switching tiers shows a different list: start it at the top; otherwise patch in place
+    if (p._tier !== _sendTier) { p._tier = _sendTier; morph(p, html); const s2 = p.querySelector(".sp-rows"); if (s2) s2.scrollTop = 0; }
+    else morph(p, html);
+    bindSendPanel(p);
   }
 
   // ---- live panel refresh ------------------------------------------------------

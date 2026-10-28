@@ -9,6 +9,7 @@
 
    Coordinates: 1 world unit = 1 grid tile. Corridor-local space: x = u - cols/2, z = v - rows/2 (u = column,
    v = row, both in tiles; row 0 = exit, last row = entrance), y = 0 is the build surface. */
+import { buildWeather } from "./weather.js";
 import * as THREE from "three";
 import { Batch, Part, MAT, rng, noise, fbm, col, shade, mix, clamp, lerp, smooth, TAU, pick, hash2 } from "./kit.js";
 const h3i = (a, b) => hash2(a * 7 + 3, b * 13 - 5);
@@ -738,6 +739,20 @@ export function createWorld(scene, DB) {
   const sea = backdrop.sea;
   let ring = null;           // current built ring
   const islandCache = new Map(); // preview islands (no grid), keyed by element|seed
+  let wxCount = 160, wxObjs = [];
+  // weather over every island (render/weather.js); rebuilt when the density setting changes
+  function buildWeatherFor(r) {
+    for (const o of wxObjs) { root.remove(o); o.traverse((n) => { if (n.geometry) n.geometry.dispose(); }); }
+    wxObjs = [];
+    if (!r || wxCount <= 0) return;
+    r.elements.forEach((el, i) => {
+      const c = r.L.corridors[i];
+      const w = buildWeather(el, HALF_W, HALF_L, COLS / 2, wxCount, 900 + i * 31);
+      if (!w) return;
+      w.position.set(c.x, 0.2, c.z); w.rotation.set(0, c.theta, 0);
+      root.add(w); wxObjs.push(w);
+    });
+  }
 
   function clear() {
     if (!ring) return;
@@ -801,6 +816,7 @@ export function createWorld(scene, DB) {
     root.add(vortex.root); objects.push(vortex.root);
     backdrop.build(L, { hw: HALF_W, hl: HALF_L });
     ring = { n, L, objects, islands, gates, bridges, vortex, elements: spec.map((s) => s.element) };
+    buildWeatherFor(ring);
     return ring;
   }
 
@@ -809,6 +825,9 @@ export function createWorld(scene, DB) {
     get ring() { return ring; },
     get layout() { return ring && ring.L; },
     build, clear,
+    // weather density per island (0 = off); rebuilds only when it changes
+    setWeatherCount(n) { if (n === wxCount) return; wxCount = n; buildWeatherFor(ring); },
+    get weatherCount() { return wxCount; },
     update(dt, t, vortexActive) {
       TIME.value = t;
       backdrop.update(dt, t, !!(ring && vortexActive));
