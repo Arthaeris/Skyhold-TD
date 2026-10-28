@@ -107,6 +107,7 @@ export function createRenderer(opts) {
     clearEntities();
     world.build(spec);
     L = world.layout;
+    if (fieldIdx >= L.corridors.length) fieldIdx = 0;
     makeLabels();
   }
 
@@ -128,11 +129,19 @@ export function createRenderer(opts) {
     const l = ins.left || 0, r = ins.right || 0;
     return { top: ins.top || 0, bottom: ins.bottom || 0, left: l, right: r, h: Math.max(80, H - (ins.top || 0) - (ins.bottom || 0)), w: Math.max(120, W - l - r) };
   }
+  // The world view is turned to match the corridor you were last on (vertical, creeps pouring down from the
+  // top, exactly as it looks up close), so going in or out of a corridor is a straight zoom with no turning.
+  function worldAz() {
+    const c = L.corridors[fieldIdx] || L.corridors[0];
+    return c ? azOf({ x: -c.t.x, z: -c.t.z }) : 0;
+  }
   function shotWorld() {
     const b = L.bounds, cr = contentRect();
-    const ringW = b.x1 - b.x0, ringD = b.z1 - b.z0;
+    const az = worldAz(), ca = Math.abs(Math.cos(az)), sa = Math.abs(Math.sin(az));
+    const bw = b.x1 - b.x0, bd = b.z1 - b.z0;
+    const ringW = bw * ca + bd * sa, ringD = bw * sa + bd * ca;   // the ring's extent as seen from this side
     const ppu = Math.min((cr.w - 16) / ringW, cr.h / (ringD * Math.sin(EL_WORLD) + 10)) * 0.84;
-    return { tx: (b.x0 + b.x1) / 2, ty: 0, tz: (b.z0 + b.z1) / 2 + 2, az: 0, el: EL_WORLD, ppu };
+    return { tx: (b.x0 + b.x1) / 2, ty: 0, tz: (b.z0 + b.z1) / 2, az, el: EL_WORLD, ppu };
   }
   function shotMenu(t) {
     const b = L.bounds;
@@ -399,7 +408,7 @@ export function createRenderer(opts) {
         r.d0 = Math.max(1, Math.hypot(r.tu - u, r.tv - v));
         prec.set(p.id, r);
         const tr = trec.get(p.twId);
-        if (tr) { tr.recoil = 1; tr.target = p.targetId; if (tr.model && tr.model.muzzle && (ri === fieldIdx || mode !== "field")) { tr.model.muzzle.getWorldPosition(tmpB); shot.muzzle(defId, tmpB); } }
+        if (tr) { tr.recoil = 1; shotFelt(tr); tr.target = p.targetId; if (tr.model && tr.model.muzzle && (ri === fieldIdx || mode !== "field")) { tr.model.muzzle.getWorldPosition(tmpB); shot.muzzle(defId, tmpB); } }
         if (ri === fieldIdx || mode !== "field") sfx("shoot", p.element);
       } else { r.pu = r.cu; r.pv = r.cv; r.cu = u; r.cv = v; r.tu = TILE(p.tx); r.tv = TILE(p.ty); }
       r.seen = true;
@@ -428,6 +437,14 @@ export function createRenderer(opts) {
       if (name === "armR") armR = holder; else if (name === "armL") armL = holder; else if (name.startsWith("wing")) wings.push({ holder, side: name === "wingL" ? 1 : -1 });
     }
     group.scale.setScalar(3.3);
+    group.rotation.order = "YXZ";   // yaw first, then lean / tilt relative to where it faces
+    // a crate of building stuff, carried overhead on the way to a job
+    const cp = new Part(77);
+    cp.b(0.26, 0.2, 0.2, "#a8743a", 0, 0, 0, { top: "#c48e4e" });
+    cp.b(0.27, 0.035, 0.21, "#6a4422", 0, 0.06, 0); cp.b(0.27, 0.035, 0.21, "#6a4422", 0, -0.06, 0);
+    cp.b(0.035, 0.21, 0.21, "#6a4422", 0.1, 0, 0); cp.b(0.035, 0.21, 0.21, "#6a4422", -0.1, 0, 0);
+    const crate = cp.build(false); crate.position.set(0, (M.height || 0.92) + 0.14, 0.02); crate.visible = false;
+    group.add(crate);
     scene.add(group);
     // a glowing marker on the ground under the builder, so it reads at any zoom
     const gc = (DB.ELEMENTS[element] && DB.ELEMENTS[element].glow) || "#ffffff";
@@ -435,7 +452,7 @@ export function createRenderer(opts) {
     ring.rotation.x = -Math.PI / 2; ring.renderOrder = 4;
     group.userData.ring = ring;
     scene.add(ring);
-    return { group, ring, armR, armL, wings, element, skin, yaw: 0, sparkT: 0, M };
+    return { group, ring, armR, armL, wings, crate, element, skin, yaw: 0, sparkT: 0, M, idleT: 4 + Math.random() * 6, emote: null, emoteT: 0, cheerT: 0, flinchT: 0, phase0: null };
   }
 
   const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
@@ -478,10 +495,29 @@ export function createRenderer(opts) {
         }
       }
       else if (ev.kind === "bounty") { const r = erec.get(ev.enemy); if (r && r.ri >= 0) popText(r.world, "+" + ev.gold + " ✦", "#ffd23d", true); }
-      else if (ev.kind === "life") { lifeFlash = 1; if (mode === "field" && L.corridors[fieldIdx]) dfx.lifeLost(corridorToWorld(L, fieldIdx, COLS / 2, -3.2, 0.6, new THREE.Vector3())); }
+      else if (ev.kind === "life") { lifeFlash = 1; { const b = brec.get(mode === "field" ? fieldIdx : 0); if (b) b.flinchT = 0.7; } if (mode === "field" && L.corridors[fieldIdx]) dfx.lifeLost(corridorToWorld(L, fieldIdx, COLS / 2, -3.2, 0.6, new THREE.Vector3())); }
       else abilityFx(ev);
     }
   }
+  // ---- towers feeling alive -----------------------------------------------------------
+  // a shot warms the tower up (spinning parts whirl faster, floating parts bob livelier), kicks it (a quick
+  // squash), and tells us its reload so slow, heavy towers can visibly charge before the next one
+  function shotFelt(tr) {
+    tr.heat = Math.min(1, (tr.heat || 0) + 0.3); tr.kick = 1;
+    if (tr.tw && tr.tw.cd > 0) tr.cdMax = tr.tw.cd;
+  }
+  // each element breathes a little from the top of its towers on the field you're watching
+  const AMBIENT = {
+    fire: (p) => sparks.spawn({ x: p.x + (Math.random() - 0.5) * 0.5, y: p.y, z: p.z + (Math.random() - 0.5) * 0.5, vx: (Math.random() - 0.5) * 0.3, vy: 1.4 + Math.random(), vz: (Math.random() - 0.5) * 0.3, color: Math.random() < 0.5 ? "#ffb15c" : "#ff7a2a", life: 0.9, size: 0.26, drag: 0.8, glow: 2.2, flicker: 1 }),
+    ice: (p) => sparks.spawn({ x: p.x + (Math.random() - 0.5) * 1.2, y: p.y + (Math.random() - 0.3) * 0.8, z: p.z + (Math.random() - 0.5) * 1.2, vy: -0.25, color: "#dff6ff", life: 0.7, size: 0.24, drag: 1, glow: 2.4, flicker: 1 }),
+    nature: (p) => sparks.spawn({ x: p.x + (Math.random() - 0.5) * 0.8, y: p.y - 0.2, z: p.z + (Math.random() - 0.5) * 0.8, vx: (Math.random() - 0.5) * 0.8, vy: 0.5, vz: (Math.random() - 0.5) * 0.8, color: Math.random() < 0.6 ? "#c6ff7a" : "#fff2a0", life: 1.4, size: 0.22, drag: 0.6, glow: 1.9 }),
+    storm: (p) => { const a = Math.random() * 6.283, b = a + 1.2 + Math.random(); streaks.bolt(new THREE.Vector3(p.x + Math.cos(a) * 0.45, p.y + (Math.random() - 0.5) * 0.5, p.z + Math.sin(a) * 0.45), new THREE.Vector3(p.x + Math.cos(b) * 0.45, p.y + (Math.random() - 0.5) * 0.5, p.z + Math.sin(b) * 0.45), "#e2c8ff", 0.06, 0.09, 3); },
+    light: (p) => sparks.spawn({ x: p.x + (Math.random() - 0.5) * 0.9, y: p.y - 0.3, z: p.z + (Math.random() - 0.5) * 0.9, vy: 0.9, color: "#fff3c0", life: 1.1, size: 0.24, drag: 0.5, glow: 2.4 }),
+    darkness: (p) => sparks.spawn({ x: p.x + (Math.random() - 0.5) * 0.9, y: p.y, z: p.z + (Math.random() - 0.5) * 0.9, vy: -0.6, color: Math.random() < 0.5 ? "#a98aff" : "#6a4ad0", life: 1.1, size: 0.3, drag: 0.6, glow: 1.8 }),
+    mech: (p) => sparks.spawn({ x: p.x + (Math.random() - 0.5) * 0.4, y: p.y, z: p.z + (Math.random() - 0.5) * 0.4, vx: 0.2, vy: 1.1, color: "#c8ccd4", life: 1.0, size: 0.5, drag: 1.2, glow: 0.55 }),
+    abnormal: (p) => sparks.spawn({ x: p.x + (Math.random() - 0.5) * 1.4, y: p.y + (Math.random() - 0.5) * 1.0, z: p.z + (Math.random() - 0.5) * 1.4, color: Math.random() < 0.5 ? "#ff5fa2" : "#5dffb0", life: 0.16, size: 0.3, drag: 0, glow: 2.4 }),
+  };
+  const AMB_RATE = { fire: 0.35, ice: 0.6, nature: 0.7, storm: 1.6, light: 0.7, darkness: 0.6, mech: 0.9, abnormal: 0.45 };
   const towerWorld = (id, out) => { const tr = trec.get(id); if (!tr) return null; tr.model.root.getWorldPosition(out); return out; };
   function abilityFx(ev) {
     const r = ev.enemy != null ? erec.get(ev.enemy) : null;
@@ -507,7 +543,7 @@ export function createRenderer(opts) {
   function zapFx(ev) {
     const tr = trec.get(ev.tower);
     if (!tr) return;
-    tr.recoil = 1;
+    tr.recoil = 1; shotFelt(tr);
     const c = elColor(ev.element);
     tr.model.muzzle.getWorldPosition(tmpA);
     const from = tmpA.clone();
@@ -664,8 +700,41 @@ export function createRenderer(opts) {
         }
       }
       if (r.rise < 1) { r.rise = Math.min(1, r.rise + dt * 3); const k = easeInOut(r.rise); m.root.scale.set(1, 0.2 + 0.8 * k, 1); }
-      if (m.spin && ud.spinRate) { if (ud.spinAxis === "z") m.spin.rotation.z += ud.spinRate * dt; else if (ud.spinAxis === "xyz") { m.spin.rotation.x += ud.spinRate * dt * 0.7; m.spin.rotation.y += ud.spinRate * dt; } else m.spin.rotation.y += ud.spinRate * dt; }
-      if (m.float && ud.bob) m.float.position.y = ud.fy + Math.sin(clock * 2 + r.pulseT * 6) * ud.bob;
+      r.heat = Math.max(0, (r.heat || 0) - dt * 0.45);
+      const spinK = 1 + 2.5 * r.heat;
+      if (m.spin && ud.spinRate) { const dtS = dt * spinK; if (ud.spinAxis === "z") m.spin.rotation.z += ud.spinRate * dtS; else if (ud.spinAxis === "xyz") { m.spin.rotation.x += ud.spinRate * dtS * 0.7; m.spin.rotation.y += ud.spinRate * dtS; } else m.spin.rotation.y += ud.spinRate * dtS; }
+      if (m.float && ud.bob) { r.bobP = (r.bobP || r.pulseT * 6) + dt * (2 + 3 * r.heat); m.float.position.y = ud.fy + Math.sin(r.bobP) * ud.bob * (1 + r.heat * 1.5); }
+      // the kick of a shot: a quick squash on the whole tower (only once it stands at full height)
+      r.kick = Math.max(0, (r.kick || 0) - dt * 6);
+      if (r.rise >= 1 && !(tw && (tw.bState || tw.upT > 0))) { const k = r.kick * r.kick; m.root.scale.set(1 + 0.045 * k, 1 - 0.07 * k, 1 + 0.045 * k); }
+      const watched = mode === "field" && r.ri === fieldIdx;
+      if (watched && tw && !tw.bState) {
+        // slow, heavy towers gather energy at the muzzle just before they fire
+        const per = r.cdMax ? r.cdMax / fx.ONE : 0, left = tw.cd / fx.ONE;
+        if (per >= 0.9 && left > 0 && left < 0.4 && r.target != null) {
+          r.chT = (r.chT || 0) + dt;
+          if (r.chT > 0.05) {
+            r.chT = 0; m.muzzle.getWorldPosition(tmpA);
+            const a = Math.random() * 6.283, d = 0.9;
+            sparks.spawn({ x: tmpA.x + Math.cos(a) * d, y: tmpA.y + (Math.random() - 0.5) * 0.6, z: tmpA.z + Math.sin(a) * d, vx: -Math.cos(a) * 3.2, vy: 0, vz: -Math.sin(a) * 3.2, color: DB.ELEMENTS[tw.def.element].glow, life: 0.25, size: 0.24, drag: 0, glow: 2.4 });
+          }
+        }
+        // the element breathes from the top of the tower now and then
+        r.ambT = (r.ambT == null ? Math.random() * 2 : r.ambT) - dt;
+        if (r.ambT <= 0) {
+          const el = tw.def.element;
+          r.ambT = (AMB_RATE[el] || 1) * (0.7 + Math.random() * 0.8);
+          if (AMBIENT[el]) { m.muzzle.getWorldPosition(tmpA); AMBIENT[el](tmpA); }
+        }
+      }
+      // a new veteran star: a little golden flourish and a hop
+      if (tw) {
+        if (r.exp0 == null) r.exp0 = tw.expert || 0;
+        else if ((tw.expert || 0) > r.exp0) {
+          r.exp0 = tw.expert; r.kick = 1.2;
+          if (watched || mode !== "field") { m.root.getWorldPosition(tmpA); sparks.burst(tmpA.x, 3.2, tmpA.z, "#ffe066", 16, 4, 0.7, 0.4, 2); rings.add(tmpA.clone().setY(0.12), "#ffe066", 0.4, 2.4, 0.5, 1.6); }
+        }
+      }
       if (m.crown) m.crown.rotation.y += dt * 0.6;
       if (m.mut) m.mut.rotation.y -= dt * 1.4;
       if (m.aim && ud.hasAim) {
@@ -675,9 +744,14 @@ export function createRenderer(opts) {
           const tw = r.tw, S = DB.CONFIG.towerSize;
           want = Math.atan2((te.u ?? te.cu) - (tw.c + S / 2), (te.v ?? te.cv) - (tw.r + S / 2));
         }
-        if (want == null) want = m.aim.rotation.y + Math.sin(clock * 0.4 + r.pulseT * 9) * dt * 0.3;
+        let rate = 10;
+        if (want == null) {
+          // nothing in range: the turret scans the field, pausing on a new bearing every few seconds
+          if (r.scanT == null || clock > r.scanT) { r.scanT = clock + 2.2 + Math.random() * 3.2; r.scanA = m.aim.rotation.y + (Math.random() < 0.5 ? -1 : 1) * (0.5 + Math.random() * 1.3); }
+          want = r.scanA; rate = 2.2;
+        } else r.scanT = clock + 1.5;
         let d = want - m.aim.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d));
-        m.aim.rotation.y += d * Math.min(1, dt * 10);
+        m.aim.rotation.y += d * Math.min(1, dt * rate);
         m.aim.position.z = 0;
         if (r.recoil > 0) { const k = r.recoil; m.aim.position.x = -Math.sin(m.aim.rotation.y) * k * 0.12; m.aim.position.z = -Math.cos(m.aim.rotation.y) * k * 0.12; }
         else m.aim.position.x = 0;
@@ -758,27 +832,63 @@ export function createRenderer(opts) {
     bars.end();
   }
 
+  // Builders: they lean into a run, carry a crate to a new job, bounce with every hammer blow, look around and
+  // fidget while idle (a wave, a hop, a twirl), cheer when a wave is cleared and flinch when a life is lost.
+  const phaseOfRing = (ri) => (V && V.versus ? (V.state.players[ri] || {}).phase : V && V.field ? V.field.phase : null);
   function syncBuilders(view, alpha, dt) {
     for (const [ri, r] of brec) {
       const b = r.b;
       if (!b || !L.corridors[ri]) { r.group.visible = false; r.ring.visible = false; continue; }
       r.group.visible = true; r.ring.visible = true;
       const u = r.pu + (r.cu - r.pu) * alpha, v = r.pv + (r.cv - r.pv) * alpha;
-      const working = !b.moving && !!b.cur;
-      const p = corridorToWorld(L, ri, u, v, 2.4 + Math.sin(clock * 3 + ri) * 0.22 + (working ? 1.2 : 0), tmpA);
+      const working = !b.moving && !!b.cur, moving = !!b.moving, carrying = moving && !!b.cur;
+      // moods: a wave just cleared -> cheer; otherwise maybe an idle fidget
+      const ph = phaseOfRing(ri);
+      if (r.phase0 === "wave" && ph && ph !== "wave") { r.cheerT = 1.8; r.emote = null; }
+      r.phase0 = ph;
+      r.cheerT = Math.max(0, r.cheerT - dt); r.flinchT = Math.max(0, r.flinchT - dt);
+      const idle = !working && !moving && r.cheerT <= 0;
+      if (idle && !r.emote) { r.idleT -= dt; if (r.idleT <= 0) { r.emote = ["wave", "hop", "twirl", "look"][Math.floor(Math.random() * 4)]; r.emoteT = 0; } }
+      if (!idle) { r.emote = null; }
+      let hopY = 0, extraYaw = 0, lean = 0, tilt = 0;
+      if (r.emote) {
+        r.emoteT += dt; const t = r.emoteT;
+        const dur = { wave: 1.6, hop: 0.9, twirl: 0.8, look: 2.4 }[r.emote];
+        if (r.emote === "hop") hopY = Math.abs(Math.sin(t * Math.PI * 2 / 0.45)) * 0.55;
+        if (r.emote === "twirl") extraYaw = easeInOut(Math.min(1, t / dur)) * Math.PI * 2;
+        if (r.emote === "look") extraYaw = Math.sin(t * Math.PI / 1.2) * 0.9;
+        if (t >= dur) { r.emote = null; r.idleT = 5 + Math.random() * 8; }
+      }
+      if (r.cheerT > 0) hopY = Math.abs(Math.sin(r.cheerT * Math.PI * 2 / 0.6)) * 0.7;
+      if (moving) lean = 0.32;
+      if (r.flinchT > 0) tilt = Math.sin(r.flinchT * 40) * 0.25 * (r.flinchT / 0.7);
+      const hammer = working ? Math.max(0, Math.sin(clock * 11)) : 0;
+      const bobAmp = moving ? 0.12 : 0.22, bobF = moving ? 9 : 3;
+      const p = corridorToWorld(L, ri, u, v, 2.4 + Math.sin(clock * bobF + ri) * bobAmp + (working ? 1.2 - hammer * 0.18 : 0) + hopY, tmpA);
       const moved = Math.hypot(p.x - r.group.position.x, p.z - r.group.position.z);
       if (moved > 0.002 && moved < 4) { const want = Math.atan2(p.x - r.group.position.x, p.z - r.group.position.z); let d = want - r.yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); r.yaw += d * Math.min(1, dt * 8); }
       r.group.position.copy(p);
-      r.group.rotation.y = r.yaw;
+      r.group.rotation.set(lean + (working ? hammer * 0.12 : 0), r.yaw + extraYaw, tilt);
       r.ring.position.set(p.x, 0.07, p.z);
       r.ring.scale.setScalar(1 + Math.sin(clock * 4 + ri) * 0.08 + (working ? 0.25 : 0));
-      if (r.armR) r.armR.rotation.x = working ? -0.6 + Math.sin(clock * 11) * 0.9 : Math.sin(clock * 3) * 0.25;
-      if (r.armL) r.armL.rotation.x = Math.sin(clock * 3 + 1) * 0.2;
-      for (const w of r.wings) w.holder.rotation.z = Math.sin(clock * 40) * 0.5 * w.side;
+      if (r.crate) r.crate.visible = carrying;
+      // arms
+      let aR, aL;
+      if (carrying) { aR = -2.7; aL = -2.7; }                                        // crate held overhead
+      else if (r.cheerT > 0) { aR = -2.6 + Math.sin(clock * 16) * 0.35; aL = -2.6 - Math.sin(clock * 16) * 0.35; }
+      else if (r.flinchT > 0) { aR = -1.9; aL = -1.9; }                              // arms up to cover
+      else if (working) { aR = -0.6 + Math.sin(clock * 11) * 0.9; aL = Math.sin(clock * 3 + 1) * 0.2; }
+      else if (moving) { aR = Math.sin(clock * 12) * 0.7; aL = -Math.sin(clock * 12) * 0.7; }
+      else if (r.emote === "wave") { aR = -2.6; aL = Math.sin(clock * 3 + 1) * 0.2; }
+      else { aR = Math.sin(clock * 3) * 0.25; aL = Math.sin(clock * 3 + 1) * 0.2; }
+      if (r.armR) { r.armR.rotation.x = aR; r.armR.rotation.z = r.emote === "wave" && !carrying ? Math.sin(clock * 14) * 0.5 : 0; }
+      if (r.armL) r.armL.rotation.x = aL;
+      for (const w of r.wings) w.holder.rotation.z = Math.sin(clock * (moving ? 55 : 40)) * 0.5 * w.side;
       if (working) {
         r.sparkT += dt;
-        if (r.sparkT > 0.15) { r.sparkT = 0; sparks.burst(p.x, 0.8, p.z, "#ffe9a8", 4, 3, 0.3, 0.3, 4); streaks.bolt(new THREE.Vector3(p.x, p.y + 0.4, p.z), new THREE.Vector3(p.x + (Math.random() - 0.5), 0.4, p.z + (Math.random() - 0.5)), DB.ELEMENTS[r.element] ? DB.ELEMENTS[r.element].glow : "#ffffff", 0.06, 0.12, 2); if (ri === fieldIdx && mode === "field" && Math.random() < 0.35) sfx("hammer"); }
-      } else if (b.moving && Math.random() < dt * 8) sparks.spawn({ x: p.x, y: p.y - 0.4, z: p.z, vy: -0.4, color: DB.ELEMENTS[r.element] ? DB.ELEMENTS[r.element].glow : "#ffffff", life: 0.5, size: 0.25, drag: 1, glow: 1.6 });
+        if (r.sparkT > 0.15) { r.sparkT = 0; sparks.burst(p.x, 0.8, p.z, "#ffe9a8", 4, 3, 0.3, 0.3, 4); streaks.bolt(new THREE.Vector3(p.x, p.y + 0.4, p.z), new THREE.Vector3(p.x + (Math.random() - 0.5), 0.4, p.z + (Math.random() - 0.5)), DB.ELEMENTS[r.element] ? DB.ELEMENTS[r.element].glow : "#ffffff", 0.08, 0.1, 3); }
+      } else if (moving && Math.random() < dt * 8) sparks.spawn({ x: p.x, y: p.y - 0.4, z: p.z, vy: -0.4, color: DB.ELEMENTS[r.element] ? DB.ELEMENTS[r.element].glow : "#ffffff", life: 0.5, size: 0.25, drag: 1, glow: 1.6 });
+      if (r.cheerT > 0 && Math.random() < dt * 10) sparks.spawn({ x: p.x + (Math.random() - 0.5) * 1.2, y: p.y + 1.6, z: p.z + (Math.random() - 0.5) * 1.2, vy: 1.6, color: Math.random() < 0.5 ? "#ffe066" : (DB.ELEMENTS[r.element] ? DB.ELEMENTS[r.element].glow : "#ffffff"), life: 0.7, size: 0.3, drag: 1, glow: 2.2 });
     }
   }
 
