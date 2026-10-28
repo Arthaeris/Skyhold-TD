@@ -26,6 +26,7 @@ import { towerThumb, enemyThumb, warmThumbs } from "../render/thumbs.js";
 import { createBuilderViewer, builderThumb } from "../render/builderview.js";
 import { createUI } from "../ui/shell.js";
 import { icon, sigil, setIconDB } from "../ui/icons.js";
+import { pvPanel, pvSec, pvTiles, pvMeter, pvPips, pvTabs, bindPvTabs } from "../ui/panel.js";
 import { createSound } from "../audio/sound.js";
 import * as rt from "../net/rtdb.js";
 import { createSession, setActiveRoom } from "../net/session.js";
@@ -33,6 +34,7 @@ import { createLockstep, TURN, DELAY, HASH_EVERY } from "../net/lockstep.js";
 import { createOnlineUI } from "../ui/online.js";
 
 const $ = (id) => document.getElementById(id);
+const setText = (id, t) => { const e = document.getElementById(id); if (e) e.textContent = t; };
 const DB = window.DB;
 const SaveSystem = window.SaveSystem;
 const RUN_KEY = "skyhold_run_v2";
@@ -289,7 +291,11 @@ function refreshMenu() {
   const sub = $("menu-progress");
   if (sub) {
     const avail = DB.availableElements(masteryMap());
-    sub.innerHTML = DB.ELEMENT_ORDER.map((e) => `<span class="mp-el ${avail.includes(e) ? "" : "off"}" title="${DB.ELEMENTS[e].name} · Mastery ${masteryLevel(e)}">${sigil(e, "sm")}<i>${masteryLevel(e)}</i></span>`).join("");
+    // a mastery strip: each element in a ring that fills one fifth per level (locked ones dimmed); tap for details
+    let tot = 0;
+    const rings = DB.ELEMENT_ORDER.map((e) => { const l = masteryLevel(e); tot += l; return `<span class="mp-ring ${avail.includes(e) ? "" : "off"}" style="--ec:${DB.ELEMENTS[e].color};--p:${l * 20}%" title="${DB.ELEMENTS[e].name} · Mastery ${l}/5">${sigil(e, "xs")}</span>`; }).join("");
+    sub.innerHTML = `<button class="mp-strip" id="mp-open" aria-label="Mastery"><span class="mp-lbl">Mastery<b>${tot}/${DB.ELEMENT_ORDER.length * 5}</b></span><span class="mp-rings">${rings}</span></button>`;
+    const mo = $("mp-open"); if (mo) mo.onclick = () => ui.openMastery();
   }
 }
 
@@ -877,7 +883,7 @@ function showSummonCard() {
     : `<div class="sc-head"><b class="win">🏆 Victory — every wave held${diff && diff.id !== "normal" ? " on " + diff.name : ""}</b></div>
        ${lastUnlocks.length ? `<div class="sc-unlocks">${lastUnlocks.slice(0, 4).map((u) => `<span class="unlock">${u}</span>`).join("")}</div>` : ""}
        <p>Something stirs in the <b>Vortex</b>. Tap it to summon <b>the Sealed One</b> — ${fresh.length ? `beat it to unlock ${fresh.map((k) => `<em>${k.name}</em>`).join(", ")}` : "beat it again for glory"}. If it gets away, your win stands.</p>
-       <div class="sc-acts"><button class="btn primary" id="sc-summon">${icon("skull", "xs")} Summon at the Vortex</button><button class="btn ghost" id="sc-finish">Finish run</button></div>`;
+       <div class="sc-acts"><button class="btn primary" id="sc-summon">${icon("skull", "xs")} Summon boss</button><button class="btn ghost" id="sc-finish">Finish run</button></div>`;
   c.classList.add("show");
   $("sc-summon").onclick = () => summonViaPortal();
   const fin = $("sc-finish"); if (fin) fin.onclick = () => { hideSummonCard(); endScreen(true, { skipped: true }); };
@@ -931,32 +937,63 @@ function endScreen(win, o = {}) {
   const title = !win ? "DEFEAT" : ch ? "CHALLENGE COMPLETE" : o.endboss ? "SEAL BROKEN" : "VICTORY";
   sc.querySelector("#end-title").textContent = title;
   sc.querySelector("#end-title").className = win ? "win" : "lose";
+  const fp = game.state.players[game.me];
+  const diff = game.state.x && RULES.SOLO_DIFFICULTY ? RULES.SOLO_DIFFICULTY[game.state.x.difficulty || "normal"] : null;
+  const total = game.mode === "endless" ? null : fp.totalWaves;
+  // one line that says what just happened
+  let sub;
+  if (!win) sub = isVersus() ? "Your corridor fell." : `Fell on wave ${fp.wave}${total ? " of " + total : ""}`;
+  else if (o.bossEscaped) sub = "The Sealed One got away — your victory stands.";
+  else if (o.endboss) sub = "The Sealed One is no more.";
+  else if (ch) sub = ch.def.name + (ch.hard ? " · Hard" : "");
+  else if (isVersus()) sub = "Last corridor standing.";
+  else sub = "Every wave held" + (diff && diff.id !== "normal" ? " on " + diff.name : "") + ".";
+  setText("end-sub", sub);
+  const badge = $("end-badge");
+  if (badge) { badge.className = "end-badge " + (win ? (o.endboss ? "seal" : "win") : "lose"); badge.innerHTML = icon(win ? (o.endboss ? "sparkle" : ch ? "skull" : "trophy") : "skull"); }
   const eb = sc.querySelector("#end-endless"); if (eb) eb.style.display = (win && game.mode !== "endless" && !ch && !isVersus()) ? "" : "none";
   const spb = $("end-spectate"); if (spb) spb.style.display = (!win && isVersus() && game.state.x && !game.state.finished) ? "" : "none";
-  const eag = $("end-again"); if (eag) eag.textContent = game.online ? "Back to Online" : "Play Again";
-  let html = "";
-  if (o.bossEscaped) html += `<p class="end-note">The Sealed One got away this time — your victory stands.</p>`;
-  else if (o.endboss) html += `<p class="end-note gold">You broke the seal. The Sealed One is no more.</p>`;
-  html += `<div class="end-tiles"><div><span>${icon("wave", "xs")} Waves</span><b>${pl.wave}</b></div><div><span>${icon("skull", "xs")} Kills</span><b>${pl.stats.kills}</b></div><div><span>${icon("trophy", "xs")} Bosses</span><b>${pl.stats.bossesKilled}</b></div><div><span>${icon("star", "xs")} Score</span><b>${pl.stats.score}</b></div></div>`;
-  if (!win && game.state.x) html += defeatReasonsHTML(game.state, pl);
+  const eag = $("end-again"); if (eag) eag.innerHTML = `${icon(game.online ? "globe" : "auto", "xs")} ${game.online ? "Online" : "Again"}`;
+  const erp = $("end-replay"); if (erp) erp.innerHTML = `${icon("play", "xs")} Replay`;
+  const emn = $("end-menu"); if (emn) emn.innerHTML = `${icon("home", "xs")} Menu`;
+  let html = pvTiles([
+    { ico: icon("wave", "xs"), label: "Waves", value: pl.wave },
+    { ico: icon("skull", "xs"), label: "Kills", value: pl.stats.kills },
+    { ico: icon("trophy", "xs"), label: "Bosses", value: pl.stats.bossesKilled },
+    { ico: icon("star", "xs"), label: "Score", value: pl.stats.score, hi: win },
+  ]);
+  if (!win && game.state.x) { const why = defeatReasonsHTML(game.state, pl); if (why) html += pvSec("What got through", why); }
   if (win && !ch) {
     let rows = "";
     for (const eid of runElementsOf(pl)) {
       const el = DB.ELEMENTS[eid]; if (!el) continue;
       const lvl = (meta.mastery && meta.mastery[eid]) || 0;
       const wins = (meta.elementWins && meta.elementWins[eid]) || 0;
-      let prog;
-      if (lvl >= 5) prog = "Mastery MAX";
-      else if (lvl === 4) prog = "Endless wave " + RULES_M5_WAVE + " → M5";
-      else prog = wins + "/" + DB.MASTERY.winsRequired[lvl + 1] + " wins → M" + (lvl + 1);
-      rows += `<span class="end-m" style="--ec:${el.color}">${sigil(eid, "xs")} ${el.name} <em>${prog}</em></span>`;
+      let label, frac;
+      if (lvl >= 5) { label = "Mastered"; frac = 1; }
+      else if (lvl === 4) { label = "Reach Endless wave " + RULES_M5_WAVE; frac = 0; }
+      else { const need = DB.MASTERY.winsRequired[lvl + 1]; label = `${Math.min(wins, need)}/${need} wins`; frac = need ? Math.min(1, wins / need) : 1; }
+      rows += `<div class="end-mrow" style="--ac:${el.color}"><span class="em-name">${sigil(eid, "xs")} ${el.name}</span><span class="em-lvl">M${lvl}${lvl < 5 ? ` <i>→</i> M${lvl + 1}` : ""}</span>${pvMeter(frac, el.color)}<span class="em-note">${label}</span></div>`;
     }
-    if (rows) html += `<div class="end-mastery">${rows}</div>`;
+    if (rows) html += pvSec("Mastery", `<div class="end-mastery2">${rows}</div>`);
   }
-  if (unlockMsgs.length) html += `<details class="end-unl" open><summary>🎉 ${unlockMsgs.length} new unlock${unlockMsgs.length > 1 ? "s" : ""}</summary><div class="end-unlocks">${unlockMsgs.map((m) => `<span class="unlock">${m}</span>`).join("")}</div></details>`;
-  if (game.state.x) html += `<div class="end-stats-wrap">${statsHTML(game.state)}</div>`;
+  if (unlockMsgs.length) {
+    const card = (m) => {
+      let ico = icon("sparkle"), kind = "Unlocked", name = m, ac = "#ffd23d";
+      const sk = /^Builder skin unlocked: (.*)$/.exec(m), ms = /^(\w+) Mastery (\d)$/.exec(m), tw = /^(\w+): Tower (\d)$/.exec(m);
+      const elOf = (n) => DB.ELEMENT_ORDER.find((e) => DB.ELEMENTS[e].name.toLowerCase() === String(n).toLowerCase());
+      if (sk) { ico = icon("hammer"); kind = "Builder look"; name = sk[1]; ac = "#7fd0ff"; }
+      else if (ms) { const e = elOf(ms[1]); ico = e ? sigil(e, "sm") : icon("star"); kind = "Mastery " + ms[2]; name = ms[1]; ac = e ? DB.ELEMENTS[e].color : ac; }
+      else if (tw) { const e = elOf(tw[1]); const t = e && DB.TOWERS.find((x) => x.element === e && x.slot === +tw[2] - 1); ico = t ? `<img src="${towerThumb(DB, t.id)}" alt="">` : icon("up"); kind = "New tower"; name = t ? t.name : m; ac = e ? DB.ELEMENTS[e].color : ac; }
+      else if (/^New Element unlocked: /.test(m)) { const n = m.replace(/^New Element unlocked: /, ""), e = elOf(n); ico = e ? sigil(e, "sm") : icon("sparkle"); kind = "New element"; name = n; ac = e ? DB.ELEMENTS[e].color : ac; }
+      else if (/^(\w+): (.+)$/.test(m)) { const mm = /^(\w+): (.+)$/.exec(m), e = elOf(mm[1]); ico = e ? sigil(e, "sm") : icon("sparkle"); kind = mm[1]; name = mm[2]; ac = e ? DB.ELEMENTS[e].color : ac; }
+      return `<div class="end-unl2" style="--ac:${ac}"><div class="eu-ico">${ico}</div><div class="eu-txt"><span>${kind}</span><b>${name}</b></div></div>`;
+    };
+    html += pvSec("New unlocks", `<div class="end-unls">${unlockMsgs.map(card).join("")}</div>`, `${unlockMsgs.length}`);
+  }
+  if (game.state.x) html += `<details class="pv-details"><summary>${icon("layers", "xs")} Match details <i>${icon("right", "xs")}</i></summary><div class="end-stats-wrap">${statsHTML(game.state)}</div></details>`;
   const body = sc.querySelector("#end-body");
-  body.innerHTML = html;
+  body.innerHTML = html; body.scrollTop = 0;
   bindStatsTabs(body);
   sc.classList.add("show");
   if (tutorial) tutorial.notify("end", { win });
@@ -1002,7 +1039,7 @@ function defeatReasonsHTML(st, pl) {
     const top = Object.entries(types).sort((a, b) => b[1] - a[1])[0];
     tips.push(["🧭", `${mobName(top[0])} leaked most (${top[1]}×)`, "Lengthen the maze so creeps pass more towers, and mix your two elements: their reactions do big damage."]);
   }
-  return `<div class="end-why"><div class="st-sub">Why it slipped away</div>${tips.slice(0, 2).map(([i, t, d]) => `<div class="why-row"><span class="why-i">${i}</span><div><b>${t}</b><span>${d}</span></div></div>`).join("")}</div>`;
+  return `<div class="end-why">${tips.slice(0, 2).map(([i, t, d]) => `<div class="why-row"><span class="why-i">${i}</span><div><b>${t}</b><span>${d}</span></div></div>`).join("")}</div>`;
 }
 const F17 = 1.7 * 65536;
 
@@ -1053,10 +1090,14 @@ function bindStatsTabs(root) {
 }
 function openStats() {
   const m = $("stats-modal"); if (!m || !game.state) return;
-  m.innerHTML = `<div class="modal wide glass"><button class="panel-close" id="stm-close">${icon("close")}</button><h2>Match Stats</h2>${game.state.x ? statsHTML(game.state) : "<p class='dim'>Detailed stats are tracked under the Expanded rules.</p>"}</div>`;
+  const st = game.state, p0 = st.players[game.me];
+  const sub = `${replayTitle(st)} · ${fmtT(st.tick)}`;
+  m.innerHTML = pvPanel({ cls: "wide stats-pv", head: { ico: icon("layers"), ac: "#5bd6ff", title: "Match stats", sub, closeId: "stm-close" },
+    body: st.x ? pvTiles([{ label: "Waves", value: myPlayer().wave }, { label: "Kills", value: p0.stats.kills }, { label: "Lives", value: p0.lives }, { label: "Score", value: p0.stats.score }]) + `<div class="end-stats-wrap">${statsHTML(st)}</div>` : "<p class='pv-lead'>Detailed stats are tracked under the Expanded rules.</p>" });
   bindStatsTabs(m);
   m.classList.add("show");
   $("stm-close").onclick = () => m.classList.remove("show");
+  m.onclick = (e) => { if (e.target === m) m.classList.remove("show"); };
 }
 
 // ---- replays --------------------------------------------------------------------------
@@ -1086,16 +1127,26 @@ function storeReplay(result) {
 function openReplays() {
   const m = $("replays-modal"); if (!m) return;
   const list = loadReplays();
-  m.innerHTML = `<div class="modal wide glass"><button class="panel-close" id="rp-close">${icon("close")}</button><h2>Replays</h2>
-    <p class="dim">Your last six matches are kept on this device. A replay re-runs the match from its seed and every command, so it plays back exactly.</p>
-    <div class="rp-list">${list.length ? list.map((r, i) => `<div class="rp-row"><div class="rp-info"><b>${r.title}</b><span class="dim">${new Date(r.date).toLocaleString()} · ${fmtT(r.ticks)} · wave ${r.wave} · ${r.result}</span>${r.version !== DB.contentHash ? `<span class="warn">made with another game version — may play back differently</span>` : ""}</div>
-      <button class="btn small primary" data-watch="${i}">Watch</button><button class="btn small" data-exp="${i}">Export</button><button class="btn small ghost" data-del="${i}">✕</button></div>`).join("") : "<p class='dim'>No replays yet — finish a match.</p>"}</div>
-    <div class="sm-actions"><button class="btn" id="rp-import">⬆ Import replay file</button></div><input type="file" id="rp-file" accept=".json,application/json" hidden></div>`;
+  const row = (r, i) => {
+    const win = /victory/i.test(r.result), dt = new Date(r.date);
+    const when = dt.toLocaleDateString(undefined, { day: "numeric", month: "short" }) + " " + dt.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    return `<div class="pv-row rp2" style="--ac:${win ? "#ffd23d" : "#ff6a8a"}"><div class="r-ico">${icon(win ? "trophy" : "skull")}</div>
+      <div class="r-main"><b>${r.title}</b><span>${when} · ${fmtT(r.ticks)} · wave ${r.wave} · ${r.result}</span>${r.version !== DB.contentHash ? `<span class="warn">Older game version — may play back differently</span>` : ""}</div>
+      <div class="r-side"><button class="btn small primary" data-watch="${i}" aria-label="Watch">${icon("play", "xs")}</button><button class="btn small" data-exp="${i}" aria-label="Export">${icon("save", "xs")}</button><button class="btn small ghost" data-del="${i}" aria-label="Delete">${icon("close", "xs")}</button></div></div>`;
+  };
+  m.innerHTML = pvPanel({ cls: "replays-pv", head: { ico: icon("play"), ac: "#5bd6ff", title: "Replays", sub: "Your last six matches · they play back exactly", closeId: "rp-close" },
+    body: list.length ? `<div class="pv-list">${list.map(row).join("")}</div><p class="pv-note">A replay re-runs the match from its seed and every command. Export one to keep it or share it.</p>`
+      : `<div class="pv-empty">${icon("play")}<b>No replays yet</b><span>Finish a match and it shows up here.</span></div>`,
+    foot: `<button class="btn" id="rp-import">${icon("up", "xs")} Import replay file</button><input type="file" id="rp-file" accept=".json,application/json" hidden>` });
   m.classList.add("show");
   $("rp-close").onclick = () => m.classList.remove("show");
+  m.onclick = (e) => { if (e.target === m) m.classList.remove("show"); };
   m.querySelectorAll("[data-watch]").forEach((b) => b.onclick = () => { m.classList.remove("show"); watchReplay(list[+b.dataset.watch]); });
   m.querySelectorAll("[data-exp]").forEach((b) => b.onclick = () => { const r = list[+b.dataset.exp]; if (SaveSystem) SaveSystem.downloadText(JSON.stringify({ skyholdReplay: 1, ...r }), "skyhold-replay-" + r.id + ".json"); });
-  m.querySelectorAll("[data-del]").forEach((b) => b.onclick = () => { list.splice(+b.dataset.del, 1); saveReplays(list); openReplays(); refreshMenu(); });
+  m.querySelectorAll("[data-del]").forEach((b) => b.onclick = () => {
+    if (!b.classList.contains("armed")) { m.querySelectorAll("[data-del].armed").forEach((x) => { x.classList.remove("armed"); x.innerHTML = icon("close", "xs"); }); b.classList.add("armed"); b.textContent = "Delete?"; return; }
+    list.splice(+b.dataset.del, 1); saveReplays(list); openReplays(); refreshMenu();
+  });
   $("rp-import").onclick = () => $("rp-file").click();
   $("rp-file").onchange = (e) => {
     const f = e.target.files[0]; if (!f) return;
@@ -1135,19 +1186,27 @@ function openChallenges() {
   const avail = DB.availableElements(masteryMap());
   if (!avail.includes(game.chEl)) game.chEl = avail[0];
   if (game.chPartner === game.chEl || (game.chPartner && !avail.includes(game.chPartner))) game.chPartner = null;
-  const pills = (sel, attr, allowNone) => (allowNone ? `<button class="elbtn ${!sel ? "sel" : ""}" data-${attr}="">—<span>None</span></button>` : "") + avail.map((e) => `<button class="elbtn ${e === sel ? "sel" : ""}" style="--ec:${DB.ELEMENTS[e].color}" data-${attr}="${e}">${sigil(e, "sm")}<span>${DB.ELEMENTS[e].name}</span></button>`).join("");
+  const pills = (sel, attr, allowNone) => (allowNone ? `<button class="ch-el ${!sel ? "sel" : ""}" data-${attr}="">None</button>` : "") + avail.map((e) => `<button class="ch-el ${e === sel ? "sel" : ""}" style="--ec:${DB.ELEMENTS[e].color}" data-${attr}="${e}">${sigil(e, "xs")}${DB.ELEMENTS[e].name}</button>`).join("");
   const els = [game.chEl, game.chPartner].filter(Boolean);
-  m.innerHTML = `<div class="modal wide glass"><button class="panel-close" id="ch-close">${icon("close")}</button><h2>Challenges</h2>
-    <p class="dim">Ten waves from one themed pool, then its boss. Every challenge can be won more than one way — read the hint and pick elements that answer it. Each element you beat it with earns that challenge's builder look in your element.</p>
-    <div class="ch-pick"><span class="ch-lbl">Element</span><div class="assign-opts ch-els">${pills(game.chEl, "chel")}</div>
-    <span class="ch-lbl">Partner <i class="dim">(optional — unlocks reactions)</i></span><div class="assign-opts ch-els">${pills(game.chPartner, "chp", true)}</div></div>
-    <div class="ch-list">${CHALLENGES.map((c) => {
-      const done = xmeta.challenges[c.id] || {}; const L = c.look || {};
-      const earned = els.map((e) => { const k = BUILDER_SKINS.find((x) => x.id === "ch_" + c.id + "_" + e); return k ? `<span class="ch-skin ${skinUnlocked(k) ? "have" : ""}">${skinUnlocked(k) ? "✓" : "🔒"} ${k.name}</span>` : ""; }).join("");
-      return `<div class="ch-card"><img src="${enemyThumb(DB, c.boss)}" alt=""><div class="ch-info"><b>${c.name}</b><span>${c.desc}</span><span class="ch-hint">💡 ${c.hint || ""}</span><span class="dim">Hard: ${c.hard.label}</span><div class="ch-skins">${earned}</div></div>
-      <div class="ch-btns"><button class="btn small primary" data-ch="${c.id}">${done.normal ? "✓ " : ""}Normal</button><button class="btn small danger" data-chh="${c.id}">${done.hard ? "✓ " : ""}Hard</button></div></div>`; }).join("")}</div></div>`;
+  const nDone = CHALLENGES.filter((c) => (xmeta.challenges[c.id] || {}).normal).length;
+  const cards = CHALLENGES.map((c) => {
+    const done = xmeta.challenges[c.id] || {};
+    const earned = els.map((e) => { const k = BUILDER_SKINS.find((x) => x.id === "ch_" + c.id + "_" + e); return k ? `<span class="ch-skin ${skinUnlocked(k) ? "have" : ""}">${skinUnlocked(k) ? "✓" : icon("lock", "xs")} ${k.name}</span>` : ""; }).join("");
+    return `<div class="ch2${done.normal ? " done" : ""}">
+      <div class="ch2-top"><img src="${enemyThumb(DB, c.boss)}" alt=""><div class="ch2-txt"><b>${c.name}</b><span>${c.desc}</span></div>
+        <div class="ch2-badges">${done.normal ? `<i class="ok">✓</i>` : ""}${done.hard ? `<i class="hard">✓</i>` : ""}</div></div>
+      ${c.hint ? `<div class="ch2-hint">💡 ${c.hint}</div>` : ""}
+      ${earned ? `<div class="ch-skins">${earned}</div>` : ""}
+      <div class="ch2-acts"><button class="btn small primary" data-ch="${c.id}">${done.normal ? "✓ " : ""}Normal</button><button class="btn small danger" data-chh="${c.id}">${done.hard ? "✓ " : ""}Hard</button></div><div class="ch2-hard">Hard: ${c.hard.label}</div></div>`;
+  }).join("");
+  m.innerHTML = pvPanel({ cls: "wide ch-pv", head: { ico: icon("skull"), ac: "#ff5f7e", title: "Challenges", sub: `${nDone}/${CHALLENGES.length} won · ten themed waves, then a boss`, closeId: "ch-close" },
+    body: `<div class="ch-pick2"><div class="ch-pr"><span>Element</span><div class="pv-scroll-x">${pills(game.chEl, "chel")}</div></div>
+        <div class="ch-pr"><span>Partner</span><div class="pv-scroll-x">${pills(game.chPartner, "chp", true)}</div></div>
+        <p class="pv-note">Read each hint and bring elements that answer it. A partner adds its towers and a reaction. Winning earns that challenge's builder look in your element.</p></div>
+      <div class="ch2-list">${cards}</div>` });
   m.classList.add("show");
   $("ch-close").onclick = () => m.classList.remove("show");
+  m.onclick = (e) => { if (e.target === m) m.classList.remove("show"); };
   m.querySelectorAll("[data-chel]").forEach((b) => b.onclick = () => { game.chEl = b.dataset.chel; openChallenges(); });
   m.querySelectorAll("[data-chp]").forEach((b) => b.onclick = () => { game.chPartner = b.dataset.chp || null; openChallenges(); });
   const go = (id, hard) => { m.classList.remove("show"); startRun({ gameMode: "solo", mode: "loop", corridors: 1, economy: "shared", status: "standard", pacing: "manual", elements: [game.chEl], partner: game.chPartner, ruleset: "expanded", mods: {}, challenge: { id, hard } }); };
@@ -1357,7 +1416,7 @@ function boot() {
   });
   loop.start();
   setInterval(() => { if (game.screen === "game" && game.state) { ui.updateTopBar(); ui.refreshPanels(); ui.updateEnemyOverview(); refreshAutoBtn(); refreshWaveFab(); refreshVsTimer(); if (game.spectate) refreshReplayBar(); } }, 250);
-  window.__skyhold = { openOnline, getSession: () => session, leaveOnline, game, view, renderer, cmd, DB, startRun, setView, enterCorridor, onTap, ui, botTick, openStats, openReplays, openChallenges, endScreen, watchReplay, loadReplays };
+  window.__skyhold = { openOnline, getSession: () => session, leaveOnline, game, view, renderer, cmd, DB, startRun, setView, enterCorridor, onTap, ui, botTick, openStats, openReplays, openChallenges, endScreen, watchReplay, loadReplays, showSummonCard, togglePause };
   // dev/test helper: fast-forward n ticks (bots included)
   window.__skyhold.ff = (n) => { for (let i = 0; i < n && game.driver; i++) { game.clock += 1 / 30; botTick(); game.driver.tick(); if (game.state.finished) break; } return game.state.tick; };
 }
@@ -1384,6 +1443,8 @@ function phaseRunning() {
 }
 
 function bindUI() {
+  // menu tiles: drawn icons (the emoji in the markup are only a fallback)
+  document.querySelectorAll(".mi[data-ico] > i").forEach((i) => { i.innerHTML = icon(i.parentElement.dataset.ico); });
   const ovp = $("enemy-overview");
   if (ovp) ovp.addEventListener("click", (e) => { if (e.target.closest(".ov-head")) { ovp._touched = true; ovp.classList.toggle("collapsed"); } });
   bind("btn-new-run", openSetup);
@@ -1493,9 +1554,11 @@ function bindUI() {
   bind("btn-send-panel", () => ui.toggleSendPanel());
   bind("btn-settings-ingame", () => togglePause(true));
   bind("pause-resume", () => togglePause(false));
-  bind("pause-restart", () => { togglePause(false); startRun(rematchCfg()); });
+  bind("pause-restart", () => armOrRun("pause-restart", () => { togglePause(false); startRun(rematchCfg()); }));
+  bind("pause-close", () => togglePause(false));
   bind("pause-save", () => { autosave(); ui.toast("Run saved to this device"); });
-  bind("pause-exit", () => { togglePause(false); if (game.online) { leaveOnline(); return; } storeReplay("Abandoned"); game.driver = null; showScreen("menu"); refreshMenu(); });
+  bind("pause-exit", () => armOrRun("pause-exit", () => { togglePause(false); if (game.online) { leaveOnline(); return; } storeReplay("Abandoned"); game.driver = null; showScreen("menu"); refreshMenu(); }));
+  decoratePause();
   bind("end-again", () => { const sc = $("end-screen"); if (sc) sc.classList.remove("show"); if (game.online) { leaveOnline(); openOnline(); return; } startRun(rematchCfg()); });
   bind("end-menu", () => { const sc = $("end-screen"); if (sc) sc.classList.remove("show"); if (game.online) { leaveOnline(); return; } game.driver = null; showScreen("menu"); refreshMenu(); });
   bind("btn-bestiary", () => ui.openBestiary());
@@ -1517,7 +1580,13 @@ function bindUI() {
     if (res.kind === "run") { $("save-modal").classList.remove("show"); restoreRun(res.data); ui.toast("Run imported!"); }
     else { meta = res.data; SaveSystem.saveMeta(meta); $("save-modal").classList.remove("show"); ui.toast("Progress imported!"); refreshMenu(); }
   });
-  bind("sm-reset", () => { if (confirm("Reset ALL progress? This cannot be undone.")) { if (SaveSystem) SaveSystem.resetAll(); meta = SaveSystem ? SaveSystem.loadMeta() : { mastery: {} }; ui.toast("Progress reset"); refreshMenu(); } });
+  // erasing everything asks for a second tap (no system dialog)
+  bind("sm-reset", () => {
+    const b = $("sm-reset");
+    if (!b.classList.contains("armed")) { b.classList.add("armed"); b.textContent = "Tap again to erase"; clearTimeout(b._t); b._t = setTimeout(() => { b.classList.remove("armed"); b.textContent = "Reset everything"; }, 4000); return; }
+    clearTimeout(b._t); b.classList.remove("armed"); b.textContent = "Reset everything";
+    if (SaveSystem) SaveSystem.resetAll(); meta = SaveSystem ? SaveSystem.loadMeta() : { mastery: {} }; ui.toast("Progress reset"); refreshMenu();
+  });
   const smFile = $("sm-file");
   if (smFile) smFile.onchange = (e) => { const f = e.target.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => { const t = $("save-text"); if (t) t.value = rd.result; ui.toast("File loaded — press Import"); }; rd.readAsText(f); };
   // keyboard (Circle's keys + corridor arrows)
@@ -1568,9 +1637,35 @@ function togglePause(force) {
   if (o) o.classList.toggle("show", want);
   game.paused = want && !game.online; // online: the pause menu doesn't stop the match
   const pr = $("pause-restart"); if (pr) pr.style.display = game.online ? "none" : "";
-  const ph = $("pause-title"); if (ph) ph.textContent = game.online ? "Menu — the match keeps running" : "Paused";
-  const px = $("pause-exit"); if (px) px.textContent = game.online ? "Leave Match" : "Exit to Menu";
+  const ph = $("pause-title"); if (ph) ph.textContent = game.online ? "Menu" : "Paused";
+  const px = $("pause-exit"); if (px) px.innerHTML = paIcon("home") + (game.online ? "Leave match<small>The match goes on without you</small>" : "Exit to menu<small>Saved as a replay</small>");
+  if (want) {
+    // a one-line summary of the run under the title; any armed "tap again" resets
+    disarmPause();
+    const p0 = game.state && game.state.players[game.me];
+    if (p0) {
+      const fld = myPlayer(), m = Math.floor((game.state.tick / SIM_HZ) / 60), sec = Math.floor((game.state.tick / SIM_HZ) % 60);
+      const els = runElementsOf(p0).map((e) => DB.ELEMENTS[e] ? DB.ELEMENTS[e].name : e).join(" + ");
+      setText("pause-sub", `${game.online ? "The match keeps running · " : ""}Wave ${fld.wave}${game.mode === "endless" ? "" : "/" + fld.totalWaves} · ♥ ${p0.lives} · ${m}:${String(sec).padStart(2, "0")}${els ? " · " + els : ""}`);
+    }
+  }
   refreshQualityButtons();
+}
+// pause-menu buttons: an icon from the shared set; Restart / Exit ask for a second tap
+const paIcon = (n) => icon(n);
+function decoratePause() {
+  document.querySelectorAll("#pause-overlay .pv-act[data-ico]").forEach((b) => { if (!b._dec) { b._dec = true; b.insertAdjacentHTML("afterbegin", icon(b.dataset.ico)); } });
+}
+let _pauseArm = null;
+function disarmPause() {
+  _pauseArm = null;
+  for (const id of ["pause-restart", "pause-exit"]) { const b = $(id); if (b) b.classList.remove("armed"); }
+}
+function armOrRun(id, run) {
+  if (_pauseArm === id) { disarmPause(); run(); return; }
+  disarmPause(); _pauseArm = id;
+  const b = $(id); if (b) b.classList.add("armed");
+  sound.play("click");
 }
 function setupSendButton() { const b = $("btn-send-panel"); if (!b) return; b.style.display = (game.gameMode === "competitive" || game.gameMode === "versus") ? "" : "none"; }
 

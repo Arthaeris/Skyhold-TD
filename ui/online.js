@@ -3,6 +3,7 @@
    in-match social layer (chat feed + input, emotes, mute, the "waiting for…" banner).
    It only talks to net/session.js; the game is started by the onStart callback. */
 import { icon, sigil } from "./icons.js";
+import { pvHead } from "./panel.js";
 import { savedName, saveName, cleanName, activeRoom, MAX_SEATS, MIN_SEATS } from "../net/session.js";
 
 export const EMOTES = [["hi", "👋 Hi!"], ["gg", "🤝 GG"], ["nice", "👏 Nice!"], ["oops", "😅 Oops"], ["help", "🆘 Help!"], ["incoming", "⚔ Incoming!"], ["lol", "😂"], ["angry", "😤"]];
@@ -29,9 +30,8 @@ export function createOnlineUI(o) {
   // ---- home --------------------------------------------------------------------------------
   function renderHome(prefill) {
     const ar = activeRoom();
-    root.innerHTML = `<div class="modal wide glass ol-modal"><button class="panel-close" id="ol-close">${icon("close")}</button>
-      <h2>Play Online</h2>
-      <p class="dim">Vs matches for 2–8 players: everyone owns a corridor, sends creeps around the ring and steals lives. Rooms are joined by code; the host can fill free seats with NPCs.${o.backend === "mock" ? " <b class='warn'>Local test server (?mocknet) — only tabs of this browser can join.</b>" : ""}</p>
+    root.innerHTML = `<div class="modal wide glass pv ol-modal">${pvHead({ ico: icon("globe"), ac: "#5bd6ff", title: "Play online", sub: "Vs matches for 2–8 players", closeId: "ol-close" })}<div class="pv-body">
+      <p class="pv-lead">Vs matches for 2–8 players: everyone owns a corridor, sends creeps around the ring and steals lives. Rooms are joined by code; the host can fill free seats with NPCs.${o.backend === "mock" ? " <b class='warn'>Local test server (?mocknet) — only tabs of this browser can join.</b>" : ""}</p>
       ${lastError ? `<div class="ol-error">⚠ ${esc(lastError)}</div>` : ""}
       <label class="ol-lbl">Your name</label>
       <input id="ol-name" class="ol-input" maxlength="16" placeholder="Nickname" value="${esc(savedName())}">
@@ -40,7 +40,7 @@ export function createOnlineUI(o) {
         <div class="ol-card"><b>Host a match</b><span class="dim">Create a room and share its code.</span><button class="btn primary" id="ol-create">Create room</button></div>
         <div class="ol-card"><b>Join a match</b><input id="ol-code" class="ol-input code" maxlength="6" placeholder="CODE" value="${esc(prefill || "")}"><button class="btn" id="ol-join">Join</button></div>
       </div>
-      <p class="dim ol-note">Online play uses the Expanded rules at 1× speed. Waves start on a shared timer. If someone drops out, the game waits up to 30 seconds, then an NPC plays their corridor until they return.</p></div>`;
+      <p class="dim ol-note">Online play uses the Expanded rules at 1× speed. Waves start on a shared timer. If someone drops out, the game waits up to 30 seconds, then an NPC plays their corridor until they return.</p></div></div>`;
     $("ol-close").onclick = close;
     const name = () => { const n = cleanName($("ol-name").value); saveName(n); return n; };
     const run = async (fn) => {
@@ -83,9 +83,9 @@ export function createOnlineUI(o) {
     }
     const cs = session.canStart();
     const link = location.origin + location.pathname + "?room=" + session.code + (o.backend === "mock" ? "&mocknet" : "");
-    root.innerHTML = `<div class="modal wide glass ol-modal">
-      <div class="ol-head"><h2>Room <span class="ol-code">${session.code}</span></h2><button class="btn small" id="ol-copy">🔗 Copy invite</button><button class="btn small ghost" id="ol-leave">Leave</button></div>
-      <div class="ol-cols">
+    root.innerHTML = `<div class="modal wide glass pv ol-modal">${pvHead({ ico: icon("users"), ac: "#5bd6ff", title: `Room <span class="ol-code">${session.code}</span>`, sub: `${n} seats · ${host ? "you host this room" : "waiting for the host"}` })}
+      <div class="ol-bar"><button class="btn small" id="ol-copy">🔗 Copy invite</button><button class="btn small ghost" id="ol-leave">Leave room</button></div>
+      <div class="pv-body"><div class="ol-cols">
         <div class="ol-col">
           <div class="ol-sub">Seats ${host ? `<span class="opt-seg"><button class="seg small" id="ol-n-minus">−</button><b>${n}</b><button class="seg small" id="ol-n-plus">+</button></span>` : `<b>${n}</b>`}</div>
           <div class="os-list">${seats}</div>
@@ -99,10 +99,10 @@ export function createOnlineUI(o) {
           <div class="ol-chat-in"><input id="ol-say" class="ol-input" maxlength="140" placeholder="Say something…"><button class="btn small" id="ol-send">Send</button></div>
         </div>
       </div>
-      <div class="ol-foot">
+      </div><footer class="pv-foot">
         ${me.kind === "human" && !host ? `<button class="btn big ${me.ready ? "" : "primary"}" id="ol-ready">${me.ready ? "✓ Ready — tap to cancel" : "I'm ready"}</button>` : ""}
-        ${host ? `<button class="btn big primary ${cs.ok ? "" : "disabled"}" id="ol-start">${cs.ok ? "Start match" : esc(cs.why)}</button>` : `<p class="dim">The host starts the match when everyone is ready.</p>`}
-      </div></div>`;
+        ${host ? `<button class="btn big primary ${cs.ok ? "" : "disabled"}" id="ol-start">${cs.ok ? "Start match" : esc(cs.why)}</button>` : `<p class="dim ol-wait">The host starts the match when everyone is ready.</p>`}
+      </footer></div>`;
     $("ol-copy").onclick = async () => { try { await navigator.clipboard.writeText(link); toast("Invite link copied"); } catch (e) { toast("Code: " + session.code); } };
     $("ol-leave").onclick = async () => { await session.leave(); view = "home"; render(); };
     const rd = $("ol-ready"); if (rd) rd.onclick = () => session.setReady(!me.ready);

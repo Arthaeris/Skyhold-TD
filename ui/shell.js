@@ -7,6 +7,7 @@
    It never mutates sim state; user intent becomes COMMANDS through opts.cmd (exactly as in Circle). */
 import * as fx from "../sim/fx.js";
 import { generateWave, waveAffix, AFFIXES } from "../sim/waves.js";
+import { pvPanel, pvHead, pvSec, pvTiles, pvMeter, pvPips, pvTabs, bindPvTabs } from "./panel.js";
 import { icon, sigil } from "./icons.js";
 import { traitList, MOB_BY_ID, ARMOR_CLASSES, SEND_TIERS } from "../content/mobs.js";
 import * as R from "../content/rules.js";
@@ -468,6 +469,7 @@ export function createUI(opts) {
     if (full != null) p.classList.toggle("full", !!full);
     return p;
   }
+  const capW = (x) => String(x || "").replace(/^./, (c) => c.toUpperCase());
   const chip = (html, cls, attrs) => `<span class="chip${cls ? " " + cls : ""}"${attrs || ""}>${html}</span>`;
 
   // ---- tower card (opened together with the tower ring) -------------------------
@@ -491,32 +493,41 @@ export function createUI(opts) {
       color: el.color,
       thumb: `<img class="sh-thumb" src="${thumb(def.id, stage)}" alt="">`,
       title: `${def.name} <span class="lv">Lv ${tw.level}${maxed ? " · MAX" : "/10"}</span>`,
-      sub: `${sigil(def.element, "xs")} ${el.name} · ${arche} · targets ${tw.targetMode || "first"}`,
+      sub: `${sigil(def.element, "xs")} ${el.name} · ${capW(arche)} · targets ${tw.targetMode || "first"}`,
     });
     const delta = (a, b, f) => (b != null && f(b) !== f(a)) ? `<em>→${f(b)}</em>` : "";
     const r0 = (x) => Math.round(x), r1 = (x) => x.toFixed(1), r2 = (x) => x.toFixed(2);
-    let chips = "";
-    if (def.archetype !== "support") chips += chip(`⚔ <b>${r0(cur.dmg * cur.rate)}</b> DPS${delta(cur.dmg * cur.rate, nxt && nxt.dmg * nxt.rate, r0)}`);
-    chips += chip(`◎ <b>${r1(cur.range)}</b>${delta(cur.range, nxt && nxt.range, r1)}`, "", ` title="Range"`);
-    chips += chip(`⏱ <b>${r2(cur.rate)}</b>/s`, "", ` title="Attacks per second"`);
-    if (def.status) chips += chip(`${DB.STATUSES[def.status].icon} ${DB.STATUSES[def.status].name}`);
+    // the three numbers that matter, with what the next level brings
+    const tiles = [];
+    if (def.archetype !== "support") tiles.push(`<div class="tc-tile"><span>DPS</span><b>${r0(cur.dmg * cur.rate)}${delta(cur.dmg * cur.rate, nxt && nxt.dmg * nxt.rate, r0)}</b></div>`);
+    else tiles.push(`<div class="tc-tile"><span>Aura</span><b>${def.status ? DB.STATUSES[def.status].icon : "✦"}</b></div>`);
+    tiles.push(`<div class="tc-tile"><span>Range</span><b>${r1(cur.range)}${delta(cur.range, nxt && nxt.range, r1)}</b></div>`);
+    tiles.push(`<div class="tc-tile"><span>Speed</span><b>${r2(cur.rate)}<small>/s</small>${delta(cur.rate, nxt && nxt.rate, r2)}</b></div>`);
+    // what it hits, in one quiet line
+    let tags = "";
+    if (v.state.x && arche !== "support") tags += `<span class="tc-tag" style="--dc:${tg.dt.color}" title="${tg.dt.desc}">${tg.dt.icon} ${tg.dt.name}</span>`;
+    if (def.status) tags += `<span class="tc-tag">${DB.STATUSES[def.status].icon} ${DB.STATUSES[def.status].name}</span>`;
     if (v.state.x) {
-      if (arche !== "support") chips += chip(`${tg.dt.icon} ${tg.dt.name}`, "dt", ` style="--dc:${tg.dt.color}" title="${tg.dt.desc}"`);
-      chips += chip(`🪽 ${air ? "Hits air" : "Ground only"}`, air ? "" : "no");
-      chips += chip(`👁 ${det ? "Sees stealth" : "Sees stealth at Lv 7"}`, det ? "good" : "no", ` title="${det ? "Reveals invisible creeps in its range" : "Light towers, support towers and any tower at level 7+ detect stealth"}"`);
-      if (tw.bState) chips += chip(`🔨 ${tw.bState === 1 ? "Waiting for builder" : "Building " + Math.round((1 - tw.bT / (tw.bMax || 1)) * 100) + "%"}`, "warn");
-      if (tw.upT > 0) chips += chip("⬆ Upgrading…", "warn");
-      if (tw.stunT > 0) chips += chip("💫 Stunned", "warn");
-      if (tw.jamT > 0 || (tw.xRate && tw.xRate < fx.ONE)) chips += chip("🐌 Slowed", "warn");
-      if (tw.curseT > 0 || (tw.xDmg && tw.xDmg < fx.ONE)) chips += chip("🧪 Weakened", "warn");
-      if (tw.confused) chips += chip("🌀 Confused", "warn");
-      if (corr.builder && corr.builder.at === tw.id) chips += chip("✨ Inspired +10%", "good");
+      tags += `<span class="tc-tag ${air ? "" : "no"}">🪽 ${air ? "Hits air" : "Ground only"}</span>`;
+      tags += `<span class="tc-tag ${det ? "good" : "no"}" title="${det ? "Reveals invisible creeps in its range" : "Light towers, support towers and any tower at level 7+ detect stealth"}">👁 ${det ? "Sees stealth" : "Stealth at Lv 7"}</span>`;
     }
-    if (maxed && slots > tw.mutations.length) chips += chip(`🧬 ${slots - tw.mutations.length} mutation${slots - tw.mutations.length > 1 ? "s" : ""} — More`, "gold", ` data-more`);
-    const peek = `<div class="xp-row"><span class="stars" title="Expertise">${stars}</span><div class="exp-bar"><div style="width:${expPct * 100}%"></div></div><span class="xp-n">${tw.expert < 5 ? tw.kills + "/" + expNeed : "MAX"}</span></div><div class="chips">${chips}</div>`;
+    // only when something needs attention
+    const alerts = [];
+    if (v.state.x) {
+      if (tw.bState) alerts.push(`🔨 ${tw.bState === 1 ? "Waiting for the builder" : "Building " + Math.round((1 - tw.bT / (tw.bMax || 1)) * 100) + "%"}`);
+      if (tw.upT > 0) alerts.push("⬆ Upgrading…");
+      if (tw.stunT > 0) alerts.push("💫 Stunned");
+      if (tw.jamT > 0 || (tw.xRate && tw.xRate < fx.ONE)) alerts.push("🐌 Slowed");
+      if (tw.curseT > 0 || (tw.xDmg && tw.xDmg < fx.ONE)) alerts.push("🧪 Weakened");
+      if (tw.confused) alerts.push("🌀 Confused");
+    }
+    const good = corr.builder && corr.builder.at === tw.id ? `<span class="tc-good">✨ Inspired · +10% attack speed</span>` : "";
+    const mutHint = maxed && slots > tw.mutations.length ? `<button class="tc-mut" data-more>🧬 ${slots - tw.mutations.length} mutation${slots - tw.mutations.length > 1 ? "s" : ""} to choose ${icon("right", "xs")}</button>` : "";
+    const peek = `<div class="tc-tiles">${tiles.join("")}</div><div class="tc-tags">${tags}</div>${alerts.length ? `<div class="tc-alert">${alerts.join(" · ")}</div>` : ""}${good}${mutHint}
+      <div class="xp-row"><span class="stars" title="Expertise">${stars}</span><div class="exp-bar"><div style="width:${expPct * 100}%"></div></div><span class="xp-n">${tw.expert < 5 ? tw.kills + "/" + expNeed + " kills" : "MAX"}</span></div>`;
     let more = `${def.desc ? `<p class="sh-desc">${def.desc}</p>` : ""}
       <div class="tp-target"><span class="tt-lbl">Target</span>${["first", "last", "strong", "weak"].map((m) => `<button class="tm-btn ${(tw.targetMode || "first") === m ? "sel" : ""}" data-tm="${m}">${m[0].toUpperCase() + m.slice(1)}</button>`).join("")}</div>
-      <div class="tp-stats">${statRow("Damage", r0(cur.dmg), nxt && r0(nxt.dmg))}${statRow("Range", r1(cur.range), nxt && r1(nxt.range))}${statRow("Attack speed", r2(cur.rate), nxt && r2(nxt.rate))}${statRow("Kills", tw.kills)}${tw.dmgDone ? statRow("Damage dealt", Math.round(tw.dmgDone / 65536)) : ""}${statRow("Sell refund", "+" + sellRefund(def, tw.level, tw))}</div>
+      <div class="tp-stats">${statRow("Damage per hit", r0(cur.dmg), nxt && r0(nxt.dmg))}${statRow("Kills", tw.kills)}${tw.dmgDone ? statRow("Damage dealt", Math.round(tw.dmgDone / 65536)) : ""}${statRow("Sell refund", "+" + sellRefund(def, tw.level, tw))}</div>
       ${towerSynergyHtml(def, v)}`;
     if (maxed) {
       more += `<div class="tp-mut-head">Mutations ${slots ? `(${tw.mutations.length}/${slots})` : "(locked — raise Mastery)"}</div><div class="tp-muts">`;
@@ -568,14 +579,19 @@ export function createUI(opts) {
     else if (e.byBuilder) chips += chip("🏮 Spotted by your builder", "good");
     if (e.invulnT > 0) chips += chip("✨ Invulnerable", "warn");
     const cls = e.cls || (m && m.armorClass) || "medium";
+    let tiles = "";
     { const ac = ARMOR_CLASSES[cls];
-      if (ac) { chips += chip(`🛡 ${ac.name}`, "ac", ` style="color:${ac.color}" data-tip="ac"`); tips.ac = `<b>${ac.name} armour</b> — ${R.armorClassText(cls)}. Its armour value ${toI(e.armor)} cuts damage by ${R.armorReductionPct(toI(e.armor) + toI(e.auraArmor || 0))}%.`; } }
+      const cut = v.state.x ? R.armorReductionPct(toI(e.armor) + toI(e.auraArmor || 0)) : 0;
+      if (ac) { tips.ac = `<b>${ac.name} armour</b> — ${R.armorClassText(cls)}. Its armour value ${toI(e.armor)} cuts damage by ${cut}%.`; }
+      tiles = `<div class="tc-tiles"><button class="tc-tile" data-tip="ac" style="text-align:left"><span>Armour</span><b style="color:${ac ? ac.color : "inherit"};font-size:14px">${ac ? ac.name : "—"}${cut ? `<small> −${cut}%</small>` : ""}</b></button>
+        <div class="tc-tile"><span>Reward</span><b style="color:#ffe68a">+${e.reward}</b></div>
+        <div class="tc-tile"><span>If it leaks</span><b style="color:#ff8fa0">♥ −${e.boss ? 2 : 1}</b></div></div>`; }
     if (m) {
       traitList(m.traits).forEach(([i, n, d], k) => { chips += chip(`${i} ${n}`, "", ` data-tip="t${k}"`); tips["t" + k] = `<b>${n}</b> — ${d}`; });
     }
     if (affix) tips.affix = `<b>${affix.name}</b> — ${affix.desc}`;
     const tip = _epTip && tips[_epTip] ? `<div class="tip-line">${tips[_epTip]}</div>` : "";
-    const peek = `${bars}<div class="chips">${chips || "<span class='chip no'>No special traits</span>"}</div>${tip}`;
+    const peek = `${bars}${tiles}<div class="chips">${chips || "<span class='chip no'>No special traits</span>"}</div>${tip}`;
     const adapts = Object.keys(e.adapt || {}).map((k) => { const a = ADAPT_INFO[k] || { icon: "↻", name: k }; const n = e.adapt[k]; return chip(`${a.icon} ${a.name}${n > 1 ? " ×" + n : ""}`, "gold"); });
     const more = `${m ? `<p class="sh-desc">${m.desc}</p>` : ""}<div class="tp-stats">${statRow("Armour", toI(e.armor) + (e.auraArmor ? " +" + toI(e.auraArmor) : "") + (v.state.x ? ` (−${R.armorReductionPct(toI(e.armor) + toI(e.auraArmor || 0))}% damage)` : ""))}${statRow("Reward", e.reward)}${statRow("Loops", e.loopCount)}</div>${adapts.length ? `<div class="tp-mut-head">↻ Loop adaptations</div><div class="chips">${adapts.join("")}</div>` : ""}`;
     return sheetHTML(head, peek, more);
@@ -695,7 +711,7 @@ export function createUI(opts) {
     const total = v.state.mode === "endless" ? "∞" : pl.totalWaves;
     let alive = 0; const onField = {};
     for (const e of v.state.enemies) if (e.alive && e.owner === v.fieldId) { alive++; onField[e.type] = (onField[e.type] || 0) + 1; }
-    const head = sheetHead({ title: "Wave guide", sub: `Wave ${pl.wave}/${total} · ${alive} on the field` , thumb: `<div class="sh-ico">${icon("wave")}</div>` });
+    const head = sheetHead({ title: "Wave guide", sub: `Wave ${pl.wave}/${total} · ${alive ? alive + " creeps on the field" : "field clear"}`, thumb: `<div class="sh-ico">${icon("wave")}</div>` });
     let body = "";
     const tipFor = {};
     if (alive) {
@@ -808,13 +824,23 @@ export function createUI(opts) {
     const fams = [["all", "All"], ["swarm", "Swarms"], ["runner", "Runners"], ["brute", "Brutes"], ["flyer", "Flyers"], ["stealth", "Stealth"], ["disruptor", "Disruptors"], ["support", "Support"], ["death", "Death"], ["resistant", "Resistant"], ["summoner", "Summoners"], ["trickster", "Tricksters"], ["el", "Elemental"], ["elite", "Elites"]];
     const ELS = ["fire", "ice", "nature", "storm", "light", "darkness", "mech", "abnormal"];
     const list = (DB.MOBS_EXPANDED || []).map((id) => MOB_BY_ID[id]).filter((m) => _bstFilter === "all" || m.family === _bstFilter || (_bstFilter === "el" && ELS.includes(m.family)));
-    mo.innerHTML = `<div class="modal wide glass"><button class="panel-close" id="bst-close">${icon("close")}</button><h2>Bestiary</h2>
-      <p class="dim">The ${DB.MOBS_EXPANDED.length} creeps of Skyhold. They join waves from the wave shown, and all but the Treasure Goblin can be sent in Vs matches. Each armour class takes more from some damage types: Light from Physical, Medium from Blast, Heavy from Magic, Fortified from Blast, Ethereal from Magic.</p>
-      <div class="bst-filter">${fams.map(([k, n]) => `<button class="seg ${k === _bstFilter ? "sel" : ""}" data-bf="${k}">${n}</button>`).join("")}</div>
-      <div class="bst-grid">${list.map((m) => { const ac = ARMOR_CLASSES[m.armorClass]; return `<div class="bst-card"><img src="${ethumb(m.id)}" alt=""><b>${m.name}${m.pack > 1 ? " ×" + m.pack : ""}</b><div class="meta"><span style="color:${ac.color}">${ac.name}</span><span>♥ ${m.hp} · W${m.minWave}${m.tier ? " · T" + SEND_TIERS[m.tier].name : ""}</span></div><div class="tr-list" style="justify-content:flex-start;margin:0">${traitList(m.traits).slice(0, 4).map(([i, n, d]) => `<span class="tr-tag" title="${d}">${i} ${n}</span>`).join("")}</div><span class="dim">${m.desc}</span></div>`; }).join("")}</div></div>`;
+    const weak = { light: "Physical", medium: "Blast", heavy: "Magic", fortified: "Blast", ethereal: "Magic" };
+    const legend = Object.keys(ARMOR_CLASSES).filter((k) => weak[k]).map((k) => `<span class="bx-ac" style="--ac:${ARMOR_CLASSES[k].color}"><b>${ARMOR_CLASSES[k].name}</b> takes more from ${weak[k]}</span>`).join("");
+    const card = (m) => { const ac = ARMOR_CLASSES[m.armorClass]; const tr = traitList(m.traits); return `<button class="bx-card" style="--ac:${ac.color}" data-bx="${m.id}">
+        <div class="bx-pic"><img src="${ethumb(m.id)}" alt="" loading="lazy"><span class="bx-acl">${ac.name}</span></div>
+        <div class="bx-txt"><b>${m.name}${m.pack > 1 ? ` <i>×${m.pack}</i>` : ""}</b>
+          <span class="bx-meta">♥ ${m.hp} · from wave ${m.minWave}${m.tier ? " · " + SEND_TIERS[m.tier].name : ""}</span>
+          ${tr.length ? `<span class="bx-tr">${tr.slice(0, 3).map(([i, n]) => `<i>${i} ${n}</i>`).join("")}${tr.length > 3 ? `<i>+${tr.length - 3}</i>` : ""}</span>` : ""}
+          <span class="bx-desc">${m.desc}${tr.length ? `<br>${tr.map(([i, n, d]) => `${i} <b>${n}</b> — ${d}`).join("<br>")}` : ""}</span></div></button>`; };
+    mo.innerHTML = pvPanel({ cls: "wide bx-pv", head: { ico: icon("book"), ac: "#c77dff", title: "Bestiary", sub: `${list.length} of ${DB.MOBS_EXPANDED.length} creeps · tap one for its traits`, closeId: "bst-close" },
+      tabs: `<div class="bx-filter pv-scroll-x">${fams.map(([k, n]) => `<button class="seg ${k === _bstFilter ? "sel" : ""}" data-bf="${k}">${n}</button>`).join("")}</div>`,
+      body: `<details class="pv-details bx-legend"><summary>${icon("shield", "xs")} Armour classes <i>${icon("right", "xs")}</i></summary><div class="bx-acs">${legend}</div></details>
+        <div class="bx-grid">${list.map(card).join("")}</div>` });
     mo.classList.add("show");
     $("bst-close").onclick = () => mo.classList.remove("show");
+    mo.onclick = (e) => { if (e.target === mo) mo.classList.remove("show"); };
     mo.querySelectorAll("[data-bf]").forEach((b) => b.onclick = () => { _bstFilter = b.dataset.bf; openBestiary(); });
+    mo.querySelectorAll("[data-bx]").forEach((b) => b.onclick = () => { b.classList.toggle("open"); sfx("click"); });
   }
 
   // ---- send panel (competitive + versus): flat costs, 5 upgrade levels ------
@@ -1091,7 +1117,7 @@ export function createUI(opts) {
     const skp = $("skin-picker");
     if (skp && opts.getSkins) {
       const cur = opts.getSkins().find((k) => k.id === opts.getSkin()) || { name: "Elemental" };
-      skp.innerHTML = `<span class="sk-lbl">🔨 Builder</span><button class="skin-btn sel" id="skin-open">${cur.name} <i class="dim">· change</i></button>`;
+      skp.innerHTML = `<button class="pv-row" id="skin-open" style="--ac:#7fd0ff"><div class="r-ico">${icon("hammer")}</div><div class="r-main"><b>${cur.name}</b><span>Your builders wear this look</span></div><div class="r-side">Change ${icon("right", "xs")}</div></button>`;
       $("skin-open").onclick = () => openWardrobe(() => renderSetup(setup, availElements));
     }
     // elements
@@ -1147,7 +1173,8 @@ export function createUI(opts) {
     };
     const card = (k) => `<button class="wd-skin${k.id === cur ? " worn" : ""}${k.id === _wdSel ? " sel" : ""}${k.unlocked ? "" : " locked"}" data-skin="${k.id}" title="${k.desc}">${portrait(k)}<b>${k.unlocked ? "" : "🔒 "}${k.name}</b><span>${k.id === cur ? "Equipped" : k.unlocked ? "Unlocked" : k.desc}</span></button>`;
     const group = (title, list, note) => list.length ? `<div class="wd-group"><div class="wd-head">${title}<span class="dim">${list.filter((k) => k.unlocked).length}/${list.length}</span></div>${note ? `<p class="dim wd-note">${note}</p>` : ""}<div class="wd-grid">${list.map(card).join("")}</div></div>` : "";
-    m.innerHTML = `<div class="modal wide glass wardrobe"><button class="panel-close" id="wd-close">${icon("close")}</button><h2>Builders</h2>
+    const nOwn = skins.filter((k) => k.unlocked).length;
+    m.innerHTML = `<div class="modal wide glass pv wardrobe">${pvHead({ ico: icon("hammer"), ac: "#7fd0ff", title: "Builders", sub: `${nOwn}/${skins.length} looks unlocked · tap one to try it on`, closeId: "wd-close" })}
       <div class="wd-stage">
         <canvas id="wd-canvas" aria-label="Builder preview — drag to turn"></canvas>
         <button class="wd-arrow l" id="wd-prev" aria-label="Previous look">${icon("left")}</button>
@@ -1155,7 +1182,7 @@ export function createUI(opts) {
         <span class="wd-hint">↔ Drag to turn</span>
         <div class="wd-info"><div><b id="wd-name"></b><span id="wd-desc"></span></div><button class="btn primary small" id="wd-equip">Equip</button></div>
       </div>
-      <div class="wd-list">
+      <div class="pv-body wd-list">
       ${group("Classics", skins.filter((k) => k.family === "general"))}
       ${group("Sealbreakers", skins.filter((k) => k.family === "seal"), "Beat the Sealed One — the bonus fight after the last wave — with that element in your run.")}
       ${group("Challenge looks", skins.filter((k) => k.family === "challenge"), "Only from Challenges: beat one with an element to earn its look in that element.")}</div></div>`;
@@ -1192,50 +1219,76 @@ export function createUI(opts) {
   }
 
 
-  // ---- mastery screen + synergy codex ------------------------------------------
-  function openMastery() {
+  // ---- mastery screen + reactions codex (one panel, two tabs) --------------------------
+  let _cxFilter = "all";
+  function openMastery(tab = "mastery") {
     const m = $("mastery-screen"); if (!m) return;
     const meta = getMeta();
     const avail = DB.availableElements(meta.mastery || {});
-    let html = `<div class="modal wide"><button class="panel-close" id="ms-close">${icon("close")}</button><h2>Elemental Mastery</h2><div class="mastery-grid">`;
+    let total = 0;
+    let cards = "";
     DB.ELEMENT_ORDER.forEach((eid) => {
       const el = DB.ELEMENTS[eid];
-      const lvl = (meta.mastery && meta.mastery[eid]) || 0;
+      const lvl = (meta.mastery && meta.mastery[eid]) || 0; total += lvl;
       const wins = (meta.elementWins && meta.elementWins[eid]) || 0;
       const locked = !avail.includes(eid);
-      const nextReq = lvl >= 5 ? "MAX" : lvl === 4 ? "Reach Endless wave 50" : `Win ${DB.MASTERY.winsRequired[lvl + 1]} runs`;
       const slots = DB.unlockedTowerSlots(lvl);
-      const towers = DB.TOWERS.filter((t) => t.element === eid);
-      html += `<div class="mastery-card ${locked ? "locked" : ""}" style="--ec:${el.color}">
-        <div class="mc-head">${sigil(eid)} <span>${el.name}</span> ${locked ? icon("lock", "xs") : ""}</div>
-        <div class="mc-towers">${towers.map((t) => `<img src="${thumb(t.id)}" class="${t.slot < slots && !locked ? "" : "off"}" title="${t.name}" alt="">`).join("")}</div>
-        <div class="mc-lvl">Mastery ${lvl}/5</div>
-        <div class="mc-pips">${[1, 2, 3, 4, 5].map((i) => `<span class="${i <= lvl ? "on" : ""}"></span>`).join("")}</div>
-        <div class="mc-req">${locked ? unlockHint(eid) : nextReq}</div>
-        <div class="mc-wins">Wins with element: ${wins}</div></div>`;
+      const towers = DB.TOWERS.filter((t) => t.element === eid).sort((a, b) => a.slot - b.slot);
+      let prog, frac = 0, next = "";
+      if (locked) prog = unlockHint(eid).replace(/^Unlock: /, "Unlocks when ");
+      else if (lvl >= 5) { prog = "Mastered"; frac = 1; }
+      else if (lvl === 4) prog = "Reach Endless wave 50";
+      else { const need = DB.MASTERY.winsRequired[lvl + 1]; frac = Math.min(1, wins / need); prog = `${Math.min(wins, need)}/${need} wins`; }
+      if (!locked && lvl < 5) { const u = (DB.MASTERY.unlocks[lvl + 1] || []); next = u.length ? "Next: " + u.join(", ") : ""; }
+      cards += `<div class="ms-card${locked ? " locked" : ""}" style="--ac:${el.color}">
+        <div class="ms-top">${sigil(eid, "sm")}<b>${el.name}</b>${locked ? icon("lock", "xs") : pvPips(lvl, 5, el.color)}</div>
+        <div class="ms-towers">${towers.map((t) => `<span class="${t.slot < slots && !locked ? "" : "off"}"><img src="${thumb(t.id)}" alt="" title="${t.name}"></span>`).join("")}</div>
+        ${locked ? "" : pvMeter(frac, el.color)}
+        <div class="ms-prog"><span>${prog}</span>${next ? `<i>${next}</i>` : ""}</div></div>`;
     });
-    html += `</div>`;
-    html += codexHTML();
-    html += `</div>`;
-    m.innerHTML = html; m.classList.add("show");
+    const tabs = pvTabs([["mastery", "Mastery"], ["codex", "Reactions"]], tab);
+    m.innerHTML = pvPanel({ cls: "wide mastery-pv", head: { ico: icon("trophy"), ac: "#ffd23d", title: "Mastery", sub: `${total}/${DB.ELEMENT_ORDER.length * 5} levels · win runs with an element to raise it`, closeId: "ms-close" }, tabs,
+      body: `<div data-pane="mastery"${tab === "mastery" ? "" : " hidden"}><p class="pv-lead">Every win with an element counts toward its Mastery. Each level unlocks another of its towers, then mutation slots.</p><div class="ms-grid">${cards}</div></div>
+        <div data-pane="codex"${tab === "codex" ? "" : " hidden"}>${codexHTML()}</div>` });
+    m.classList.add("show");
+    bindPvTabs(m);
+    bindCodex(m);
     $("ms-close").onclick = () => m.classList.remove("show");
+    m.onclick = (e) => { if (e.target === m) m.classList.remove("show"); };
   }
   // ---- reactions codex: every element pair, one reaction each ---------------------------
   function codexHTML() {
     const v = getView(); const run = v && v.state && v.player ? (v.player.buildable || v.player.elements) : [];
-    let h = `<h2 class="codex-head">${icon("flask")} Element Reactions</h2>
-      <p class="dim codex-note">Every pair of elements has one reaction. A creep carrying a status from one element (🔥 Burning, ❄ Chilled…) that is <b>attacked</b> by a tower of the other element reacts: the status is used up and the effect fires. Auras set statuses up; attacks set reactions off. Each creep can react once per second. "Power" is the attacking tower's damage per second.</p><div class="codex-list">`;
-    for (const s of R.SYNERGIES_X) {
-      const live = run.includes(s.a) && run.includes(s.b);
-      h += `<div class="codex-row${live ? " live" : ""}"><span class="cx-combo">${sigil(s.a, "xs")} ${DB.ELEMENTS[s.a].name} <span class="dim">+</span> ${sigil(s.b, "xs")} ${DB.ELEMENTS[s.b].name}</span><span class="cx-name" style="color:${s.color}">${s.icon} ${s.name}</span><span class="cx-eff">${s.text}</span>${live ? `<span class="cx-live">in this run</span>` : ""}</div>`;
+    const rows = R.SYNERGIES_X.map((s) => ({ s, live: run.includes(s.a) && run.includes(s.b) }))
+      .filter((r) => _cxFilter === "all" || r.s.a === _cxFilter || r.s.b === _cxFilter)
+      .sort((a, b) => (b.live ? 1 : 0) - (a.live ? 1 : 0));
+    const filt = `<div class="pv-scroll-x cx-filter"><button class="seg ${_cxFilter === "all" ? "sel" : ""}" data-cxf="all">All</button>${DB.ELEMENT_ORDER.map((e) => `<button class="seg cx-el ${_cxFilter === e ? "sel" : ""}" data-cxf="${e}" style="--ec:${DB.ELEMENTS[e].color}" aria-label="${DB.ELEMENTS[e].name}">${sigil(e, "xs")}</button>`).join("")}</div>`;
+    let h = `<p class="pv-lead">Every pair of elements has one reaction. When a creep carrying one element's status (🔥 Burning, ❄ Chilled…) is <b>attacked</b> by a tower of the other element, the status is used up and the effect fires — at most once a second per creep. "Power" is the attacker's damage per second.</p>${filt}<div class="cx-list">`;
+    for (const { s, live } of rows) {
+      h += `<div class="cx-row${live ? " live" : ""}" style="--ac:${s.color}"><div class="cx-pair">${sigil(s.a, "sm")}<i>+</i>${sigil(s.b, "sm")}</div><div class="cx-main"><b>${s.icon} ${s.name}${live ? ` <span class="cx-live">In this run</span>` : ""}</b><span>${s.text}</span></div></div>`;
     }
     return h + `</div>`;
   }
+  function bindCodex(root) {
+    root.querySelectorAll("[data-cxf]").forEach((b) => b.onclick = () => {
+      _cxFilter = b.dataset.cxf; sfx("click");
+      const pane = root.querySelector('[data-pane="codex"]') || root.querySelector(".pv-body");
+      if (pane) { pane.innerHTML = codexHTML(); bindCodex(root); }
+    });
+  }
   function openCodex() {
     const m = $("mastery-screen"); if (!m) return;
-    m.innerHTML = `<div class="modal wide glass"><button class="panel-close" id="ms-close">${icon("close")}</button>${codexHTML()}</div>`;
-    m.classList.add("show");
-    $("ms-close").onclick = () => m.classList.remove("show");
+    const v = getView();
+    if (v && v.screen === "game") {
+      // in a run: just the reactions, with this run's pairs first
+      m.innerHTML = pvPanel({ cls: "wide mastery-pv", head: { ico: icon("flask"), ac: "#9cff7a", title: "Reactions", sub: "Element pairs and what they do", closeId: "ms-close" }, body: `<div data-pane="codex">${codexHTML()}</div>` });
+      m.classList.add("show");
+      bindCodex(m);
+      $("ms-close").onclick = () => m.classList.remove("show");
+      m.onclick = (e) => { if (e.target === m) m.classList.remove("show"); };
+      return;
+    }
+    openMastery("codex");
   }
   function unlockHint(eid) {
     if (eid === "light" || eid === "darkness") return "Unlock: all starters at Mastery 1";

@@ -61,14 +61,14 @@
         <button id="btn-new-run" class="btn big primary">New Run</button>
       </div>
       <div class="menu-icons">
-        <button id="btn-challenges" class="mi"><i>☠</i><span>Challenges</span></button>
-        <button id="btn-multiplayer" class="mi"><i>🌐</i><span>Online</span></button>
-        <button id="btn-mastery" class="mi"><i>🏆</i><span>Mastery</span></button>
-        <button id="btn-wardrobe" class="mi"><i>🔨</i><span>Builders</span></button>
-        <button id="btn-tutorial" class="mi"><i>🎓</i><span>How to play</span></button>
-        <button id="btn-bestiary" class="mi"><i>📖</i><span>Bestiary</span></button>
-        <button id="btn-replays" class="mi"><i>▶</i><span>Replays</span><b class="pill">0</b></button>
-        <button id="btn-menu-save" class="mi"><i>💾</i><span>Save</span></button>
+        <button id="btn-challenges" class="mi" data-ico="skull"><i>☠</i><span>Challenges</span></button>
+        <button id="btn-multiplayer" class="mi" data-ico="globe"><i>🌐</i><span>Online</span></button>
+        <button id="btn-mastery" class="mi" data-ico="trophy"><i>🏆</i><span>Mastery</span></button>
+        <button id="btn-wardrobe" class="mi" data-ico="hammer"><i>🔨</i><span>Builders</span></button>
+        <button id="btn-tutorial" class="mi" data-ico="grad"><i>🎓</i><span>Tutorial</span></button>
+        <button id="btn-bestiary" class="mi" data-ico="book"><i>📖</i><span>Bestiary</span></button>
+        <button id="btn-replays" class="mi" data-ico="play"><i>▶</i><span>Replays</span><b class="pill">0</b></button>
+        <button id="btn-menu-save" class="mi" data-ico="save"><i>💾</i><span>Save</span></button>
         <button id="btn-settings" class="mi" aria-label="Settings"><i><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/></svg></i><span>Settings</span></button>
       </div>
     </div>
@@ -76,24 +76,36 @@
 
   <!-- SETTINGS (menu gear and pause menu) -->
   <div id="settings-modal" class="modal-overlay">
-    <div class="modal glass settings-modal">
-      <button class="panel-close" id="settings-close" aria-label="Close"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
-      <h2>Settings</h2>
-      <div class="set-group"><div class="set-head">Audio</div>
-        <div class="set-row"><span>🎵 Music</span><button id="audio-music-on" class="toggle" role="switch" aria-checked="true"><i></i></button></div>
-        <div class="set-row sub"><span class="dim">Volume</span><input type="range" id="audio-music" min="0" max="100" value="40" aria-label="Music volume"></div>
-        <div class="set-row"><span>🔊 Sound effects</span><button id="audio-sfx-on" class="toggle" role="switch" aria-checked="true"><i></i></button></div>
-        <div class="set-row sub"><span class="dim">Volume</span><input type="range" id="audio-sfx" min="0" max="100" value="70" aria-label="Effects volume"></div>
+    <div class="modal glass pv narrow settings-pv">
+      <header class="pv-head">
+        <div class="pv-ico" style="--ac:#8f7dff"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/></svg></div>
+        <div class="pv-titles"><h2>Settings</h2><p class="pv-sub">Saved on this device</p></div>
+        <button class="panel-close" id="settings-close" aria-label="Close"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </header>
+      <div class="pv-body">
+        <section class="pv-sec"><div class="pv-sec-h"><span>Sound</span></div>
+          <div class="set-card">
+            <div class="set-line"><span class="sl-lbl">🎵 Music</span><input type="range" id="audio-music" min="0" max="100" value="40" aria-label="Music volume"><button id="audio-music-on" class="toggle" role="switch" aria-checked="true" aria-label="Music on/off"><i></i></button></div>
+            <div class="set-line"><span class="sl-lbl">🔊 Effects</span><input type="range" id="audio-sfx" min="0" max="100" value="70" aria-label="Effects volume"><button id="audio-sfx-on" class="toggle" role="switch" aria-checked="true" aria-label="Effects on/off"><i></i></button></div>
+          </div>
+        </section>
+        <section class="pv-sec"><div class="pv-sec-h"><span>Graphics</span></div>
+          <div class="set-card">
+            <div class="set-stack"><span class="sl-lbl">Quality<small>Auto steps down if your device struggles</small></span>
+              <span class="set-seg"><button class="seg" data-quality="auto">Auto</button><button class="seg" data-quality="high">High</button><button class="seg" data-quality="medium">Med</button><button class="seg" data-quality="low">Low</button></span></div>
+            <div class="set-stack"><span class="sl-lbl">Frame rate<small>Lower saves battery</small></span>
+              <span class="set-seg"><button class="seg" data-fps="30">30</button><button class="seg" data-fps="45">45</button><button class="seg sel" data-fps="60">60</button></span></div>
+            <div class="set-line"><span class="sl-lbl">🌦 Weather &amp; atmosphere<small>Embers, snow, rain, fireflies over each island</small></span><button id="gfx-weather" class="toggle" role="switch" aria-checked="true"><i></i></button></div>
+            <div class="set-line"><span class="sl-lbl">💡 Mood lighting<small>Each island lit in its own colours</small></span><button id="gfx-mood" class="toggle" role="switch" aria-checked="true"><i></i></button></div>
+          </div>
+        </section>
+        <section class="pv-sec set-keys-sec"><div class="pv-sec-h"><span>Keyboard</span></div>
+          <div class="set-keys">
+            <span><kbd>Space</kbd>Start wave</span><span><kbd>W</kbd>World view</span><span><kbd>Q</kbd><kbd>E</kbd>Corridors</span>
+            <span><kbd>1</kbd>–<kbd>5</kbd>Speed</span><span><kbd>Esc</kbd>Pause</span><span><kbd>Wheel</kbd>Zoom · drag to pan</span>
+          </div>
+        </section>
       </div>
-      <div class="set-group"><div class="set-head">Graphics</div>
-        <div class="set-row"><span>Quality</span>
-          <span class="opt-seg"><button class="seg" data-quality="auto">Auto</button><button class="seg" data-quality="high">High</button><button class="seg" data-quality="medium">Med</button><button class="seg" data-quality="low">Low</button></span></div>
-        <div class="set-row"><span>Frame rate</span>
-          <span class="opt-seg"><button class="seg" data-fps="30">30</button><button class="seg" data-fps="45">45</button><button class="seg sel" data-fps="60">60</button></span></div>
-        <div class="set-row"><span>🌦 Weather &amp; atmosphere<small class="set-note">Embers, snow, rain, fireflies… over each island</small></span><button id="gfx-weather" class="toggle" role="switch" aria-checked="true"><i></i></button></div>
-        <div class="set-row"><span>💡 Mood lighting<small class="set-note">Each island lit in its own colours; waves and bosses shift the mood</small></span><button id="gfx-mood" class="toggle" role="switch" aria-checked="true"><i></i></button></div>
-      </div>
-      <p class="dim keys">PC: Space start wave · W world · Q/E or ←/→ corridors · 1/2/3/5 speed · Esc pause · wheel zoom · drag to pan</p>
     </div>
   </div>
 
@@ -147,38 +159,39 @@
     </div>
     <!-- everything else lives one tap away -->
     <div id="more-modal" class="modal-overlay">
-      <div class="modal glass more-modal">
-        <button class="panel-close" id="more-close" aria-label="Close"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
-        <h2>Run options</h2>
-        <div id="more-body" class="more-body open">
-          <div class="opt-row solo-only"><span class="opt-lbl">Economy</span>
-            <span class="opt-seg">
-              <button class="seg" data-econ="shared">Gold</button>
-              <button class="seg" data-econ="elemental">Essence</button>
-            </span></div>
-          <div class="opt-row solo-only"><span class="opt-lbl">Waves start</span>
-            <span class="opt-seg">
-              <button class="seg" data-pacing="manual">When I'm ready</button>
-              <button class="seg" data-pacing="auto">Automatically</button>
-            </span></div>
-          <div class="mod-chips" id="mod-chips">
-            <button class="mod-chip" data-mod="builders">🔨 Builders</button>
-            <button class="mod-chip vs" data-mod="lifeSteal">❤ Life steal</button>
-            <button class="mod-chip vs" data-mod="sendStock">⏳ Send stock</button>
-            <button class="mod-chip vs" data-mod="turbo">⚡ Turbo income</button>
-            <button class="mod-chip" data-mod="noFlyers">🪽 No flyers</button>
-            <button class="mod-chip" data-mod="noStealth">👁 No stealth</button>
-            <button class="mod-chip" data-mod="noDisruptors">🪨 No disruptors</button>
-            <button class="mod-chip vs" data-mod="randomLanes">🎲 Random lanes</button>
-            <button class="mod-chip vs" data-mod="doppel">👥 Doppelgängers</button>
-            <button class="mod-chip vs" data-mod="anonymous">🎭 Anonymous</button>
-            <button class="mod-chip" data-mod="goldMult">💰 Gold ×1</button>
-            <button class="mod-chip" data-mod="livesMult">❤ Lives ×1</button>
+      <div class="modal glass pv more-pv">
+        <header class="pv-head">
+          <div class="pv-ico" style="--ac:#8f7dff"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></div>
+          <div class="pv-titles"><h2>Run options</h2><p class="pv-sub">Rules for this run only</p></div>
+          <button class="panel-close" id="more-close" aria-label="Close"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+        </header>
+        <div id="more-body" class="pv-body more-body open">
+          <div class="set-card solo-only">
+            <div class="set-stack"><span class="sl-lbl">Economy<small>One gold purse, or essence per element</small></span>
+              <span class="set-seg"><button class="seg" data-econ="shared">Gold</button><button class="seg" data-econ="elemental">Essence</button></span></div>
+            <div class="set-stack"><span class="sl-lbl">Waves start<small>Automatic gives a short countdown</small></span>
+              <span class="set-seg"><button class="seg" data-pacing="manual">When ready</button><button class="seg" data-pacing="auto">Automatic</button></span></div>
           </div>
-          <p class="opt-desc" id="setup-hint"></p>
-          <div id="skin-picker"></div>
+          <section class="pv-sec"><div class="pv-sec-h"><span>Modifiers</span></div>
+            <div class="mod-chips" id="mod-chips">
+              <button class="mod-chip" data-mod="builders">🔨 Builders</button>
+              <button class="mod-chip vs" data-mod="lifeSteal">❤ Life steal</button>
+              <button class="mod-chip vs" data-mod="sendStock">⏳ Send stock</button>
+              <button class="mod-chip vs" data-mod="turbo">⚡ Turbo income</button>
+              <button class="mod-chip" data-mod="noFlyers">🪽 No flyers</button>
+              <button class="mod-chip" data-mod="noStealth">👁 No stealth</button>
+              <button class="mod-chip" data-mod="noDisruptors">🪨 No disruptors</button>
+              <button class="mod-chip vs" data-mod="randomLanes">🎲 Random lanes</button>
+              <button class="mod-chip vs" data-mod="doppel">👥 Doppelgängers</button>
+              <button class="mod-chip vs" data-mod="anonymous">🎭 Anonymous</button>
+              <button class="mod-chip" data-mod="goldMult">💰 Gold ×1</button>
+              <button class="mod-chip" data-mod="livesMult">❤ Lives ×1</button>
+            </div>
+            <p class="opt-desc" id="setup-hint"></p>
+          </section>
+          <section class="pv-sec"><div class="pv-sec-h"><span>Builder look</span></div><div id="skin-picker"></div></section>
         </div>
-        <button class="btn primary" id="more-done">Done</button>
+        <footer class="pv-foot"><button class="btn primary" id="more-done">Done</button></footer>
       </div>
     </div>
   </section>
@@ -240,31 +253,48 @@
       </div>
     </div>
     <div id="pause-overlay" class="modal-overlay">
-      <div class="modal glass">
-        <h2 id="pause-title">Paused</h2>
-        <div class="modal-buttons">
-          <button id="pause-resume" class="btn primary">Resume</button>
-          <button id="pause-restart" class="btn">Restart</button>
-          <button id="pause-save" class="btn">Save</button>
-          <button id="pause-stats" class="btn">Match Stats</button>
-          <button id="pause-codex" class="btn">⚗ Reactions</button>
-          <button id="pause-tutorial" class="btn">🎓 How to Play</button>
-          <button id="pause-settings" class="btn">⚙ Settings</button>
-          <button id="pause-exit" class="btn ghost">Exit to Menu</button>
+      <div class="modal glass pv narrow pause-pv">
+        <header class="pv-head">
+          <div class="pv-ico" style="--ac:#8f7dff"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 6v12M15 6v12"/></svg></div>
+          <div class="pv-titles"><h2 id="pause-title">Paused</h2><p class="pv-sub" id="pause-sub"></p></div>
+          <button class="panel-close" id="pause-close" aria-label="Resume"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button>
+        </header>
+        <div class="pv-body">
+          <div class="pv-actions">
+            <button id="pause-stats" class="pv-act" data-ico="layers">Match stats<small>Leaks, towers, sends</small></button>
+            <button id="pause-codex" class="pv-act" data-ico="flask">Reactions<small>Element pairs</small></button>
+            <button id="pause-tutorial" class="pv-act" data-ico="grad">How to play<small>Guided run</small></button>
+            <button id="pause-settings" class="pv-act" data-ico="gear">Settings<small>Sound, graphics</small></button>
+            <button id="pause-save" class="pv-act wide" data-ico="save">Save run<small>Also saves by itself after every wave</small></button>
+          </div>
+          <div class="pv-sec">
+            <div class="pv-sec-h"><span>Leave this run</span></div>
+            <div class="pv-actions">
+              <button id="pause-restart" class="pv-act danger" data-ico="auto">Restart<small>Same setup</small></button>
+              <button id="pause-exit" class="pv-act danger" data-ico="home">Exit to menu<small>Saved as a replay</small></button>
+            </div>
+          </div>
         </div>
+        <footer class="pv-foot"><button id="pause-resume" class="btn primary big">Resume</button></footer>
       </div>
     </div>
     <div id="end-screen" class="modal-overlay">
-      <div class="modal glass">
-        <h1 id="end-title" class="win">VICTORY</h1>
-        <div id="end-body" class="end-body"></div>
-        <div class="modal-buttons">
+      <div class="modal glass pv end-pv">
+        <header class="end-hero">
+          <div class="end-badge" id="end-badge" aria-hidden="true"></div>
+          <h1 id="end-title" class="win">VICTORY</h1>
+          <p id="end-sub" class="end-sub"></p>
+        </header>
+        <div class="pv-body" id="end-body"></div>
+        <footer class="pv-foot">
           <button id="end-endless" class="btn primary">Continue into Endless</button>
           <button id="end-spectate" class="btn" style="display:none">Spectate the rest</button>
-          <button id="end-replay" class="btn">Watch Replay</button>
-          <button id="end-again" class="btn">Play Again</button>
-          <button id="end-menu" class="btn ghost">Main Menu</button>
-        </div>
+          <div class="pv-foot-row">
+            <button id="end-replay" class="btn">Replay</button>
+            <button id="end-again" class="btn">Play Again</button>
+            <button id="end-menu" class="btn ghost">Menu</button>
+          </div>
+        </footer>
       </div>
     </div>
   </section>
@@ -280,21 +310,25 @@
   <div id="online-modal" class="modal-overlay"></div>
 
   <div id="save-modal" class="modal-overlay">
-    <div class="modal wide glass">
-      <button class="panel-close" id="sm-close">✕</button>
-      <h2>Save · Import · Export</h2>
-      <p class="dim sm-note">Progress auto-saves on this device after every wave. Export a JSON backup you can re-import if storage is ever cleared. Circle Tower Wars exports import here too.</p>
-      <div class="sm-actions">
-        <button id="sm-export-run" class="btn">Show Current Run</button>
-        <button id="sm-export-meta" class="btn">Show Progress</button>
-        <button id="sm-download" class="btn primary">⬇ Download .json</button>
-      </div>
-      <textarea id="save-text" placeholder="Paste a save here to import, or press a button above to export…"></textarea>
-      <input type="file" id="sm-file" accept=".json,application/json" hidden>
-      <div class="sm-actions">
-        <button id="sm-upload" class="btn">⬆ Upload File</button>
-        <button id="sm-import" class="btn primary">Import</button>
-        <button id="sm-reset" class="btn danger">Reset All Progress</button>
+    <div class="modal glass pv save-pv">
+      <header class="pv-head">
+        <div class="pv-ico" style="--ac:#5fe07a"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h11l3 3v13H5z"/><path d="M8 4v5h7V4M8 20v-6h8v6"/></svg></div>
+        <div class="pv-titles"><h2>Save &amp; backup</h2><p class="pv-sub">Progress saves on this device after every wave</p></div>
+        <button class="panel-close" id="sm-close" aria-label="Close"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button>
+      </header>
+      <div class="pv-body">
+        <section class="pv-sec"><div class="pv-sec-h"><span>1 · Back up</span></div>
+          <p class="pv-lead">Keep a copy in case this device's storage is ever cleared. Circle Tower Wars saves import here too.</p>
+          <div class="sm-actions"><button id="sm-export-meta" class="btn small">Show progress</button><button id="sm-export-run" class="btn small">Show current run</button><button id="sm-download" class="btn small primary">⬇ Download .json</button></div>
+        </section>
+        <textarea id="save-text" placeholder="Your save appears here — or paste one to import…"></textarea>
+        <input type="file" id="sm-file" accept=".json,application/json" hidden>
+        <section class="pv-sec"><div class="pv-sec-h"><span>2 · Restore</span></div>
+          <div class="sm-actions"><button id="sm-upload" class="btn small">⬆ Upload a file</button><button id="sm-import" class="btn small primary">Import the text above</button></div>
+        </section>
+        <section class="pv-sec"><div class="pv-sec-h"><span>Danger zone</span></div>
+          <div class="sm-danger"><span>Erase your Mastery, unlocks and the saved run on this device.</span><button id="sm-reset" class="btn small danger">Reset everything</button></div>
+        </section>
       </div>
     </div>
   </div>
