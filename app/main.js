@@ -388,6 +388,7 @@ function startRun(cfg, seed, replay, online) {
   // the voxel bosses take a moment to build: do it now, in idle slices, not when they first walk in
   try { renderer.warmTowers(["fire", "ice", "nature", "storm", "light", "darkness", "mech", "abnormal"].flatMap((e) => [0, 1, 2, 3, 4].map((i) => e + "_" + i))); } catch (e) { /* fine */ }
   try { renderer.warmEnemies(["boss", ...(cfg.challenge ? [(CHALLENGES.find((c) => c.id === cfg.challenge.id) || {}).boss] : ["endboss"])].filter(Boolean)); } catch (e) { /* fine */ }
+  try { setTimeout(() => renderer.warmAllMobs(), 2500); } catch (e) { /* fine */ }
   if (!online && game.online) stopOnline();
   game.view = "world"; game.activeCorridor = 0;
   game.selectedTowerId = game.selectedEnemyId = game.buildTile = null; game.buildPreview = null;

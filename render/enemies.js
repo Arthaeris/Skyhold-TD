@@ -8,6 +8,7 @@
 import * as THREE from "three";
 import { Part, TAU, col } from "./kit.js";
 import { MOB_MODELS } from "./mobmodels.js";
+import { VOX_CLASSIC } from "./mobvox.js";
 import { BOSS_MODELS } from "./bossmodels.js";
 import { iceChunkGeometry } from "./statusfx.js";
 
@@ -173,6 +174,7 @@ const STATUS_TINT = {
   corrupted: "#ffb0d8", fracture: "#ffc0e0", entropy: "#ffd0e8",
 };
 Object.assign(MODELS, MOB_MODELS); // the expanded bestiary (render/mobmodels.js)
+Object.assign(MODELS, VOX_CLASSIC); // the five classic creeps as voxel sculpts (render/mobvox.js)
 Object.assign(MODELS, BOSS_MODELS); // the bosses, sculpted in true voxels (render/bossmodels.js)
 export const enemyModels = MODELS;
 

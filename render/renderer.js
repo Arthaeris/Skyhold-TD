@@ -5,6 +5,7 @@
    One continuous world: the ring of corridor islands is always there. The camera flies between the world
    overview (Circle's world map) and a tilted, portrait-friendly view of one corridor (Circle's field
    view), and drifts around the ring behind the menus. */
+import { MOB_MODELS } from "./mobmodels.js";
 import * as THREE from "three";
 import * as fx from "../sim/fx.js";
 import * as pf from "../sim/pathfind.js";
@@ -1080,6 +1081,7 @@ export function createRenderer(opts) {
   return {
     render, resize, snapshotPositions, onEvents, previewRing, pick, panBy, zoomAt, setMode, enterField, emote,
     warmEnemies(ids) { enemies.warm(ids); },
+    warmAllMobs() { enemies.warm(Object.keys(MOB_MODELS)); },
     // pre-build the heavier voxel towers (stage 0) in idle slices so the first placement doesn't hitch
     warmTowers(ids) { const q = ids.slice(); const next = () => { const id = q.shift(); if (!id) return; try { if (DB.TOWER_BY_ID[id]) towerTemplate(DB, id, 0, 0); } catch (e) { /* built on demand instead */ } setTimeout(next, 80); }; setTimeout(next, 1200); },
     setFollow(id) { follow = id; if (id != null) nudge = null; },

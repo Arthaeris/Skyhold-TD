@@ -17,6 +17,7 @@
 import { TAU, shade, mix } from "./kit.js";
 import { SKIN_SPECS } from "../content/skins.js";
 import { voxelBuilderModel } from "./buildermodels.js";
+import { VOX_PLAN } from "./mobvox.js";
 
 // ---------------------------------------------------------------------------
 // extras: small builders that decorate a part. (P, o, a) — o = spec, a = anchor {x,y,z,s}
@@ -504,5 +505,6 @@ export function legacyBuilderModel(id) {
 }
 
 export const MOB_MODELS = {};
-for (const id in MOB_SPECS) { const o = MOB_SPECS[id]; MOB_MODELS[id] = PLAN[o.plan](o); }
+export const LEGACY_MOB_MODELS = {};
+for (const id in MOB_SPECS) { const o = MOB_SPECS[id]; LEGACY_MOB_MODELS[id] = PLAN[o.plan](o); MOB_MODELS[id] = (VOX_PLAN[o.plan] || PLAN[o.plan])(o); }
 export function mobColor(id) { const o = MOB_SPECS[id]; return o ? o.c1 : null; }
