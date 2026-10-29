@@ -182,7 +182,7 @@ export const enemyModels = MODELS;
 // part animation: returns a local rotation for the part at walk phase w (radians) and time t
 // ---------------------------------------------------------------------------
 const E = new THREE.Euler();
-function animRot(kind, w, t, out) {
+export function animRot(kind, w, t, out) {
   switch (kind) {
     case "legA": E.set(Math.sin(w) * 0.6, 0, 0); break;
     case "legB": E.set(-Math.sin(w) * 0.6, 0, 0); break;

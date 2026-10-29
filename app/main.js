@@ -1200,9 +1200,9 @@ function openChallenges() {
       <div class="ch2-acts"><button class="btn small primary" data-ch="${c.id}">${done.normal ? "✓ " : ""}Normal</button><button class="btn small danger" data-chh="${c.id}">${done.hard ? "✓ " : ""}Hard</button></div><div class="ch2-hard">Hard: ${c.hard.label}</div></div>`;
   }).join("");
   m.innerHTML = pvPanel({ cls: "wide ch-pv", head: { ico: icon("skull"), ac: "#ff5f7e", title: "Challenges", sub: `${nDone}/${CHALLENGES.length} won · ten themed waves, then a boss`, closeId: "ch-close" },
-    body: `<div class="ch-pick2"><div class="ch-pr"><span>Element</span><div class="pv-scroll-x">${pills(game.chEl, "chel")}</div></div>
-        <div class="ch-pr"><span>Partner</span><div class="pv-scroll-x">${pills(game.chPartner, "chp", true)}</div></div>
-        <p class="pv-note">Read each hint and bring elements that answer it. A partner adds its towers and a reaction. Winning earns that challenge's builder look in your element.</p></div>
+    body: `<div class="ch-pick2"><div class="ch-pr"><span>Element #1</span><div class="pv-scroll-x">${pills(game.chEl, "chel")}</div></div>
+        <div class="ch-pr"><span>Element #2</span><div class="pv-scroll-x">${pills(game.chPartner, "chp", true)}</div></div>
+        <p class="pv-note">Read each hint and bring elements that answer it. Element #2 is optional: it adds its towers and a reaction. Winning earns that challenge's builder look in your element.</p></div>
       <div class="ch2-list">${cards}</div>` });
   m.classList.add("show");
   $("ch-close").onclick = () => m.classList.remove("show");

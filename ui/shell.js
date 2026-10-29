@@ -818,29 +818,117 @@ export function createUI(opts) {
   }
 
   // ---- bestiary -------------------------------------------------------------------
-  let _bstFilter = "all";
-  function openBestiary() {
+    // ---- Compendium: every tower and every creep, on a turntable ----------------------------
+  // Tap an entry and it stands on the plinth above the list, alive (towers spin, bob, scan and kick as they
+  // fire; creeps walk on the spot); drag to turn it. Towers can be seen at each of their four looks.
+  const CP = { tab: "towers", tf: "all", cf: "all", tower: null, creep: null, stage: 0, view: null };
+  const CP_FAMS = [["all", "All"], ["swarm", "Swarms"], ["runner", "Runners"], ["brute", "Brutes"], ["flyer", "Flyers"], ["stealth", "Stealth"], ["disruptor", "Disruptors"], ["support", "Support"], ["death", "Death"], ["resistant", "Resistant"], ["summoner", "Summoners"], ["trickster", "Tricksters"], ["el", "Elemental"], ["elite", "Elites"]];
+  const CP_ELS = ["fire", "ice", "nature", "storm", "light", "darkness", "mech", "abnormal"];
+  const CP_STAGES = [[0, "Lv 1"], [1, "Lv 4"], [2, "Lv 7"], [3, "Lv 10"]];
+  function cpTowers() { return DB.TOWERS.filter((t) => CP.tf === "all" || t.element === CP.tf).slice().sort((a, b) => DB.ELEMENT_ORDER.indexOf(a.element) - DB.ELEMENT_ORDER.indexOf(b.element) || a.slot - b.slot); }
+  function cpCreeps() { return (DB.MOBS_EXPANDED || []).map((id) => MOB_BY_ID[id]).filter((m) => m && (CP.cf === "all" || m.family === CP.cf || (CP.cf === "el" && CP_ELS.includes(m.family)))); }
+  function cpTowerLocked(t) {
+    const meta = getMeta(); const lvl = (meta.mastery && meta.mastery[t.element]) || 0;
+    const avail = DB.availableElements(meta.mastery || {});
+    return !avail.includes(t.element) || t.slot >= DB.unlockedTowerSlots(lvl);
+  }
+  function cpFilterHTML() {
+    if (CP.tab === "towers") return `<button class="seg ${CP.tf === "all" ? "sel" : ""}" data-cpf="all">All</button>${CP_ELS.map((e) => `<button class="seg cx-el ${CP.tf === e ? "sel" : ""}" data-cpf="${e}" style="--ec:${DB.ELEMENTS[e].color}">${sigil(e, "xs")} ${DB.ELEMENTS[e].name}</button>`).join("")}`;
+    return CP_FAMS.map(([k, n]) => `<button class="seg ${k === CP.cf ? "sel" : ""}" data-cpf="${k}">${n}</button>`).join("");
+  }
+  function cpTowerCard(t) {
+    const el = DB.ELEMENTS[t.element], x = R.towerX(t), lock = cpTowerLocked(t);
+    const dps = t.archetype === "support" ? "aura" : Math.round(x.damage * x.fireRate * R.TUNE.towerDamage) + " DPS";
+    const tg = towerTags(t);
+    return `<button class="bx-card cp-card${CP.tower === t.id ? " open sel" : ""}${lock ? " locked" : ""}" style="--ac:${el.color}" data-cpt="${t.id}">
+      <div class="bx-pic"><img src="${thumb(t.id, 1)}" alt=""><span class="bx-acl">${sigil(t.element, "xs")} ${t.cost}</span>${lock ? `<i class="cp-lock">${icon("lock", "xs")}</i>` : ""}</div>
+      <div class="bx-txt"><b>${t.name}</b><span class="bx-meta">${capW(t.archetype)} · ${dps}</span>
+        <span class="bx-desc">${t.desc || ""}<br><span class="dim">${tg.dt.icon} ${tg.dt.name} · ${tg.air ? "🪽 hits air" : "ground only"}${tg.det ? " · 👁 sees stealth" : ""} · range ${x.range}${t.status ? ` · ${DB.STATUSES[t.status].icon} ${DB.STATUSES[t.status].name}` : ""}${lock ? `<br>${icon("lock", "xs")} ${DB.availableElements((getMeta().mastery) || {}).includes(t.element) ? "Unlocks with " + el.name + " Mastery" : unlockHint(t.element)}` : ""}</span></span></div></button>`;
+  }
+  function cpCreepCard(m) {
+    const ac = ARMOR_CLASSES[m.armorClass], tr = traitList(m.traits);
+    return `<button class="bx-card${CP.creep === m.id ? " open sel" : ""}" style="--ac:${ac.color}" data-cpc="${m.id}">
+      <div class="bx-pic"><img src="${ethumb(m.id)}" alt=""><span class="bx-acl">${ac.name}</span></div>
+      <div class="bx-txt"><b>${m.name}${m.pack > 1 ? ` <i>×${m.pack}</i>` : ""}</b>
+        <span class="bx-meta">♥ ${m.hp} · from wave ${m.minWave}${m.tier ? " · " + SEND_TIERS[m.tier].name : ""}</span>
+        ${tr.length ? `<span class="bx-tr">${tr.slice(0, 3).map(([i, n]) => `<i>${i} ${n}</i>`).join("")}${tr.length > 3 ? `<i>+${tr.length - 3}</i>` : ""}</span>` : ""}
+        <span class="bx-desc">${m.desc}${tr.length ? `<br>${tr.map(([i, n, d]) => `${i} <b>${n}</b> — ${d}`).join("<br>")}` : ""}</span></div></button>`;
+  }
+  function cpInfo() {
+    const box = $("cp-info"); if (!box) return;
+    if (CP.tab === "towers") {
+      const t = DB.TOWER_BY_ID[CP.tower]; if (!t) { box.innerHTML = ""; return; }
+      const el = DB.ELEMENTS[t.element], cur = towerView(t, [1, 4, 7, 10][CP.stage], 0);
+      box.innerHTML = `<div class="cp-name"><b>${t.name}</b><span>${sigil(t.element, "xs")} ${el.name} · ${capW(t.archetype)} · ${t.cost} gold</span></div>
+        <div class="cp-stats">${t.archetype === "support" ? "" : `<span><i>DPS</i>${Math.round(cur.dmg * cur.rate)}</span>`}<span><i>Range</i>${cur.range.toFixed(1)}</span><span><i>Speed</i>${cur.rate.toFixed(2)}</span></div>
+        <div class="cp-stages">${CP_STAGES.map(([k, n]) => `<button class="${CP.stage === k ? "sel" : ""}" data-cps="${k}">${n}</button>`).join("")}</div>`;
+    } else {
+      const m = MOB_BY_ID[CP.creep]; if (!m) { box.innerHTML = ""; return; }
+      const ac = ARMOR_CLASSES[m.armorClass];
+      box.innerHTML = `<div class="cp-name"><b>${m.name}${m.pack > 1 ? ` <i>×${m.pack}</i>` : ""}</b><span><span style="color:${ac.color}">${ac.name}</span> · ♥ ${m.hp}${m.armor ? " · 🛡 " + m.armor : ""} · from wave ${m.minWave}</span></div>`;
+    }
+    box.querySelectorAll("[data-cps]").forEach((b) => b.onclick = () => { CP.stage = +b.dataset.cps; sfx("click"); cpShow(); cpInfo(); });
+  }
+  function cpShow() {
+    if (!CP.view) return;
+    if (CP.tab === "towers") { const t = DB.TOWER_BY_ID[CP.tower]; if (t && CP.view.showTower) CP.view.showTower(DB, t.id, CP.stage, DB.ELEMENTS[t.element].glow); }
+    else { const m = MOB_BY_ID[CP.creep]; if (m && CP.view.showEnemy) CP.view.showEnemy(m.id, ARMOR_CLASSES[m.armorClass].color); }
+  }
+  function cpList() {
+    const list = $("cp-list"), filt = $("cp-filter"); if (!list) return;
+    filt.innerHTML = cpFilterHTML();
+    const items = CP.tab === "towers" ? cpTowers() : cpCreeps();
+    if (CP.tab === "towers" && (!CP.tower || !items.find((t) => t.id === CP.tower))) CP.tower = items[0] && items[0].id;
+    if (CP.tab === "creeps" && (!CP.creep || !items.find((m) => m.id === CP.creep))) CP.creep = items[0] && items[0].id;
+    list.innerHTML = items.map(CP.tab === "towers" ? cpTowerCard : cpCreepCard).join("") || `<div class="pv-empty"><b>Nothing here</b></div>`;
+    setText("cp-count", CP.tab === "towers" ? `${items.length} tower${items.length === 1 ? "" : "s"}` : `${items.length} creep${items.length === 1 ? "" : "s"}`);
+    filt.querySelectorAll("[data-cpf]").forEach((b) => b.onclick = () => { if (CP.tab === "towers") CP.tf = b.dataset.cpf; else CP.cf = b.dataset.cpf; sfx("click"); cpList(); cpShow(); cpInfo(); });
+    list.querySelectorAll("[data-cpt]").forEach((b) => b.onclick = () => { const was = CP.tower === b.dataset.cpt; CP.tower = b.dataset.cpt; sfx("click"); if (!was) { cpShow(); cpInfo(); } cpMark(b); });
+    list.querySelectorAll("[data-cpc]").forEach((b) => b.onclick = () => { const was = CP.creep === b.dataset.cpc; CP.creep = b.dataset.cpc; sfx("click"); if (!was) { cpShow(); cpInfo(); } cpMark(b); });
+  }
+  function cpMark(b) {
+    const list = $("cp-list");
+    const open = b.classList.contains("open");
+    list.querySelectorAll(".bx-card.sel, .bx-card.open").forEach((x) => x.classList.remove("sel", "open"));
+    b.classList.add("sel"); if (!open) b.classList.add("open");
+  }
+  function cpStep(d) {
+    const items = CP.tab === "towers" ? cpTowers().map((t) => t.id) : cpCreeps().map((m) => m.id);
+    const cur = CP.tab === "towers" ? CP.tower : CP.creep;
+    const i = (items.indexOf(cur) + d + items.length) % items.length;
+    if (CP.tab === "towers") CP.tower = items[i]; else CP.creep = items[i];
+    sfx("click"); cpShow(); cpInfo();
+    const list = $("cp-list"), b = list && list.querySelector(`[data-${CP.tab === "towers" ? "cpt" : "cpc"}="${items[i]}"]`);
+    if (b) { cpMark(b); b.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
+  }
+  function openBestiary(tab) {
     const mo = $("bestiary-modal"); if (!mo) return;
-    const fams = [["all", "All"], ["swarm", "Swarms"], ["runner", "Runners"], ["brute", "Brutes"], ["flyer", "Flyers"], ["stealth", "Stealth"], ["disruptor", "Disruptors"], ["support", "Support"], ["death", "Death"], ["resistant", "Resistant"], ["summoner", "Summoners"], ["trickster", "Tricksters"], ["el", "Elemental"], ["elite", "Elites"]];
-    const ELS = ["fire", "ice", "nature", "storm", "light", "darkness", "mech", "abnormal"];
-    const list = (DB.MOBS_EXPANDED || []).map((id) => MOB_BY_ID[id]).filter((m) => _bstFilter === "all" || m.family === _bstFilter || (_bstFilter === "el" && ELS.includes(m.family)));
-    const weak = { light: "Physical", medium: "Blast", heavy: "Magic", fortified: "Blast", ethereal: "Magic" };
-    const legend = Object.keys(ARMOR_CLASSES).filter((k) => weak[k]).map((k) => `<span class="bx-ac" style="--ac:${ARMOR_CLASSES[k].color}"><b>${ARMOR_CLASSES[k].name}</b> takes more from ${weak[k]}</span>`).join("");
-    const card = (m) => { const ac = ARMOR_CLASSES[m.armorClass]; const tr = traitList(m.traits); return `<button class="bx-card" style="--ac:${ac.color}" data-bx="${m.id}">
-        <div class="bx-pic"><img src="${ethumb(m.id)}" alt="" loading="lazy"><span class="bx-acl">${ac.name}</span></div>
-        <div class="bx-txt"><b>${m.name}${m.pack > 1 ? ` <i>×${m.pack}</i>` : ""}</b>
-          <span class="bx-meta">♥ ${m.hp} · from wave ${m.minWave}${m.tier ? " · " + SEND_TIERS[m.tier].name : ""}</span>
-          ${tr.length ? `<span class="bx-tr">${tr.slice(0, 3).map(([i, n]) => `<i>${i} ${n}</i>`).join("")}${tr.length > 3 ? `<i>+${tr.length - 3}</i>` : ""}</span>` : ""}
-          <span class="bx-desc">${m.desc}${tr.length ? `<br>${tr.map(([i, n, d]) => `${i} <b>${n}</b> — ${d}`).join("<br>")}` : ""}</span></div></button>`; };
-    mo.innerHTML = pvPanel({ cls: "wide bx-pv", head: { ico: icon("book"), ac: "#c77dff", title: "Bestiary", sub: `${list.length} of ${DB.MOBS_EXPANDED.length} creeps · tap one for its traits`, closeId: "bst-close" },
-      tabs: `<div class="bx-filter pv-scroll-x">${fams.map(([k, n]) => `<button class="seg ${k === _bstFilter ? "sel" : ""}" data-bf="${k}">${n}</button>`).join("")}</div>`,
-      body: `<details class="pv-details bx-legend"><summary>${icon("shield", "xs")} Armour classes <i>${icon("right", "xs")}</i></summary><div class="bx-acs">${legend}</div></details>
-        <div class="bx-grid">${list.map(card).join("")}</div>` });
+    if (tab) CP.tab = tab;
+    mo.innerHTML = `<div class="modal wide glass pv cp-pv">${pvHead({ ico: icon("book"), ac: "#c77dff", title: "Compendium", sub: "Every tower and creep · tap one to see it up close", closeId: "bst-close" })}
+      <div class="cp-stage wd-stage">
+        <canvas id="cp-canvas" aria-label="3D preview — drag to turn"></canvas>
+        <button class="wd-arrow l" id="cp-prev" aria-label="Previous">${icon("left")}</button>
+        <button class="wd-arrow r" id="cp-next" aria-label="Next">${icon("right")}</button>
+        <span class="wd-hint">↔ Drag to turn</span>
+        <div class="cp-info" id="cp-info"></div>
+      </div>
+      ${pvTabs([["towers", "Towers"], ["creeps", "Creeps"]], CP.tab, "data-cptab")}
+      <div class="bx-filter pv-scroll-x" id="cp-filter"></div>
+      <div class="pv-body"><div class="cp-count" id="cp-count"></div><div class="bx-grid" id="cp-list"></div></div></div>`;
     mo.classList.add("show");
-    $("bst-close").onclick = () => mo.classList.remove("show");
-    mo.onclick = (e) => { if (e.target === mo) mo.classList.remove("show"); };
-    mo.querySelectorAll("[data-bf]").forEach((b) => b.onclick = () => { _bstFilter = b.dataset.bf; openBestiary(); });
-    mo.querySelectorAll("[data-bx]").forEach((b) => b.onclick = () => { b.classList.toggle("open"); sfx("click"); });
+    const close = () => { mo.classList.remove("show"); if (CP.view) { CP.view.dispose(); CP.view = null; } };
+    $("bst-close").onclick = close;
+    mo.onclick = (e) => { if (e.target === mo) close(); };
+    if (CP.view) { CP.view.dispose(); CP.view = null; }
+    try { if (opts.builderViewer) CP.view = opts.builderViewer($("cp-canvas")); } catch (e) { console.warn("compendium preview", e); }
+    $("cp-prev").onclick = () => cpStep(-1);
+    $("cp-next").onclick = () => cpStep(1);
+    mo.querySelectorAll("[data-cptab]").forEach((b) => b.onclick = () => {
+      CP.tab = b.dataset.cptab; sfx("click");
+      mo.querySelectorAll("[data-cptab]").forEach((x) => x.classList.toggle("sel", x === b));
+      cpList(); cpShow(); cpInfo(); const body = mo.querySelector(".pv-body"); if (body) body.scrollTop = 0;
+    });
+    cpList(); cpShow(); cpInfo();
   }
 
   // ---- send panel (competitive + versus): flat costs, 5 upgrade levels ------
@@ -1020,7 +1108,7 @@ export function createUI(opts) {
   // ---- setup screen --------------------------------------------------------------
   // Every choice explains itself right where it is made; the run estimate updates live.
   const MODE_DESC = {
-    single: () => "One corridor, 10 waves — a bossy little sprint. Pick an element and a partner: together they set off reactions.",
+    single: () => "One corridor, 10 waves — a bossy little sprint. Pick two elements: together they set off reactions.",
     loop: (n) => `${n} corridors in a ring, ${R.wavesFor("loop", n)} waves. A creep that escapes walks on into the next corridor; it costs a life only once it has come all the way round. Every corridor can build all of your elements.`,
     endless: (n) => `${n === 1 ? "One corridor" : n + " corridors"}, no last wave — climb as high as you can. Endless waves count toward Mastery 5.`,
   };
@@ -1138,10 +1226,10 @@ export function createUI(opts) {
       } else {
         const a = setup.elements[0];
         if (!availElements.includes(setup.partner) || setup.partner === a) setup.partner = availElements.find((e) => e !== a) || null;
-        h += `<div class="su-el"><span class="su-lbl">${vs ? "You" : "Element"}<b style="color:${DB.ELEMENTS[a].color}">${elName(a)}</b></span><div class="chip-row">${elementChips(a, availElements, "pel")}</div></div>`;
-        h += `<div class="su-el"><span class="su-lbl">Partner<b style="color:${setup.partner ? DB.ELEMENTS[setup.partner].color : "inherit"}">${elName(setup.partner)}</b></span><div class="chip-row">${elementChips(setup.partner, availElements, "ppa", a)}</div></div>`;
+        h += `<div class="su-el"><span class="su-lbl">Element #1<b style="color:${DB.ELEMENTS[a].color}">${elName(a)}</b></span><div class="chip-row">${elementChips(a, availElements, "pel")}</div></div>`;
+        h += `<div class="su-el"><span class="su-lbl">Element #2<b style="color:${setup.partner ? DB.ELEMENTS[setup.partner].color : "inherit"}">${elName(setup.partner)}</b></span><div class="chip-row">${elementChips(setup.partner, availElements, "ppa", a)}</div></div>`;
         const sy = setup.partner ? R.synergyFor(a, setup.partner) : null;
-        h += `<button class="rx-strip" id="rx-strip">${sy ? `${sigil(a, "xs")}<i>+</i>${sigil(setup.partner, "xs")}<i>→</i><span style="color:${sy.color}">${sy.icon} <b>${sy.name}</b></span><span class="rx-txt">${sy.text}</span>` : `<span class="dim">Pick a partner to unlock a reaction</span>`}</button>`;
+        h += `<button class="rx-strip" id="rx-strip">${sy ? `${sigil(a, "xs")}<i>+</i>${sigil(setup.partner, "xs")}<i>→</i><span style="color:${sy.color}">${sy.icon} <b>${sy.name}</b></span><span class="rx-txt">${sy.text}</span>` : `<span class="dim">Pick Element #2 to unlock a reaction</span>`}</button>`;
       }
       if (picker._h !== h) {
         picker.innerHTML = h; picker._h = h;
